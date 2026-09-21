@@ -459,7 +459,9 @@ String getHTML() {
 
           <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
             <a href="/export.csv" class="btn btn-emerald" style="width: 100%;" data-th="📥 ดาวน์โหลดรายงานสรุป (CSV)" data-en="📥 Export Summary (CSV)">📥 ดาวน์โหลดรายงานสรุป (CSV)</a>
+            <button onclick="printDaily()" class="btn btn-indigo" style="width: 100%;" title="พิมพ์ใบสรุปยอดประจำวันออกเครื่องพิมพ์ความร้อน 58 มม." data-th="🖨️ พิมพ์ใบสรุปประจำวัน" data-en="🖨️ Print Daily Summary">🖨️ พิมพ์ใบสรุปประจำวัน</button>
             <button onclick="syncDeviceTime()" class="btn btn-slate" style="width: 100%;" data-th="⚡ ซิงค์เวลากับเครื่องนี้" data-en="⚡ Sync Device Time">⚡ ซิงค์เวลากับเครื่องนี้</button>
+            <div id="printerBadge" style="font-size: 0.72rem; font-weight: 700; text-align: center; padding: 0.2rem 0; color: var(--text-muted);">🖨️ —</div>
           </div>
         </div>
 
@@ -693,6 +695,45 @@ String getHTML() {
             <button type="submit" class="btn btn-indigo">💾 บันทึก</button>
             <a href="/display" target="_blank" rel="noopener" class="btn btn-emerald">📺 เปิดหน้าจอสาธารณะ</a>
           </form>
+        </div>
+
+        <div class="col-span-12 bento-card">
+          <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;" data-th="🖨️ เครื่องพิมพ์สลิปความร้อน 58 มม." data-en="🖨️ 58 mm Thermal Slip Printer">🖨️ เครื่องพิมพ์สลิปความร้อน 58 มม.</h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+            เมื่อเปิดใช้งาน ระบบจะพิมพ์สลิปให้อัตโนมัติ <b>ทุกครั้ง</b> ที่ตัดสิทธิ์สำเร็จ ทั้งจากการแตะบัตรที่จุดบริการ
+            และจากการกดตัดสิทธิ์ด้วยตนเองบนหน้าเว็บ หรือจะสั่งพิมพ์ย้อนหลังทีละรายการจากปุ่ม 🖨️ ในตารางรายชื่อก็ได้
+            <br>
+            เนื้อหาบนสลิปเป็น <b>ภาษาอังกฤษและตัวเลขล้วน</b> เพราะหัวพิมพ์ราคาประหยัดไม่มีฟอนต์ไทยในตัว
+            ชื่อนิสิตที่เป็นภาษาไทยจะถูกแทนด้วย <code>STUDENT &lt;รหัสนิสิต&gt;</code> โดยอัตโนมัติ
+            ส่วนชื่อร้านที่เป็นภาษาไทยจะเหลือแค่หมายเลขร้าน — ถ้าต้องการให้ชื่อร้านขึ้นบนสลิปด้วย
+            ให้ตั้งชื่อร้านเป็นภาษาอังกฤษในแท็บ 🏪 ร้านค้า
+            <br>
+            รายการที่ซิงค์ย้อนหลังหลังลิงก์ขาด <b>จะไม่พิมพ์สลิปอัตโนมัติ</b> เพราะนิสิตรับอาหารและกลับไปแล้ว
+            ยอดยังอยู่ครบในใบสรุปประจำวันและไฟล์ CSV
+          </p>
+          <div style="display:flex; gap:1rem; align-items:flex-end; flex-wrap:wrap;">
+            <form method="POST" action="/api/settings/printer" data-ajax="1" style="display:flex; gap:1rem; align-items:flex-end; flex-wrap:wrap; flex:1; min-width:20rem; margin:0;">
+              <div style="flex:1; min-width:16rem;">
+                <label style="font-size: 0.85rem; font-weight: 700;">การพิมพ์สลิปอัตโนมัติ:</label>
+                <select name="auto" class="form-input" style="margin-bottom:0;">
+                  <option value="1" )rawliteral" + String(printerAutoSlip ? "selected" : "") + R"rawliteral(>เปิด (พิมพ์ทุกครั้งที่ตัดสิทธิ์สำเร็จ)</option>
+                  <option value="0" )rawliteral" + String(!printerAutoSlip ? "selected" : "") + R"rawliteral(>ปิด (สั่งพิมพ์เองจากปุ่มเท่านั้น)</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-indigo">💾 บันทึก</button>
+            </form>
+            <button type="button" onclick="printTest()" class="btn btn-emerald">🧾 พิมพ์สลิปทดสอบ</button>
+          </div>
+          <div style="margin-top:1rem; padding:0.75rem 1rem; border:1px solid var(--border-card); border-radius:1rem; background: var(--bg-surface-elevated); font-size:0.82rem;">
+            <span style="color: var(--text-muted);">สถานะการเชื่อมต่อ:</span>
+            <b id="printerStatusText">)rawliteral" + htmlEscape(printerStatusText()) + R"rawliteral(</b>
+            <span style="color: var(--text-muted);"> · งานค้างในคิว </span><b id="printerQueueText">0</b>
+            <br>
+            <span style="color: var(--text-muted);">
+              ช่องทางที่คอมไพล์ไว้: )rawliteral" + String(PRINTER_TRANSPORT_UART ? "UART TTL (GPIO 17 = TX, GPIO 18 = RX, ร่วม GND)" : "USB OTG host (ต้องจ่ายไฟ 5V เข้าขา VBUS เอง และตั้ง USB Mode เป็น Hardware CDC and JTAG)") + R"rawliteral(
+              — สลับช่องทางได้ด้วยการแก้ <code>#define PRINTER_TRANSPORT_UART</code> ที่หัวสเก็ตช์แล้วอัปโหลดใหม่
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -1002,6 +1043,22 @@ String getHTML() {
           var tempBadge = document.getElementById('tempCount');
           if (tempBadge) tempBadge.textContent = d.tempWaiting;
 
+          var prn = d.printer || {};
+          var prnBadge = document.getElementById('printerBadge');
+          if (prnBadge) {
+            if (!prn.enabled) {
+              prnBadge.textContent = '🖨️ ปิดการใช้งานในเฟิร์มแวร์';
+              prnBadge.style.color = 'var(--text-muted)';
+            } else {
+              prnBadge.textContent = '🖨️ ' + (prn.ready ? 'พร้อมพิมพ์' : 'ยังไม่พบเครื่องพิมพ์')
+                                   + (prn.auto ? ' · อัตโนมัติ' : ' · พิมพ์เอง')
+                                   + (prn.queue ? ' · คิว ' + prn.queue : '');
+              prnBadge.style.color = prn.ready ? 'var(--accent-green)' : 'var(--accent-yellow)';
+            }
+          }
+          setText('printerStatusText', prn.status || '—');
+          setText('printerQueueText', (prn.queue === undefined) ? '0' : prn.queue);
+
           renderStations();
           drawAnalyticsChart();
           return d;
@@ -1300,6 +1357,12 @@ String getHTML() {
               })(st.id), false));
               tdAct.appendChild(document.createTextNode(' '));
             }
+            if (st.claimed) {
+              tdAct.appendChild(smallButton('🖨️', 'พิมพ์สลิปของรายการนี้ซ้ำ', (function (id) {
+                return function () { printSlip(id); };
+              })(st.id), false));
+              tdAct.appendChild(document.createTextNode(' '));
+            }
             tdAct.appendChild(smallButton('✏️', 'แก้ไขข้อมูลนิสิต', (function (a, b, c) {
               return function () { openEditModal(a, b, c); };
             })(st.id, st.name, st.uid), false));
@@ -1319,6 +1382,11 @@ String getHTML() {
           toast('โหลดรายชื่อไม่สำเร็จ', false);
         });
     }
+
+    /* --------------------------- เครื่องพิมพ์สลิป --------------------------- */
+    function printSlip(id) { api('/api/print/slip', { id: id }).catch(function () { }); }
+    function printDaily()  { api('/api/print/daily').catch(function () { }); }
+    function printTest()   { api('/api/print/test').catch(function () { }); }
 
     function changePageSize(val) { pageSize = parseInt(val, 10); curPage = 1; loadStudents(1); }
     function prevPage() { if (curPage > 1) loadStudents(curPage - 1); }

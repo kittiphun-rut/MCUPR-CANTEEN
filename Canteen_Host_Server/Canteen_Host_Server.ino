@@ -33,7 +33,17 @@
 #include <RTClib.h>
 #include <esp_random.h>
 
-#define APP_VERSION         "108.0.0"
+// ---------------------------------------------------------------------------
+// เครื่องพิมพ์ความร้อน 58 มม. (ESC/POS)
+//   ENABLE_THERMAL_PRINTER 0 = ปิดทั้งระบบ ไม่กินแฟลช/แรม และปุ่มบนเว็บจะแจ้งว่าปิดอยู่
+//   PRINTER_TRANSPORT_UART 0 = ต่อผ่าน USB OTG (ค่าเริ่มต้น), 1 = ต่อผ่าน UART TTL GPIO17/18
+// อ่านข้อกำหนดการต่อไฟและการตั้งค่า USB Mode ได้ที่หัวไฟล์ ThermalPrinter.h
+// ---------------------------------------------------------------------------
+#define ENABLE_THERMAL_PRINTER 1
+#define PRINTER_TRANSPORT_UART 0
+#include "ThermalPrinter.h"
+
+#define APP_VERSION         "109.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -114,6 +124,7 @@ const uint8_t ESPNOW_CHANNEL = 1;
 bool timeWindowEnabled = true;
 // หน้าจอสาธารณะ /display สำหรับต่อออกมอนิเตอร์จอใหญ่ให้นิสิตและร้านค้าดู
 bool publicDisplayEnabled = true;
+bool printerAutoSlip     = true;   // พิมพ์สลิปอัตโนมัติทุกครั้งที่ตัดสิทธิ์สำเร็จ
 int serviceStartHour   = 10;
 int serviceStartMin    = 0;
 int serviceEndHour     = 13;
@@ -345,6 +356,16 @@ void handleDeleteStudent();
 void handleSaveAdmin();
 void handleDeleteAdmin();
 void handleHostButton();
+String asciiSafe(const String &raw, const String &fallback);
+String asciiName(const String &raw, const String &fallback);
+String buildClaimSlip(const Student &s);
+String buildDailySlip();
+String buildTestSlip();
+bool printClaimSlip(const Student &s);
+void handlePrintTest();
+void handlePrintSlip();
+void handlePrintDaily();
+void handleSavePrinterSettings();
 
 struct ScanQueueItem {
   uint8_t mac[6];
@@ -1821,6 +1842,13 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     if (isOfflineSync) claimType += " (Offline)";
     appendLogToFS(matchedStudent->studentId, matchedStudent->fullName, matchedStudent->uid, matchedStudent->refNo, matchedStudent->claimTime, pkt.stationId, claimType);
     pushDisplayEvent(matchedStudent->studentId, pkt.stationId, matchedStudent->claimTime);
+
+    // พิมพ์สลิปอัตโนมัติ — ข้ามรายการที่ซิงค์ย้อนหลัง เพราะนิสิตรับอาหารและกลับไปแล้ว
+    // ตั้งแต่ตอนที่ลิงก์ขาด การพิมพ์ทีละหลายสิบใบจะล้นคิวและเปลืองกระดาษเปล่า
+    // ยอดของรายการเหล่านั้นยังอยู่ครบในใบสรุปประจำวันและไฟล์ CSV
+    if (printerAutoSlip && !isOfflineSync) {
+      printClaimSlip(*matchedStudent);
+    }
     
     if (matchedStudent->isTempCard) {
       if (matchedStudent->originalUid != "") {
@@ -1875,6 +1903,12 @@ void handleDashboardAPI() {
   j += ",\"clock\":\"" + jsonEscape(getRealTimeStr()) + "\"";
   j += ",\"serviceOpen\":" + String(isWithinServiceTime() ? "true" : "false");
   j += ",\"window\":\"" + String(win) + "\"";
+
+  j += ",\"printer\":{\"enabled\":" + String(ENABLE_THERMAL_PRINTER ? "true" : "false");
+  j += ",\"ready\":" + String(printerIsConnected() ? "true" : "false");
+  j += ",\"auto\":" + String(printerAutoSlip ? "true" : "false");
+  j += ",\"queue\":" + String((unsigned)printerQueueDepth());
+  j += ",\"status\":\"" + jsonEscape(printerStatusText()) + "\"}";
 
   j += ",\"shops\":[";
   for (int i = 0; i < 4; i++) {
@@ -1988,6 +2022,7 @@ void handleManualClaim() {
       lastScannedRefNo = st.refNo;
       appendLogToFS(st.studentId, st.fullName, st.uid, st.refNo, st.claimTime, station, st.isTempCard ? "Temp Card" : "Normal");
       pushDisplayEvent(st.studentId, (uint8_t)station, st.claimTime);
+      if (printerAutoSlip) printClaimSlip(st);
 
       if (st.isTempCard) {
         st.uid = st.originalUid;
@@ -2576,6 +2611,249 @@ void handleFileUpload() {
 }
 
 // ============================================================================
+// สลิปเครื่องพิมพ์ความร้อน 58 มม.
+// เนื้อหาเป็น "อังกฤษ + ตัวเลข" ล้วนตามที่ตกลงไว้ เพราะหัวพิมพ์ราคาประหยัด
+// ไม่มีฟอนต์ไทยในตัว ถ้าส่งไบต์ UTF-8 ภาษาไทยออกไปจะได้อักขระขยะเต็มม้วน
+// ทุกข้อความที่มาจากฐานข้อมูล (ชื่อนิสิต ชื่อร้าน) จึงถูกกรองเหลือ ASCII ก่อนเสมอ
+// และถ้ากรองแล้วไม่เหลืออะไร จะใช้ข้อความสำรองที่อ่านออกแทน
+// ============================================================================
+
+// ตัดให้สั้นพอดีความกว้างกระดาษ ป้องกันบรรทัดล้นไปขึ้นบรรทัดใหม่เอง
+static String slipClip(const String &v, int maxLen) {
+  if ((int)v.length() <= maxLen) return v;
+  return v.substring(0, maxLen);
+}
+
+String asciiSafe(const String &raw, const String &fallback) {
+  String out;
+  out.reserve(raw.length());
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    uint8_t c = (uint8_t)raw[i];
+    if (c >= 32 && c < 127) out += (char)c;
+  }
+  out.trim();
+  if (out.length() == 0) return fallback;
+  return out;
+}
+
+// สำหรับ "ชื่อคน" และ "ชื่อร้าน" โดยเฉพาะ
+// ชื่อไทยอย่าง "ร้านที่ 1" พอกรอง ASCII แล้วจะเหลือแค่ "1" ซึ่งอ่านไม่รู้เรื่อง
+// จึงบังคับว่าผลลัพธ์ต้องมีตัวอักษรอังกฤษอย่างน้อยหนึ่งตัว ไม่งั้นใช้ข้อความสำรองแทน
+String asciiName(const String &raw, const String &fallback) {
+  String out = asciiSafe(raw, "");
+  bool hasLetter = false;
+  for (unsigned int i = 0; i < out.length(); i++) {
+    char c = out[i];
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) { hasLetter = true; break; }
+  }
+  if (!hasLetter) return fallback;
+  return out;
+}
+
+static String slipHeader(const String &subtitle) {
+  String s;
+  s += escInit();
+  s += escAlign(1);
+  s += escSize(0x11);
+  s += escBold(true);
+  s += "MCU CANTEEN\n";
+  s += escSize(0);
+  s += escBold(false);
+  s += slipClip(subtitle, PRINTER_COLS) + "\n";
+  s += "MCU PHRAE CAMPUS\n";
+  s += escAlign(0);
+  s += escRule('=');
+  return s;
+}
+
+static String slipFooter() {
+  String s;
+  s += escRule('=');
+  s += escAlign(1);
+  s += "KEEP THIS SLIP AS PROOF\n";
+  s += "CANTEEN HOST v" APP_VERSION "\n";
+  s += escAlign(0);
+  s += escFeed(3);
+  s += escCut();
+  return s;
+}
+
+// สลิปประจำตัวนิสิต 1 ใบต่อการใช้สิทธิ์ 1 ครั้ง
+String buildClaimSlip(const Student &s) {
+  String sid   = asciiSafe(s.studentId, "-");
+  // "NAME  " กินไป 6 ช่อง เหลือให้ชื่อ 26 ช่องพอดีหนึ่งบรรทัด ไม่ล้นไปขึ้นบรรทัดใหม่
+  String name  = slipClip(asciiName(s.fullName, "STUDENT " + sid), PRINTER_COLS - 6);
+  // ชื่อร้านที่ตั้งเป็นภาษาไทยพิมพ์ออกหัวพิมพ์ไม่ได้ จะเหลือแค่หมายเลขร้าน
+  // ถ้าต้องการให้ชื่อร้านขึ้นบนสลิปด้วย ให้ตั้งชื่อร้านเป็นภาษาอังกฤษในแท็บร้านค้า
+  String shopN = "-";
+  if (s.station >= 1 && s.station <= 4) {
+    shopN = slipClip(asciiName(shops[s.station - 1].name, "-"), 21);
+  }
+
+  String out = slipHeader("MEAL SUBSIDY RECEIPT");
+  out += escPair("DATE", getDateFormattedStr());
+  out += escPair("TIME", asciiSafe(s.claimTime, getRealTimeStr()));
+  out += escRule('-');
+
+  out += escAlign(1);
+  out += "STUDENT ID\n";
+  out += escSize(0x11);
+  out += sid + "\n";
+  out += escSize(0);
+  out += escAlign(0);
+  out += "NAME  " + name + "\n";
+  out += escRule('-');
+
+  out += escPair("SHOP", String(s.station) + " " + shopN);
+  // เลขอ้างอิงเต็มรูปแบบยาว 28 ตัว ถ้าใส่คู่กับป้ายชื่อจะเกิน 32 ช่องและถูกตัดขึ้นบรรทัดใหม่เอง
+  // จึงขึ้นบรรทัดใหม่ให้ตั้งแต่ต้น เพื่อให้เลขอ้างอิงอยู่ครบในบรรทัดเดียวเสมอ
+  out += "REF NO\n";
+  out += slipClip(asciiSafe(s.refNo, "-"), PRINTER_COLS) + "\n";
+  out += escRule('-');
+
+  out += escAlign(1);
+  out += escBold(true);
+  out += escSize(0x11);
+  out += "35.00 THB\n";
+  out += escSize(0);
+  out += escBold(false);
+  out += "ONE MEAL PER STUDENT PER DAY\n";
+  out += escAlign(0);
+
+  out += slipFooter();
+  return out;
+}
+
+// สลิปสรุปยอดประจำวัน สำหรับแนบเอกสารเบิกจ่าย
+String buildDailySlip() {
+  int usedCount = 0;
+  int shopCounts[4] = {0, 0, 0, 0};
+  for (const auto &st : db) {
+    if (st.claimed) {
+      usedCount++;
+      if (st.station >= 1 && st.station <= 4) shopCounts[st.station - 1]++;
+    }
+  }
+  int total = (int)db.size();
+
+  char win[20];
+  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d",
+           serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+
+  String out = slipHeader("DAILY SUMMARY REPORT");
+  out += escPair("DATE", getDateFormattedStr());
+  out += escPair("PRINTED", getTimeOnlyStr());
+  out += escPair("WINDOW", String(win));
+  out += escRule('-');
+  out += escPair("ELIGIBLE", String(total));
+  out += escPair("CLAIMED", String(usedCount));
+  out += escPair("REMAINING", String(total - usedCount));
+  out += escRule('-');
+
+  for (int i = 0; i < 4; i++) {
+    String label = "SHOP " + String(i + 1);
+    String value = String(shopCounts[i]) + " x 35 = " + String(shopCounts[i] * 35);
+    out += escPair(label, value);
+  }
+  out += escRule('-');
+
+  out += escAlign(1);
+  out += escBold(true);
+  out += escSize(0x11);
+  out += String(usedCount * 35) + " THB\n";
+  out += escSize(0);
+  out += escBold(false);
+  out += "TOTAL DISBURSED\n";
+  out += escAlign(0);
+  out += escFeed(2);
+  out += "CHECKED BY\n";
+  out += escRule('.');
+  out += escFeed(1);
+  out += "APPROVED BY\n";
+  out += escRule('.');
+  out += slipFooter();
+  return out;
+}
+
+// สลิปทดสอบ ใช้ยืนยันว่าสายและไฟเลี้ยงเครื่องพิมพ์พร้อมใช้งาน
+String buildTestSlip() {
+  String out = slipHeader("PRINTER SELF TEST");
+  out += escPair("DATE", getDateFormattedStr());
+  out += escPair("TIME", getTimeOnlyStr());
+  out += escPair("LINK", printerStatusText());
+  out += escRule('-');
+  out += "0123456789012345678901234567890\n";
+  out += "ABCDEFGHIJKLMNOPQRSTUVWXYZ\n";
+  out += escBold(true);
+  out += "BOLD SAMPLE\n";
+  out += escBold(false);
+  out += escSize(0x11);
+  out += "BIG SAMPLE\n";
+  out += escSize(0);
+  out += escRule('-');
+  out += escAlign(1);
+  out += "IF THIS LOOKS CORRECT\n";
+  out += "THE PRINTER IS READY\n";
+  out += escAlign(0);
+  out += slipFooter();
+  return out;
+}
+
+bool printClaimSlip(const Student &s) {
+  return printerEnqueue(buildClaimSlip(s));
+}
+
+// ---------------------------------------------------------------------------
+// ปลายทาง API ของเครื่องพิมพ์
+// ---------------------------------------------------------------------------
+static bool printerGuard() {
+#if ENABLE_THERMAL_PRINTER
+  return true;
+#else
+  sendJson(false, "เฟิร์มแวร์นี้ปิดการใช้งานเครื่องพิมพ์ไว้ (ENABLE_THERMAL_PRINTER 0)");
+  return false;
+#endif
+}
+
+void handlePrintTest() {
+  if (!requireAuth()) return;
+  if (!printerGuard()) return;
+  if (!printerEnqueue(buildTestSlip())) { sendJson(false, "คิวงานพิมพ์เต็ม กรุณารอสักครู่แล้วลองใหม่"); return; }
+  sendJson(true, "ส่งสลิปทดสอบเข้าคิวแล้ว (สถานะ: " + printerStatusText() + ")");
+}
+
+void handlePrintSlip() {
+  if (!requireAuth()) return;
+  if (!printerGuard()) return;
+  String id = server.arg("id"); id.trim();
+  for (const auto &st : db) {
+    if (st.studentId == id) {
+      if (!st.claimed) { sendJson(false, "นิสิต " + id + " ยังไม่ได้ใช้สิทธิ์ของวันนี้ จึงยังไม่มีสลิปให้พิมพ์"); return; }
+      if (!printClaimSlip(st)) { sendJson(false, "คิวงานพิมพ์เต็ม กรุณารอสักครู่แล้วลองใหม่"); return; }
+      sendJson(true, "ส่งสลิปของรหัส " + id + " เข้าคิวพิมพ์แล้ว");
+      return;
+    }
+  }
+  sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ");
+}
+
+void handlePrintDaily() {
+  if (!requireAuth()) return;
+  if (!printerGuard()) return;
+  if (!printerEnqueue(buildDailySlip())) { sendJson(false, "คิวงานพิมพ์เต็ม กรุณารอสักครู่แล้วลองใหม่"); return; }
+  sendJson(true, "ส่งใบสรุปยอดประจำวันเข้าคิวพิมพ์แล้ว");
+}
+
+void handleSavePrinterSettings() {
+  if (!requireAuth()) return;
+  printerAutoSlip = (server.arg("auto") == "1");
+  preferences.begin("sys_cfg", false);
+  preferences.putBool("prn_auto", printerAutoSlip);
+  preferences.end();
+  sendJson(true, printerAutoSlip ? "เปิดการพิมพ์สลิปอัตโนมัติแล้ว" : "ปิดการพิมพ์สลิปอัตโนมัติแล้ว");
+}
+
+// ============================================================================
 // หน้าเว็บทั้งหมดอยู่ในไฟล์ WebPortal.h (แท็บถัดไปใน Arduino IDE)
 // วางไว้ตรงนี้เพราะโค้ดข้างในอ้างถึงตัวแปรส่วนกลางและฟังก์ชันช่วยเหลือข้างบน
 // ============================================================================
@@ -2616,7 +2894,11 @@ void setup() {
   serviceEndMin     = preferences.getInt("end_m", 30);
   isTftDarkMode     = preferences.getBool("tft_dark", true);
   publicDisplayEnabled = preferences.getBool("pub_disp", true);
+  printerAutoSlip      = preferences.getBool("prn_auto", true);
   preferences.end();
+
+  // เริ่มสแต็กเครื่องพิมพ์ก่อนเปิด Wi-Fi เผื่อฝั่ง USB host ต้องใช้เวลาจับอุปกรณ์
+  printerBegin();
 
   WiFi.mode(WIFI_AP);
   // เดิมรับได้ 4 เครื่อง ซึ่งจอสาธารณะจะกินไปหนึ่งช่อง เหลือให้เจ้าหน้าที่แค่สาม
@@ -2775,6 +3057,10 @@ void setup() {
   server.on("/api/shops/save", HTTP_POST, handleSaveShops);
   server.on("/api/claim/manual", HTTP_POST, handleManualClaim);
   server.on("/api/system/reset", HTTP_POST, handleDailyReset);
+  server.on("/api/print/test", HTTP_POST, handlePrintTest);
+  server.on("/api/print/slip", HTTP_POST, handlePrintSlip);
+  server.on("/api/print/daily", HTTP_POST, handlePrintDaily);
+  server.on("/api/settings/printer", HTTP_POST, handleSavePrinterSettings);
 
   server.on("/api/settings/display", HTTP_POST, []() {
     if (!requireAuth()) return;
@@ -2861,6 +3147,7 @@ void loop() {
   server.handleClient();
   handleHostButton();
   calculateCpuLoad();
+  printerLoop();      // ทยอยปล่อยข้อมูลสลิปออกทีละก้อน ไม่บล็อกลูปหลัก
 
   ScanQueueItem item;
   if (scanQueue != NULL && xQueueReceive(scanQueue, &item, 0) == pdTRUE) {
