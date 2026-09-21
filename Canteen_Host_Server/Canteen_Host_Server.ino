@@ -293,6 +293,7 @@ void sendStationConfig(uint8_t stationId);
 void broadcastStationConfig();
 void setHostScreenPower(bool on);
 void announceHostMode();
+void fillSystemSummary(HostResponsePacket &pkt);
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void ledStandby();
 void ledApproved();
@@ -723,6 +724,17 @@ static void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId) {
   cfg.screenOn = isHostScreenOn ? 1 : 0;
   cfg.screensaver = isScreensaverActive ? 1 : 0;
   cfg.modeSeq = hostModeSeq;
+}
+
+// ฝากภาพรวมทั้งระบบไปกับช่องที่ไม่ได้ใช้ของแพ็กเก็ต heartbeat (message[32])
+// รูปแบบ "ใช้สิทธิ์/ผู้มีสิทธิ์ทั้งหมด/เปิดบริการ/เวลาเปิด-เวลาปิด" เช่น "268/412/1/1000-1330"
+// ขนาดแพ็กเก็ตไม่เปลี่ยน เฟิร์มแวร์สถานีรุ่นเก่าไม่อ่านช่องนี้ จึงอัปเดตทีละเครื่องได้
+void fillSystemSummary(HostResponsePacket &pkt) {
+  int used = 0;
+  for (const auto &st : db) if (st.claimed) used++;
+  snprintf(pkt.message, sizeof(pkt.message), "%d/%d/%d/%02d%02d-%02d%02d",
+           used, (int)db.size(), isWithinServiceTime() ? 1 : 0,
+           serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
 }
 
 void sendStationConfig(uint8_t stationId) {
@@ -2749,6 +2761,7 @@ void setup() {
     strcpy(beacon.status, "ONLINE");
     strncpy(beacon.claimTime, getRealTimeStr().c_str(), sizeof(beacon.claimTime) - 1);
     beacon.servedCount = getStationServedCount(i);
+    fillSystemSummary(beacon);
     sendToStation(i, (uint8_t *)&beacon, sizeof(HostResponsePacket));
     delay(20);
   }
@@ -2784,6 +2797,7 @@ void loop() {
       strcpy(ack.status, "ONLINE");
       strncpy(ack.claimTime, getRealTimeStr().c_str(), sizeof(ack.claimTime) - 1);
       ack.servedCount = getStationServedCount(i + 1);
+      fillSystemSummary(ack);
       sendToStation(i + 1, (uint8_t *)&ack, sizeof(HostResponsePacket));
       // ย้ำโหมดการแสดงผลทุกครั้งที่ตอบ heartbeat เพื่อให้สถานีที่เพิ่งบูต
       // หรือที่พลาดคำสั่ง broadcast ไป กลับมาตรงกับแม่ข่ายภายในไม่กี่วินาที

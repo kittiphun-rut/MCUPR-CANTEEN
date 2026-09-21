@@ -2,7 +2,7 @@
  * ============================================================================
  * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
  * System: Vendor Station Client & Dynamic Theme Suite
- * Version: 118.1.0 (Display Mode Follows Host: Theme, Screensaver, Backlight)
+ * Version: 118.2.0 (Station Stats: Live Payout Feed & Canteen-wide Totals)
  * Release Date: กันยายน 2569 (September 2026)
  * 
  * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
@@ -30,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "118.1.0"
+#define APP_VERSION         "118.2.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -196,8 +196,29 @@ unsigned long stateHoldUntil        = 0;
 unsigned long lastRc522HealthCheck  = 0;
 unsigned long nextHeartbeatInterval = 6000;
 
-uint32_t totalScansToday            = 0;
-uint32_t totalSuccessToday          = 0;
+uint32_t totalScansToday            = 0;   // จำนวนครั้งที่แตะบัตรทั้งหมด นับตั้งแต่เปิดเครื่อง
+uint32_t totalRejectToday           = 0;   // ที่ไม่ผ่าน (บัตรซ้ำ/ไม่อยู่ในทะเบียน/นอกเวลา)
+uint32_t totalSuccessToday          = 0;   // ยอดที่จ่ายจริง ซิงค์จากแม่ข่ายจึงถูกต้องแม้รีบูต
+
+// รายการที่จ่ายสำเร็จล่าสุดของสถานีนี้ เก็บในแรมเพื่อแสดงบนหน้า 2
+#define STN_FEED_SIZE 3
+struct StationTap {
+  char id[16];
+  char time[12];
+};
+StationTap stnFeed[STN_FEED_SIZE] = {};
+uint8_t stnFeedCount = 0;
+uint8_t stnFeedHead  = 0;
+char lastPayoutTime[12] = "--:--";
+
+// ภาพรวมทั้งโรงอาหารที่แม่ข่ายฝากมากับ heartbeat
+bool hasSystemInfo   = false;
+uint16_t sysUsed     = 0;
+uint16_t sysTotal    = 0;
+bool sysServiceOpen  = false;
+char sysWindow[16]   = "--:--";
+volatile bool pendingSysInfo = false;
+char pendingSysMsg[32] = {0};
 String lastProcessedUID             = "";
 unsigned long lastProcessedTime     = 0;
 
@@ -256,7 +277,10 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
 void renderScreensaver(bool fullRedraw);
 void renderDeveloperCredit();
 void displayTapCardStandby();
-void displayStatsDashboard();
+void displayStatsDashboard(bool fullRedraw);
+String maskStudentId(const String &id);
+void pushStationTap(const char *studentId);
+void applySystemSummary(const char *msg);
 void displayStatusScreen(bool fullRedraw);
 void displayScanningUID(String uid);
 void displayResult(String status, String name, String id, String refNo, String claimTime, String msg);
@@ -562,6 +586,42 @@ void updateShopLabel() {
   snprintf(dynamicShopLabel, sizeof(dynamicShopLabel), "STATION 0%d", currentStationId);
 }
 
+// ปิดบังรหัสนิสิตให้เหลือห้าหลักแรก ใช้กฎเดียวกับจอสาธารณะของแม่ข่าย
+String maskStudentId(const String &id) {
+  if (id.length() == 0 || id == "-") return "-";
+  if (id.length() <= 5) return id;
+  String out = id.substring(0, 5);
+  for (size_t i = 5; i < id.length(); i++) out += '*';
+  return out;
+}
+
+void pushStationTap(const char *studentId) {
+  StationTap &e = stnFeed[stnFeedHead];
+  String masked = maskStudentId(String(studentId));
+  strncpy(e.id, masked.c_str(), sizeof(e.id) - 1);
+  e.id[sizeof(e.id) - 1] = '\0';
+  String t = getTimeOnlyStr();
+  strncpy(e.time, t.c_str(), sizeof(e.time) - 1);
+  e.time[sizeof(e.time) - 1] = '\0';
+  strncpy(lastPayoutTime, e.time, sizeof(lastPayoutTime) - 1);
+  lastPayoutTime[sizeof(lastPayoutTime) - 1] = '\0';
+  stnFeedHead = (stnFeedHead + 1) % STN_FEED_SIZE;
+  if (stnFeedCount < STN_FEED_SIZE) stnFeedCount++;
+}
+
+// แกะสรุปภาพรวมที่แม่ข่ายฝากมา รูปแบบ "268/412/1/1000-1330"
+// ถ้าแม่ข่ายเป็นเฟิร์มแวร์รุ่นเก่าช่องนี้จะว่าง แกะไม่ผ่านแล้วหน้าจอจะแสดงขีดแทน
+void applySystemSummary(const char *msg) {
+  int u = 0, t = 0, open = 0, w1 = 0, w2 = 0;
+  if (sscanf(msg, "%d/%d/%d/%d-%d", &u, &t, &open, &w1, &w2) == 5) {
+    sysUsed = (uint16_t)u;
+    sysTotal = (uint16_t)t;
+    sysServiceOpen = (open != 0);
+    snprintf(sysWindow, sizeof(sysWindow), "%02d:%02d-%02d:%02d", w1 / 100, w1 % 100, w2 / 100, w2 % 100);
+    hasSystemInfo = true;
+  }
+}
+
 String maskUID(String uid) {
   if (uid.length() < 4 || uid == "-") return uid;
   return uid.substring(0, uid.length() - 4) + "****";
@@ -841,51 +901,135 @@ void displayTapCardStandby() {
   drawStationBottomBar("PAGE 1/3 | PRESS BUTTON TO CYCLE");
 }
 
-void displayStatsDashboard() {
+// หน้า 2: ยอดของร้านนี้ ภาพรวมทั้งโรงอาหาร และรายการที่จ่ายล่าสุด
+// แยกส่วนคงที่กับส่วนที่เปลี่ยนค่า เพื่อให้รีเฟรชทุก heartbeat ได้โดยจอไม่กะพริบ
+void displayStatsDashboard(bool fullRedraw) {
   ledStandby();
-  tft.fillScreen(getStBg());
 
-  drawStationTopBar(String(dynamicShopLabel) + " STATS");
+  if (fullRedraw) {
+    tft.fillScreen(getStBg());
+    drawStationTopBar(String(dynamicShopLabel) + " STATS");
 
-  drawStationCard(6, 30, 150, 130, getStGreen(), getStCardBg());
-  tft.setTextColor(getStTextMuted(), getStCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(14, 38);
-  tft.println("TODAY SERVED");
-  drawStationPillBadge(88, 36, 62, 14, isHostOnline ? "ONLINE" : "OFFLINE", isHostOnline ? (isStationDarkMode ? 0x0000 : 0xFFFF) : 0xFFFF, isHostOnline ? getStGreen() : getStRose());
+    drawStationCard(6, 30, 150, 112, getStGreen(), getStCardBg());
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.setTextSize(1);
+    tft.setCursor(14, 38);
+    tft.print("THIS STATION");
+    tft.setCursor(14, 104);
+    tft.print("TOTAL PAYOUT");
 
+    drawStationCard(164, 30, 150, 112, getStCardBorder(), getStCardBg());
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.setCursor(172, 38);
+    tft.print("WHOLE CANTEEN");
+
+    drawStationCard(6, 148, 308, 66, getStCardBorder(), getStCardBg());
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.setCursor(16, 152);
+    tft.print("LAST PAYOUTS AT THIS STATION");
+
+    drawStationBottomBar("PAGE 2/3 | PRESS BUTTON TO CYCLE");
+  }
+
+  // ---- ยอดของร้านนี้ ----
+  tft.fillRect(12, 48, 138, 34, getStCardBg());
   tft.setTextColor(getStGreen(), getStCardBg());
   tft.setTextSize(3);
-  tft.setCursor(14, 62);
+  tft.setCursor(14, 52);
   tft.printf("%u", (unsigned)totalSuccessToday);
   tft.setTextSize(1);
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.print(" pax");
 
+  tft.fillRect(12, 82, 138, 18, getStCardBg());
   tft.setTextColor(getStYellow(), getStCardBg());
   tft.setTextSize(2);
-  tft.setCursor(14, 110);
+  tft.setCursor(14, 84);
   tft.printf("%u B.", (unsigned)(totalSuccessToday * 35));
-  tft.setTextSize(1);
-  tft.setTextColor(getStTextMuted(), getStCardBg());
-  tft.setCursor(14, 136);
-  tft.println("Total Payout");
 
-  drawStationCard(164, 30, 150, 130, getStCardBorder(), getStCardBg());
-  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.fillRect(12, 116, 138, 12, getStCardBg());
   tft.setTextSize(1);
-  tft.setCursor(172, 38);
-  tft.println("SYSTEM STATUS");
-
+  tft.setCursor(14, 118);
+  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.print("FAIL ");
+  tft.setTextColor(totalRejectToday > 0 ? getStRose() : getStTextMuted(), getStCardBg());
+  tft.printf("%u", (unsigned)totalRejectToday);
+  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.print("  LAST ");
   tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(172, 60); tft.println("QUOTA : 35 THB");
-  tft.setCursor(172, 78); tft.println("LIMIT : 1 TIME");
-  tft.setCursor(172, 96); tft.println("RADIO : ESP-NOW");
-  tft.setTextColor(getStCyan(), getStCardBg());
-  tft.setCursor(172, 118); tft.println("CH 1 LOCKED");
+  tft.print(lastPayoutTime);
 
-  drawStationBottomBar("PAGE 2/3 | PRESS BUTTON TO CYCLE");
+  // ---- ภาพรวมทั้งโรงอาหาร (แม่ข่ายฝากมากับ heartbeat) ----
+  tft.fillRect(170, 48, 138, 34, getStCardBg());
+  if (hasSystemInfo) {
+    tft.setTextColor(getStCyan(), getStCardBg());
+    tft.setTextSize(3);
+    tft.setCursor(172, 52);
+    tft.printf("%u", (unsigned)sysUsed);
+    tft.setTextSize(1);
+    tft.setTextColor(getStTextMain(), getStCardBg());
+    tft.printf(" /%u", (unsigned)sysTotal);
+  } else {
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.setTextSize(2);
+    tft.setCursor(172, 58);
+    tft.print("-- / --");
+  }
+
+  int pct = (hasSystemInfo && sysTotal > 0) ? (int)((uint32_t)sysUsed * 100 / sysTotal) : 0;
+  if (pct > 100) pct = 100;
+  tft.fillRect(172, 86, 134, 8, getStCardBg());
+  tft.drawRoundRect(172, 86, 134, 8, 3, getStCardBorder());
+  int fillW = (pct * 130) / 100;
+  if (fillW > 0) tft.fillRoundRect(174, 88, fillW, 4, 2, getStCyan());
+
+  tft.fillRect(170, 98, 138, 12, getStCardBg());
+  tft.setTextSize(1);
+  tft.setCursor(172, 100);
+  if (!hasSystemInfo) {
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.print("WAITING FOR HOST");
+  } else if (sysServiceOpen) {
+    tft.setTextColor(getStGreen(), getStCardBg());
+    tft.printf("OPEN %s", sysWindow);
+  } else {
+    tft.setTextColor(getStRose(), getStCardBg());
+    tft.printf("CLOSED %s", sysWindow);
+  }
+
+  tft.fillRect(170, 114, 138, 12, getStCardBg());
+  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.setCursor(172, 116);
+  if (hasSystemInfo) tft.printf("%d%% OF ELIGIBLE", pct);
+  else tft.print("SYNCING...");
+
+  // ---- รายการที่จ่ายล่าสุดของสถานีนี้ ----
+  tft.fillRect(12, 162, 296, 50, getStCardBg());
+  if (stnFeedCount == 0) {
+    tft.setTextSize(1);
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.setCursor(103, 182);
+    tft.print("NO PAYOUT YET TODAY");
+  } else {
+    for (int i = 0; i < stnFeedCount; i++) {
+      int idx = (stnFeedHead - 1 - i + STN_FEED_SIZE * 2) % STN_FEED_SIZE;
+      int y = 164 + i * 16;
+      tft.setTextSize(1);
+      tft.setTextColor(getStTextMuted(), getStCardBg());
+      tft.setCursor(16, y + 4);
+      tft.print(stnFeed[idx].time);
+
+      tft.setTextSize(2);
+      tft.setTextColor(getStTextMain(), getStCardBg());
+      tft.setCursor(74, y);
+      tft.print(stnFeed[idx].id);
+
+      tft.setTextSize(1);
+      tft.setTextColor(getStYellow(), getStCardBg());
+      tft.setCursor(262, y + 4);
+      tft.print("35 B.");
+    }
+  }
 }
 
 void displayScanningUID(String uid) {
@@ -1047,7 +1191,7 @@ void showStationPage(int page, bool fullRedraw) {
   currentStationPage = page;
   currentState = (page == 3) ? STATE_STATUS : STATE_STANDBY;
   if (page == 1)      displayTapCardStandby();
-  else if (page == 2) displayStatsDashboard();
+  else if (page == 2) displayStatsDashboard(fullRedraw);
   else                displayStatusScreen(fullRedraw);
 }
 
@@ -1314,6 +1458,11 @@ void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int l
   if (pkt.msgType == MSG_HEARTBEAT) {
     pendingServedCount = pkt.servedCount;
     hasServedCountUpdate = true;
+    portENTER_CRITICAL_ISR(&espnowMux);
+    strncpy(pendingSysMsg, pkt.message, sizeof(pendingSysMsg) - 1);
+    pendingSysMsg[sizeof(pendingSysMsg) - 1] = '\0';
+    pendingSysInfo = true;
+    portEXIT_CRITICAL_ISR(&espnowMux);
     return;
   }
 
@@ -1375,6 +1524,11 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   if (pkt.msgType == MSG_HEARTBEAT) {
     pendingServedCount = pkt.servedCount;
     hasServedCountUpdate = true;
+    portENTER_CRITICAL_ISR(&espnowMux);
+    strncpy(pendingSysMsg, pkt.message, sizeof(pendingSysMsg) - 1);
+    pendingSysMsg[sizeof(pendingSysMsg) - 1] = '\0';
+    pendingSysInfo = true;
+    portEXIT_CRITICAL_ISR(&espnowMux);
   } else if (pkt.msgType == MSG_SCAN_RESP &&
              currentState == STATE_SCANNING_SENT &&
              pkt.seq == pendingScanSeq) {
@@ -1788,16 +1942,20 @@ void loop() {
     }
 
     if (currentState == STATE_STANDBY && currentStationPage == 2 && isScreenOn) {
-      tft.fillRect(12, 60, 90, 28, getStCardBg());
-      tft.setTextColor(getStGreen(), getStCardBg());
-      tft.setTextSize(3);
-      tft.setCursor(14, 62);
-      tft.printf("%u", (unsigned)totalSuccessToday);
-      tft.fillRect(12, 108, 130, 22, getStCardBg());
-      tft.setTextColor(getStYellow(), getStCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(14, 110);
-      tft.printf("%u B.", (unsigned)(totalSuccessToday * 35));
+      displayStatsDashboard(false);
+    }
+  }
+
+  if (pendingSysInfo) {
+    char msgCopy[32];
+    portENTER_CRITICAL(&espnowMux);
+    strncpy(msgCopy, pendingSysMsg, sizeof(msgCopy) - 1);
+    msgCopy[sizeof(msgCopy) - 1] = '\0';
+    pendingSysInfo = false;
+    portEXIT_CRITICAL(&espnowMux);
+    applySystemSummary(msgCopy);
+    if (currentState == STATE_STANDBY && currentStationPage == 2 && isScreenOn) {
+      displayStatsDashboard(false);
     }
   }
 
@@ -1822,7 +1980,12 @@ void loop() {
   if (hasNewPacket) {
     hasNewPacket = false;
     // นับยอดที่นี่ ไม่ใช่ซ่อนไว้ใน displayResult() ซึ่งเป็นฟังก์ชันวาดจอ
-    if (strcmp(receivedPacketBuffer.status, "SUCCESS") == 0) totalSuccessToday++;
+    if (strcmp(receivedPacketBuffer.status, "SUCCESS") == 0) {
+      totalSuccessToday++;
+      pushStationTap(receivedPacketBuffer.studentId);
+    } else {
+      totalRejectToday++;
+    }
     displayResult(String(receivedPacketBuffer.status), 
                   String(receivedPacketBuffer.name), 
                   String(receivedPacketBuffer.studentId), 
