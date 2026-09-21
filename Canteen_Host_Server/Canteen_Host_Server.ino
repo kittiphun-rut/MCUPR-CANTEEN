@@ -135,6 +135,17 @@ ActiveSession activeSessions[3];
 
 enum MsgType : uint8_t { MSG_HEARTBEAT = 1, MSG_SCAN_REQ = 2, MSG_SCAN_RESP = 3, MSG_CONFIG = 4 };
 
+// ---------------------------------------------------------------------------
+// บังคับให้ ESP-NOW ใช้อัตราส่งแบบ Long Range (250 kbps) ซึ่งรับสัญญาณอ่อนได้ดีขึ้นมาก
+// แลกกับความเร็วที่ระบบนี้ไม่ต้องการอยู่แล้ว เพราะแพ็กเก็ตใหญ่สุดแค่ 200 ไบต์
+//
+// ค่าเริ่มต้นคือปิดไว้ เพราะถ้าเปิดข้างเดียวทั้งสองเครื่องจะคุยกันไม่รู้เรื่อง
+// วิธีเปิด: แฟลชทั้งสองฝั่งด้วยค่า 0 ให้ระบบทำงานปกติก่อน แล้วค่อยเปลี่ยนเป็น 1
+// ทั้งสองไฟล์แล้วแฟลชใหม่ทั้งคู่ในเวลาที่ไม่มีนิสิตใช้บริการ
+// ถ้าคอมไพล์ไม่ผ่านกับ core ที่ใช้อยู่ ให้ตั้งกลับเป็น 0
+// ---------------------------------------------------------------------------
+#define ESPNOW_FORCE_LONG_RANGE_RATE 0
+
 #define ESPNOW_PROTO_MAGIC 0xCA
 #define ESPNOW_PROTO_VER   2
 
@@ -196,6 +207,13 @@ StationNode stationNodes[4];
 bool stationPeerReady[4] = {false, false, false, false};
 volatile bool hbAckPending[4] = {false, false, false, false};
 
+// ส่งคำตอบการสแกนซ้ำเมื่อชิปรายงานว่าส่งไม่ถึง
+volatile bool respSendFailed = false;
+HostResponsePacket lastRespPacket = {};
+uint8_t lastRespStation = 0;
+uint8_t lastRespRetryLeft = 0;
+unsigned long lastRespRetryAt = 0;
+
 uint16_t lastScanSeq[4] = {0, 0, 0, 0};
 bool hasLastScanSeq[4] = {false, false, false, false};
 HostResponsePacket lastScanResponse[4] = {};
@@ -253,7 +271,7 @@ void handleDashboardAPI();
 void handleDisplayAPI();
 String getDisplayHTML();
 String maskStudentId(const String &id);
-void pushDisplayEvent(const String &studentId, uint8_t station);
+void pushDisplayEvent(const String &studentId, uint8_t station, const String &timeStr);
 void handleManualClaim();
 void handleDailyReset();
 void handleSaveShops();
@@ -294,6 +312,12 @@ void broadcastStationConfig();
 void setHostScreenPower(bool on);
 void announceHostMode();
 void fillSystemSummary(HostResponsePacket &pkt);
+void applyEspNowRate(const uint8_t *peerAddr);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status);
+#else
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
+#endif
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void ledStandby();
 void ledApproved();
@@ -623,12 +647,12 @@ String maskStudentId(const String &id) {
   return out;
 }
 
-void pushDisplayEvent(const String &studentId, uint8_t station) {
+void pushDisplayEvent(const String &studentId, uint8_t station, const String &timeStr) {
   DisplayEvent &e = displayFeed[displayFeedHead];
   String masked = maskStudentId(studentId);
   strncpy(e.maskedId, masked.c_str(), sizeof(e.maskedId) - 1);
   e.maskedId[sizeof(e.maskedId) - 1] = '\0';
-  String t = getTimeOnlyStr();
+  String t = (timeStr.length() >= 8) ? timeStr.substring(timeStr.length() - 8) : getTimeOnlyStr();
   strncpy(e.timeStr, t.c_str(), sizeof(e.timeStr) - 1);
   e.timeStr[sizeof(e.timeStr) - 1] = '\0';
   e.station = station;
@@ -698,21 +722,50 @@ bool ensureStationPeer(uint8_t stationId) {
     return true;
   }
 
+
   esp_err_t err = esp_now_add_peer(&peerInfo);
   if (err == ESP_OK || err == ESP_ERR_ESPNOW_EXIST) {
     stationPeerReady[stationId - 1] = true;
+    applyEspNowRate(node.mac);
     return true;
   }
   stationPeerReady[stationId - 1] = false;
   return false;
 }
 
+// เดิมถ้า unicast ล้มเหลวจะยิงเป็น broadcast แทน ซึ่งทำให้แย่ลงไม่ใช่ดีขึ้น
+// เพราะ broadcast ไม่มี ACK ระดับ MAC จึงไม่มีการส่งซ้ำอัตโนมัติของชิป
+// ขณะที่ unicast มี ARQ ในตัว ตอนนี้ใช้ broadcast เฉพาะตอนยังไม่รู้จัก MAC ของสถานี
 bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len) {
   if (stationId >= 1 && stationId <= 4 && ensureStationPeer(stationId)) {
-    esp_err_t err = esp_now_send(stationNodes[stationId - 1].mac, data, len);
-    if (err == ESP_OK) return true;
+    return esp_now_send(stationNodes[stationId - 1].mac, data, len) == ESP_OK;
   }
   return esp_now_send(broadcastAddress, data, len) == ESP_OK;
+}
+
+// ตั้งอัตราส่งของ peer ให้เป็นโหมดระยะไกล (เรียกทุกครั้งหลังเพิ่ม peer)
+void applyEspNowRate(const uint8_t *peerAddr) {
+#if ESPNOW_FORCE_LONG_RANGE_RATE && ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_now_rate_config_t rateCfg = {};
+  rateCfg.phymode = WIFI_PHY_MODE_LR;
+  rateCfg.rate = WIFI_PHY_RATE_LORA_250K;
+  rateCfg.ersu = false;
+  rateCfg.dcm = false;
+  esp_now_set_peer_rate_config(peerAddr, &rateCfg);
+#else
+  (void)peerAddr;
+#endif
+}
+
+// ชิปบอกได้ทันทีว่าส่งถึงหรือไม่ ใช้จังหวะนี้ยิงคำตอบการสแกนซ้ำแทนการรอ timeout
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
+  (void)tx_info;
+#else
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  (void)mac_addr;
+#endif
+  if (status != ESP_NOW_SEND_SUCCESS) respSendFailed = true;
 }
 
 static void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId) {
@@ -1626,6 +1679,12 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   String uid = String(pkt.uid);
   uid.trim();
 
+  // รายการที่สถานีบันทึกไว้ตอนขาดการเชื่อมต่อ แล้วส่งตามมาทีหลัง
+  // ใช้เวลาที่นิสิตแตะบัตรจริงเป็นเวลารับสิทธิ์ ไม่ใช่เวลาที่ซิงค์
+  String offlineStamp = String(pkt.offlineTime);
+  offlineStamp.trim();
+  bool isOfflineSync = (offlineStamp.length() >= 10);
+
   lastScannedUID = uid;
   lastScannedStation = pkt.stationId;
   lastScannedRefNo = "-";
@@ -1650,7 +1709,8 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   resp.seq = pkt.seq;
   resp.amount = 35;
 
-  if (!isWithinServiceTime()) {
+  // รายการย้อนหลังต้องไม่ถูกปฏิเสธเพราะซิงค์หลังปิดบริการ ในเมื่อตอนแตะบัตรยังเปิดอยู่
+  if (!isOfflineSync && !isWithinServiceTime()) {
     strncpy(resp.status, "TIME_CLOSED", sizeof(resp.status) - 1);
     strncpy(resp.studentId, "-", sizeof(resp.studentId) - 1);
     strncpy(resp.name, "SERVICE CLOSED", sizeof(resp.name) - 1);
@@ -1700,7 +1760,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         lastScannedStatus = "DUPLICATE";
         lastScannedRefNo = s.refNo;
       } else {
-        String currentTimestamp = getRealTimeStr();
+        String currentTimestamp = isOfflineSync ? offlineStamp : getRealTimeStr();
         String currentRefNo = generateRefNo(pkt.stationId);
 
         s.claimed = true;
@@ -1737,14 +1797,30 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     memcpy(&lastScanResponse[pkt.stationId - 1], &resp, sizeof(resp));
   }
   sendToStation(pkt.stationId, (uint8_t *)&resp, sizeof(HostResponsePacket));
-  displayHostLiveScan(lastScannedUID, lastScannedStudentId, lastScannedStatus, pkt.stationId);
-  // มีคนมาใช้บริการแล้ว ปลุกทุกสถานีออกจากโหมดพักหน้าจอพร้อมกัน
-  if (wasScreensaver || wasScreenOff) announceHostMode();
+  memcpy(&lastRespPacket, &resp, sizeof(resp));
+  lastRespStation = pkt.stationId;
+  lastRespRetryLeft = 2;
+  lastRespRetryAt = millis() + 220;
+  respSendFailed = false;
+  if (isOfflineSync) {
+    // ซิงค์ย้อนหลังอาจมาทีละหลายสิบรายการติดกัน วาดจอใหม่อย่างมากวินาทีครึ่งครั้ง
+    // ไม่อย่างนั้นจอจะกะพริบรัวและหน่วงการตอบกลับของแม่ข่ายไปด้วย
+    static unsigned long lastSyncRedraw = 0;
+    if (millis() - lastSyncRedraw > 1500) {
+      lastSyncRedraw = millis();
+      renderHostPage(true);
+    }
+  } else {
+    displayHostLiveScan(lastScannedUID, lastScannedStudentId, lastScannedStatus, pkt.stationId);
+    // มีคนมาใช้บริการแล้ว ปลุกทุกสถานีออกจากโหมดพักหน้าจอพร้อมกัน
+    if (wasScreensaver || wasScreenOff) announceHostMode();
+  }
 
   if (found && matchedStudent && strcmp(resp.status, "SUCCESS") == 0) {
     String claimType = matchedStudent->isTempCard ? "Temp Card" : "Normal";
+    if (isOfflineSync) claimType += " (Offline)";
     appendLogToFS(matchedStudent->studentId, matchedStudent->fullName, matchedStudent->uid, matchedStudent->refNo, matchedStudent->claimTime, pkt.stationId, claimType);
-    pushDisplayEvent(matchedStudent->studentId, pkt.stationId);
+    pushDisplayEvent(matchedStudent->studentId, pkt.stationId, matchedStudent->claimTime);
     
     if (matchedStudent->isTempCard) {
       if (matchedStudent->originalUid != "") {
@@ -1756,7 +1832,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
       saveDatabaseToFS();
     }
 
-    soundScanSuccess();
+    if (!isOfflineSync) soundScanSuccess();
   }
 }
 
@@ -1911,7 +1987,7 @@ void handleManualClaim() {
       lastScannedStation = station; lastScannedStatus = "APPROVED";
       lastScannedRefNo = st.refNo;
       appendLogToFS(st.studentId, st.fullName, st.uid, st.refNo, st.claimTime, station, st.isTempCard ? "Temp Card" : "Normal");
-      pushDisplayEvent(st.studentId, (uint8_t)station);
+      pushDisplayEvent(st.studentId, (uint8_t)station, st.claimTime);
 
       if (st.isTempCard) {
         st.uid = st.originalUid;
@@ -2547,8 +2623,12 @@ void setup() {
   WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 8);
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
-  esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-  esp_wifi_set_max_tx_power(68);
+  // เพิ่ม WIFI_PROTOCOL_LR เพื่อให้คุยกับสถานีในโหมดระยะไกลได้ การใส่เพิ่มเฉย ๆ
+  // ปลอดภัยเพราะยังคง 11b/g/n ไว้ โทรศัพท์และคอมพิวเตอร์จึงต่อ Wi-Fi ได้ตามปกติ
+  esp_wifi_set_protocol(WIFI_IF_AP,
+                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
+  // 80 = 20 dBm ซึ่งเป็นค่าสูงสุดของ ESP32-S3 เดิมตั้งไว้ 68 = 17 dBm
+  esp_wifi_set_max_tx_power(80);
 
   // ตั้งค่าที่ captive portal ต้องการ: ตอบทุกโดเมนมาที่ตัวเอง และ TTL = 0
   // เพื่อไม่ให้โทรศัพท์จำการชี้โดเมนนี้ไว้หลังตัดการเชื่อมต่อไปแล้ว
@@ -2558,6 +2638,7 @@ void setup() {
 
   esp_now_init();
   esp_now_register_recv_cb(onDataRecv);
+  esp_now_register_send_cb(onDataSent);
 
   esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
@@ -2565,6 +2646,7 @@ void setup() {
   peerInfo.ifidx = WIFI_IF_AP;
   peerInfo.encrypt = false;
   esp_now_add_peer(&peerInfo);
+  applyEspNowRate(broadcastAddress);
 
   delay(50);
   broadcastStationConfig();
@@ -2783,6 +2865,14 @@ void loop() {
   ScanQueueItem item;
   if (scanQueue != NULL && xQueueReceive(scanQueue, &item, 0) == pdTRUE) {
     processScanRequest(item.mac, item.pkt, item.rssi);
+  }
+
+  // ถ้าชิปรายงานว่าคำตอบการสแกนส่งไม่ถึง ให้ยิงซ้ำทันทีโดยไม่ต้องรอสถานีถามใหม่
+  if (lastRespRetryLeft > 0 && respSendFailed && (long)(millis() - lastRespRetryAt) >= 0) {
+    respSendFailed = false;
+    lastRespRetryLeft--;
+    lastRespRetryAt = millis() + 260;
+    sendToStation(lastRespStation, (uint8_t *)&lastRespPacket, sizeof(HostResponsePacket));
   }
 
   for (int i = 0; i < 4; i++) {

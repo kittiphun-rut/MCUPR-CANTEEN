@@ -2,7 +2,7 @@
  * ============================================================================
  * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
  * System: Vendor Station Client & Dynamic Theme Suite
- * Version: 118.2.0 (Station Stats: Live Payout Feed & Canteen-wide Totals)
+ * Version: 119.0.0 (Offline Safety Queue: Serve Students During Link Loss)
  * Release Date: กันยายน 2569 (September 2026)
  * 
  * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
@@ -30,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "118.2.0"
+#define APP_VERSION         "119.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -121,6 +121,13 @@ enum MsgType : uint8_t {
   MSG_CONFIG    = 4
 };
 
+// ---------------------------------------------------------------------------
+// บังคับให้ ESP-NOW ใช้อัตราส่งแบบ Long Range (250 kbps) รับสัญญาณอ่อนได้ดีขึ้นมาก
+// ต้องตั้งเป็นค่าเดียวกันกับไฟล์ของเครื่องแม่ข่าย และแฟลชทั้งสองฝั่ง
+// ถ้าเปิดข้างเดียวทั้งสองเครื่องจะคุยกันไม่รู้เรื่อง รายละเอียดอยู่ใน README
+// ---------------------------------------------------------------------------
+#define ESPNOW_FORCE_LONG_RANGE_RATE 0
+
 #define ESPNOW_PROTO_MAGIC 0xCA
 #define ESPNOW_PROTO_VER   2
 
@@ -178,7 +185,8 @@ enum AppState {
   STATE_STATUS, 
   STATE_SCREENSAVER, 
   STATE_CREDIT, 
-  STATE_CONFIG_ID 
+  STATE_CONFIG_ID,
+  STATE_SYNCING        // กำลังส่งรายการที่บันทึกไว้ตอนขาดการเชื่อมต่อเข้าระบบ
 };
 AppState currentState = STATE_STANDBY;
 
@@ -211,6 +219,32 @@ uint8_t stnFeedCount = 0;
 uint8_t stnFeedHead  = 0;
 char lastPayoutTime[12] = "--:--";
 
+// ---------------------------------------------------------------------------
+// คิวออฟไลน์: เมื่อแม่ข่ายไม่ตอบ สถานีจะบันทึกการแตะบัตรลงหน่วยความจำถาวร
+// แล้วให้แม่ค้าจ่ายอาหารไปก่อน พอลิงก์กลับมาจึงส่งเข้าระบบเองโดยใช้เวลาตอนแตะจริง
+// ข้อมูลอยู่ใน NVS จึงไม่หายแม้ไฟดับหรือรีบูตกลางคัน
+// ---------------------------------------------------------------------------
+#define OFFLINE_QUEUE_MAX 48
+struct OfflineTap {
+  char uid[16];
+  char time[20];        // "YYYY-MM-DD HH:MM:SS"
+};
+OfflineTap offlineQueue[OFFLINE_QUEUE_MAX];
+uint8_t offlineCount = 0;
+
+bool syncInProgress          = false;
+bool syncQuiet               = false;   // ซิงค์เงียบ ๆ ขณะพักหน้าจอหรือจอดับ
+AppState syncReturnState     = STATE_STANDBY;
+int syncReturnPage           = 1;
+uint8_t syncTotal            = 0;
+uint8_t syncDone             = 0;
+uint8_t syncRejected         = 0;
+uint8_t syncRetry            = 0;
+uint16_t syncSeq             = 0;
+unsigned long syncSentAt     = 0;
+volatile bool syncAckReceived = false;
+unsigned long syncRetryNotBefore = 0;   // กันการวนลองซิงค์รัวเมื่อแม่ข่ายหายอีก
+
 // ภาพรวมทั้งโรงอาหารที่แม่ข่ายฝากมากับ heartbeat
 bool hasSystemInfo   = false;
 uint16_t sysUsed     = 0;
@@ -222,6 +256,7 @@ char pendingSysMsg[32] = {0};
 String lastProcessedUID             = "";
 unsigned long lastProcessedTime     = 0;
 
+volatile bool lastSendFailed        = false;  // ชิปรายงานว่าส่งแพ็กเก็ตล่าสุดไม่ถึง
 volatile bool hasNewPacket          = false;
 HostResponsePacket receivedPacketBuffer;
 
@@ -246,6 +281,7 @@ uint16_t nextScanSeq = 1;
 uint16_t pendingScanSeq = 0;
 StationPacket pendingScanPacket = {};
 uint8_t scanRetryCount = 0;
+const uint8_t SCAN_MAX_RETRY = 6;   // เดิม 3 ครั้ง ใช้เวลาแค่ 1.35 วินาทีจาก timeout 3 วินาที
 unsigned long lastScanSendTime = 0;
 
 const unsigned long TIMEOUT_SCREENSAVER = 300000; 
@@ -253,7 +289,10 @@ const unsigned long MULTI_CLICK_GAP     = 320;
 const unsigned long STATION_ID_HOLD_MS  = 3000;
 const unsigned long CONFIG_AUTO_SAVE_MS = 3000;
 const unsigned long COOLDOWN_MS         = 3500;
-const unsigned long SCAN_TIMEOUT_MS     = 3000;
+const unsigned long SCAN_TIMEOUT_MS         = 3000;
+// เมื่อรู้อยู่แล้วว่าแม่ข่ายหลุด ไม่ต้องให้นิสิตยืนรอครบสามวินาทีทุกคน
+const unsigned long SCAN_TIMEOUT_OFFLINE_MS = 1500;
+const unsigned long SYNC_ACK_TIMEOUT_MS     = 2000;
 const unsigned long BASE_HEARTBEAT      = 6000;
 const unsigned long HOST_OFFLINE_TIMEOUT = 15000;
 
@@ -281,6 +320,18 @@ void displayStatsDashboard(bool fullRedraw);
 String maskStudentId(const String &id);
 void pushStationTap(const char *studentId);
 void applySystemSummary(const char *msg);
+String getFullTimeStr();
+void loadOfflineQueue();
+void saveOfflineQueue();
+int findOfflineTap(const String &uid);
+bool enqueueOfflineTap(const String &uid);
+void popOfflineTap();
+void displayOfflineSaved(const String &uid, bool alreadySaved);
+void displaySyncProgress(uint8_t done, uint8_t total);
+void displaySyncDone(uint8_t ok, uint8_t rejected);
+void startOfflineSync();
+void sendOfflineTap();
+void finishOfflineSync(bool aborted);
 void displayStatusScreen(bool fullRedraw);
 void displayScanningUID(String uid);
 void displayResult(String status, String name, String id, String refNo, String claimTime, String msg);
@@ -327,6 +378,7 @@ String maskUID(String uid);
 bool isValidMac(const uint8_t *mac);
 bool ensureHostPeer();
 bool sendToHost(const uint8_t *data, size_t len);
+void applyEspNowRate(const uint8_t *peerAddr);
 int calculateSignalQuality(int rssi);
 uint16_t getSignalColor(int rssi, bool isOnline);
 int getActiveSignalBarsCount(int rssi, bool isOnline);
@@ -552,6 +604,109 @@ void soundThemeSwitch() {
   noTone(BUZZER_PIN);
 }
 
+// จอแจ้งว่าบันทึกการแตะไว้แล้ว ให้แม่ค้าจ่ายอาหารไปก่อนได้
+// ใช้โทนฟ้าเพื่อให้แยกจากเขียว(ผ่าน) ส้ม(ซ้ำ) และแดง(ไม่ผ่าน) ได้ชัดเจน
+void displayOfflineSaved(const String &uid, bool alreadySaved) {
+  wakeScreenIfNeeded();
+  setLedColor(0, 40, 55);
+
+  const uint16_t screenBg = 0x0209;
+  const uint16_t cardBg   = 0x0126;
+  const uint16_t banner   = alreadySaved ? ST77XX_ORANGE : 0x07FF;
+  const uint16_t muted    = alreadySaved ? 0xFDC0 : 0x9EFF;
+
+  tft.fillScreen(screenBg);
+  tft.fillRect(0, 0, 320, 34, banner);
+  drawFitCenteredText(0, 0, 320, 34,
+                      alreadySaved ? "! ALREADY SAVED OFFLINE !" : "SAVED - SERVE THE STUDENT",
+                      2, 0x0000, banner);
+
+  tft.fillRoundRect(8, 40, 304, 142, 8, cardBg);
+  tft.drawRoundRect(8, 40, 304, 142, 8, banner);
+  tft.drawRoundRect(9, 41, 302, 140, 7, banner);
+
+  tft.setTextSize(1);
+  tft.setTextColor(muted, cardBg);
+  tft.setCursor(20, 50);  tft.print("SERVICE STATION:");
+  tft.setCursor(156, 50); tft.print("CARD UID (ENCRYPTED):");
+
+  tft.setTextSize(2);
+  tft.setTextColor(0xFFFF, cardBg);
+  tft.setCursor(20, 62);  tft.printf("STATION 0%d", currentStationId);
+  tft.setCursor(156, 62); tft.print(maskUID(uid));
+
+  tft.drawFastHLine(20, 86, 280, banner);
+
+  tft.setTextSize(1);
+  tft.setTextColor(muted, cardBg);
+  tft.setCursor(20, 94);
+  tft.print("RECORDS WAITING TO SYNC:");
+
+  tft.setTextSize(3);
+  tft.setTextColor(0xFFFF, cardBg);
+  tft.setCursor(20, 108);
+  tft.printf("%u", (unsigned)offlineCount);
+  tft.setTextSize(1);
+  tft.printf(" / %u", (unsigned)OFFLINE_QUEUE_MAX);
+
+  tft.setTextColor(muted, cardBg);
+  tft.setCursor(20, 146);
+  tft.print(alreadySaved ? "THIS CARD IS ALREADY IN THE QUEUE"
+                         : "SENT AUTOMATICALLY WHEN THE LINK IS BACK");
+  tft.setCursor(20, 162);
+  tft.print("NOTHING IS LOST IF THE POWER GOES OFF");
+
+  tft.fillRoundRect(16, 188, 288, 30, 6, banner);
+  drawFitCenteredText(16, 188, 288, 30,
+                      alreadySaved ? "NO SECOND MEAL FOR THIS CARD" : "HOST UNREACHABLE - RECORD KEPT ON THIS DEVICE",
+                      1, 0x0000, banner);
+
+  drawStationBottomBar("OFFLINE MODE | RECORD SAVED LOCALLY");
+  if (alreadySaved) soundAlarm(); else soundSuccess();
+}
+
+void displaySyncProgress(uint8_t done, uint8_t total) {
+  tft.fillScreen(getStBg());
+  drawStationTopBar("SYNCING OFFLINE RECORDS");
+  drawStationCard(16, 46, 288, 140, getStCyan(), getStCardBg());
+
+  drawFitCenteredText(28, 60, 264, 16, "SENDING SAVED RECORDS TO THE HOST", 1,
+                      getStTextMuted(), getStCardBg());
+
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%u / %u", (unsigned)done, (unsigned)total);
+  drawFitCenteredText(28, 86, 264, 32, buf, 4, getStCyan(), getStCardBg());
+
+  int pct = (total > 0) ? (int)((uint32_t)done * 100 / total) : 0;
+  tft.drawRoundRect(40, 132, 240, 12, 5, getStCardBorder());
+  int w = (pct * 236) / 100;
+  if (w > 0) tft.fillRoundRect(42, 134, w, 8, 4, getStCyan());
+
+  drawFitCenteredText(28, 156, 264, 16, "PLEASE DO NOT TURN OFF THE DEVICE", 1,
+                      getStTextMuted(), getStCardBg());
+  drawStationBottomBar("SYNCING | PLEASE WAIT");
+}
+
+void displaySyncDone(uint8_t ok, uint8_t rejected) {
+  tft.fillScreen(getStBg());
+  drawStationTopBar("OFFLINE SYNC COMPLETE");
+  drawStationCard(16, 50, 288, 132, getStGreen(), getStCardBg());
+
+  drawFitCenteredText(28, 64, 264, 20, "SAVED RECORDS HAVE BEEN SENT", 2,
+                      getStTextMain(), getStCardBg());
+
+  char buf[40];
+  snprintf(buf, sizeof(buf), "ACCEPTED %u", (unsigned)ok);
+  drawFitCenteredText(28, 100, 264, 24, buf, 3, getStGreen(), getStCardBg());
+
+  snprintf(buf, sizeof(buf), "REJECTED AS DUPLICATE: %u", (unsigned)rejected);
+  drawFitCenteredText(28, 140, 264, 16, buf, 1,
+                      rejected > 0 ? getStRose() : getStTextMuted(), getStCardBg());
+
+  drawStationBottomBar("RETURNING TO THE MAIN PAGE...");
+  soundSuccess();
+}
+
 void displayOfflineAlert() {
   ledOffline();
   tft.fillScreen(0x8000);
@@ -593,6 +748,53 @@ String maskStudentId(const String &id) {
   String out = id.substring(0, 5);
   for (size_t i = 5; i < id.length(); i++) out += '*';
   return out;
+}
+
+void saveOfflineQueue() {
+  stationPrefs.begin("st_offq", false);
+  stationPrefs.putUChar("n", offlineCount);
+  if (offlineCount > 0) stationPrefs.putBytes("q", offlineQueue, offlineCount * sizeof(OfflineTap));
+  else stationPrefs.remove("q");
+  stationPrefs.end();
+}
+
+void loadOfflineQueue() {
+  stationPrefs.begin("st_offq", true);
+  offlineCount = stationPrefs.getUChar("n", 0);
+  if (offlineCount > OFFLINE_QUEUE_MAX) offlineCount = 0;
+  if (offlineCount > 0) {
+    size_t need = offlineCount * sizeof(OfflineTap);
+    if (stationPrefs.getBytesLength("q") == need) stationPrefs.getBytes("q", offlineQueue, need);
+    else offlineCount = 0;   // ข้อมูลไม่ครบ ทิ้งทั้งคิวดีกว่าส่งของเสียเข้าระบบ
+  }
+  stationPrefs.end();
+}
+
+int findOfflineTap(const String &uid) {
+  for (int i = 0; i < offlineCount; i++) {
+    if (uid.equals(offlineQueue[i].uid)) return i;
+  }
+  return -1;
+}
+
+bool enqueueOfflineTap(const String &uid) {
+  if (offlineCount >= OFFLINE_QUEUE_MAX) return false;
+  OfflineTap &e = offlineQueue[offlineCount];
+  strncpy(e.uid, uid.c_str(), sizeof(e.uid) - 1);
+  e.uid[sizeof(e.uid) - 1] = '\0';
+  String t = getFullTimeStr();
+  strncpy(e.time, t.c_str(), sizeof(e.time) - 1);
+  e.time[sizeof(e.time) - 1] = '\0';
+  offlineCount++;
+  saveOfflineQueue();
+  return true;
+}
+
+void popOfflineTap() {
+  if (offlineCount == 0) return;
+  for (int i = 1; i < offlineCount; i++) offlineQueue[i - 1] = offlineQueue[i];
+  offlineCount--;
+  saveOfflineQueue();
 }
 
 void pushStationTap(const char *studentId) {
@@ -641,17 +843,37 @@ bool ensureHostPeer() {
   peerInfo.encrypt = false;
   if (esp_now_is_peer_exist(hostMacAddress)) { hostPeerReady = true; return true; }
   esp_err_t err = esp_now_add_peer(&peerInfo);
-  if (err == ESP_OK || err == ESP_ERR_ESPNOW_EXIST) { hostPeerReady = true; return true; }
+  if (err == ESP_OK || err == ESP_ERR_ESPNOW_EXIST) {
+    hostPeerReady = true;
+    applyEspNowRate(hostMacAddress);
+    return true;
+  }
   hostPeerReady = false;
   return false;
 }
 
+// เดิมถ้า unicast ล้มเหลวจะยิงเป็น broadcast แทน ซึ่งทำให้แย่ลงไม่ใช่ดีขึ้น
+// เพราะ broadcast ไม่มี ACK ระดับ MAC จึงไม่มีการส่งซ้ำอัตโนมัติของชิป
+// ขณะที่ unicast มี ARQ ในตัว ตอนนี้ใช้ broadcast เฉพาะตอนยังไม่รู้จัก MAC ของแม่ข่าย
 bool sendToHost(const uint8_t *data, size_t len) {
   if (ensureHostPeer()) {
-    esp_err_t err = esp_now_send(hostMacAddress, data, len);
-    if (err == ESP_OK) return true;
+    return esp_now_send(hostMacAddress, data, len) == ESP_OK;
   }
   return esp_now_send(broadcastAddress, data, len) == ESP_OK;
+}
+
+// ตั้งอัตราส่งของ peer ให้เป็นโหมดระยะไกล (เรียกทุกครั้งหลังเพิ่ม peer)
+void applyEspNowRate(const uint8_t *peerAddr) {
+#if ESPNOW_FORCE_LONG_RANGE_RATE && ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_now_rate_config_t rateCfg = {};
+  rateCfg.phymode = WIFI_PHY_MODE_LR;
+  rateCfg.rate = WIFI_PHY_RATE_LORA_250K;
+  rateCfg.ersu = false;
+  rateCfg.dcm = false;
+  esp_now_set_peer_rate_config(peerAddr, &rateCfg);
+#else
+  (void)peerAddr;
+#endif
 }
 
 int calculateSignalQuality(int rssi) {
@@ -763,6 +985,16 @@ String getTimeOnlyStr() {
   }
   char buffer[16];
   strftime(buffer, sizeof(buffer), "%H:%M:%S", &timeinfo);
+  return String(buffer);
+}
+
+// เวลาเต็มรูปแบบสำหรับบันทึกลงคิวออฟไลน์ คืนสตริงว่างถ้ายังไม่เคยซิงค์เวลากับแม่ข่าย
+// แล้วแม่ข่ายจะใช้เวลาของตัวเองตอนรับรายการแทน
+String getFullTimeStr() {
+  struct tm timeinfo;
+  if (!isTimeSynced || !getLocalTime(&timeinfo)) return String("");
+  char buffer[24];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
   return String(buffer);
 }
 
@@ -892,11 +1124,16 @@ void displayTapCardStandby() {
   tft.setCursor(52, 170);
   tft.print("35 THB / DAY");
 
-  // บรรทัดโปรโตคอลย้ายมาอยู่นอกการ์ด จัดกึ่งกลางจอ
-  tft.setTextColor(getStTextMuted(), getStBg());
-  tft.setTextSize(1);
-  tft.setCursor(55, 204);
-  tft.print("Protocol: ESP-NOW Channel 1 Secured");
+  // บรรทัดล่างสุด: ปกติบอกโปรโตคอล แต่ถ้ามีรายการค้างจะเตือนว่ากำลังทำงานแบบออฟไลน์
+  if (offlineCount > 0) {
+    char offBuf[52];
+    snprintf(offBuf, sizeof(offBuf), "OFFLINE MODE - %u RECORDS WAITING TO SYNC",
+             (unsigned)offlineCount);
+    drawFitCenteredText(0, 200, 320, 12, offBuf, 1, getStYellow(), getStBg());
+  } else {
+    drawFitCenteredText(0, 200, 320, 12, "Protocol: ESP-NOW Channel 1 Secured", 1,
+                        getStTextMuted(), getStBg());
+  }
 
   drawStationBottomBar("PAGE 1/3 | PRESS BUTTON TO CYCLE");
 }
@@ -1236,7 +1473,8 @@ void applyHostConfig() {
   // แล้วค่อยทำตามในรอบถัดไป (ยังไม่จด lastAppliedModeSeq)
   bool busy = (currentState == STATE_SCANNING_SENT ||
                currentState == STATE_RESULT_DISPLAY ||
-               currentState == STATE_CONFIG_ID);
+               currentState == STATE_CONFIG_ID ||
+               currentState == STATE_SYNCING);
   if (newCommand && busy) {
     if (needRedraw) redrawCurrentScreen();
     return;
@@ -1268,6 +1506,58 @@ void applyHostConfig() {
   }
 
   if (needRedraw) redrawCurrentScreen();
+}
+
+void sendOfflineTap() {
+  if (offlineCount == 0) return;
+  memset(&pendingScanPacket, 0, sizeof(pendingScanPacket));
+  pendingScanPacket.magic = ESPNOW_PROTO_MAGIC;
+  pendingScanPacket.version = ESPNOW_PROTO_VER;
+  pendingScanPacket.msgType = MSG_SCAN_REQ;
+  pendingScanPacket.stationId = currentStationId;
+
+  if (nextScanSeq == 0) nextScanSeq = 1;
+  syncSeq = nextScanSeq++;
+  if (nextScanSeq == 0) nextScanSeq = 1;
+  pendingScanPacket.seq = syncSeq;
+
+  strncpy(pendingScanPacket.uid, offlineQueue[0].uid, sizeof(pendingScanPacket.uid) - 1);
+  strncpy(pendingScanPacket.offlineTime, offlineQueue[0].time, sizeof(pendingScanPacket.offlineTime) - 1);
+  pendingScanPacket.systemVoltage = readBatteryVoltage();
+
+  sendToHost((uint8_t *)&pendingScanPacket, sizeof(StationPacket));
+  syncSentAt = millis();
+}
+
+void startOfflineSync() {
+  syncReturnState = (currentState == STATE_SCREENSAVER) ? STATE_SCREENSAVER : STATE_STANDBY;
+  syncReturnPage  = currentStationPage;
+  syncQuiet       = (currentState == STATE_SCREENSAVER) || !isScreenOn;
+  syncTotal       = offlineCount;
+  syncDone = 0; syncRejected = 0; syncRetry = 0;
+  syncAckReceived = false;
+  syncInProgress  = true;
+  currentState    = STATE_SYNCING;
+  if (!syncQuiet) displaySyncProgress(0, syncTotal);
+  sendOfflineTap();
+}
+
+void finishOfflineSync(bool aborted) {
+  syncInProgress = false;
+  lastActivityTime = millis();
+  // แม่ข่ายหายไปอีก เก็บคิวที่เหลือไว้แล้วเว้นช่วงก่อนลองใหม่ ไม่วนรัว
+  if (aborted) syncRetryNotBefore = millis() + 15000;
+
+  if (syncReturnState == STATE_SCREENSAVER) {
+    currentState = STATE_SCREENSAVER;
+    if (isScreenOn) renderScreensaver(true);
+    return;
+  }
+  if (!syncQuiet && isScreenOn && !aborted && (syncDone + syncRejected) > 0) {
+    displaySyncDone(syncDone, syncRejected);
+    delay(2200);
+  }
+  showStationPage(syncReturnPage, true);
 }
 
 // ธีมถูกกำหนดจากเครื่องแม่ข่าย การกดสามครั้งที่สถานีจึงแจ้งให้ทราบแทนการสลับเอง
@@ -1470,12 +1760,15 @@ void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int l
     if (currentState == STATE_SCANNING_SENT && pkt.seq == pendingScanSeq) {
       memcpy(&receivedPacketBuffer, &pkt, sizeof(pkt));
       hasNewPacket = true;
+    } else if (currentState == STATE_SYNCING && pkt.seq == syncSeq) {
+      memcpy(&receivedPacketBuffer, &pkt, sizeof(pkt));
+      syncAckReceived = true;
     }
   }
 }
 void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
   (void)tx_info;
-  (void)status;
+  if (status != ESP_NOW_SEND_SUCCESS) lastSendFailed = true;
 }
 #else
 void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
@@ -1529,16 +1822,19 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
     pendingSysMsg[sizeof(pendingSysMsg) - 1] = '\0';
     pendingSysInfo = true;
     portEXIT_CRITICAL_ISR(&espnowMux);
-  } else if (pkt.msgType == MSG_SCAN_RESP &&
-             currentState == STATE_SCANNING_SENT &&
-             pkt.seq == pendingScanSeq) {
-    memcpy(&receivedPacketBuffer, &pkt, sizeof(pkt));
-    hasNewPacket = true;
+  } else if (pkt.msgType == MSG_SCAN_RESP) {
+    if (currentState == STATE_SCANNING_SENT && pkt.seq == pendingScanSeq) {
+      memcpy(&receivedPacketBuffer, &pkt, sizeof(pkt));
+      hasNewPacket = true;
+    } else if (currentState == STATE_SYNCING && pkt.seq == syncSeq) {
+      memcpy(&receivedPacketBuffer, &pkt, sizeof(pkt));
+      syncAckReceived = true;
+    }
   }
 }
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   (void)mac_addr;
-  (void)status;
+  if (status != ESP_NOW_SEND_SUCCESS) lastSendFailed = true;
 }
 #endif
 
@@ -1724,6 +2020,9 @@ void handlePhysicalButton() {
     btnWasPressed = false;
     lastActivityTime = millis();
 
+    // ระหว่างส่งรายการออฟไลน์เข้าระบบ อย่าให้การกดปุ่มมาตัดกลางคัน
+    if (currentState == STATE_SYNCING) { clickCount = 0; return; }
+
     if (holdUiShown) {
       holdUiShown = false;
       if (pressDuration < STATION_ID_HOLD_MS) {
@@ -1806,11 +2105,12 @@ void sendCardToHost(String uid) {
   lastScanSendTime = millis();
 
   currentState = STATE_SCANNING_SENT;
-  stateHoldUntil = millis() + SCAN_TIMEOUT_MS;
+  stateHoldUntil = millis() + (isHostOnline ? SCAN_TIMEOUT_MS : SCAN_TIMEOUT_OFFLINE_MS);
 }
 
 void checkRC522() {
-  if (currentState == STATE_SCANNING_SENT || currentState == STATE_RESULT_DISPLAY) return;
+  if (currentState == STATE_SCANNING_SENT || currentState == STATE_RESULT_DISPLAY ||
+      currentState == STATE_SYNCING) return;
 
   if (millis() - lastRc522HealthCheck > 10000) {
     lastRc522HealthCheck = millis();
@@ -1877,6 +2177,8 @@ void setup() {
   totalSuccessToday = stationPrefs.getUInt("served", 0);
   stationPrefs.end();
 
+  loadOfflineQueue();
+
   nextHeartbeatInterval = BASE_HEARTBEAT + (currentStationId * 350) + random(0, 200);
 
   WiFi.mode(WIFI_STA);
@@ -1887,8 +2189,11 @@ void setup() {
 
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
-  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-  esp_wifi_set_max_tx_power(68);
+  // เพิ่ม WIFI_PROTOCOL_LR เพื่อให้คุยกับแม่ข่ายในโหมดระยะไกลได้
+  esp_wifi_set_protocol(WIFI_IF_STA,
+                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
+  // 80 = 20 dBm ซึ่งเป็นค่าสูงสุดของ ESP32-S3 เดิมตั้งไว้ 68 = 17 dBm
+  esp_wifi_set_max_tx_power(80);
 
   esp_now_init();
   esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
@@ -1902,6 +2207,7 @@ void setup() {
   peerInfo.ifidx = WIFI_IF_STA;
   peerInfo.encrypt = false;
   esp_now_add_peer(&peerInfo);
+  applyEspNowRate(broadcastAddress);
 
   playBootAnimation();
   lastActivityTime = millis();
@@ -1968,13 +2274,17 @@ void loop() {
     updateStationHeaderStatus(false);
   }
 
-  if (currentState == STATE_SCANNING_SENT &&
-      !hasNewPacket &&
-      scanRetryCount < 3 &&
-      millis() - lastScanSendTime >= 450) {
-    sendToHost((uint8_t *)&pendingScanPacket, sizeof(StationPacket));
-    scanRetryCount++;
-    lastScanSendTime = millis();
+  // ยิงซ้ำถี่ขึ้นช่วงแรกแล้วค่อยห่างออก และถ้าชิปบอกว่าส่งไม่ถึงก็ยิงซ้ำทันที
+  // ไม่ต้องรอครบช่วงเวลา รวมแล้วได้ 7 ครั้งภายใน timeout 3 วินาทีเท่าเดิม
+  if (currentState == STATE_SCANNING_SENT && !hasNewPacket && scanRetryCount < SCAN_MAX_RETRY) {
+    unsigned long gap = 120UL + (unsigned long)scanRetryCount * 150UL;
+    unsigned long since = millis() - lastScanSendTime;
+    if ((lastSendFailed && since >= 60) || since >= gap) {
+      lastSendFailed = false;
+      sendToHost((uint8_t *)&pendingScanPacket, sizeof(StationPacket));
+      scanRetryCount++;
+      lastScanSendTime = millis();
+    }
   }
 
   if (hasNewPacket) {
@@ -1992,15 +2302,58 @@ void loop() {
                   String(receivedPacketBuffer.refNo), 
                   String(receivedPacketBuffer.claimTime), 
                   String(receivedPacketBuffer.message));
-    scanRetryCount = 3;
+    scanRetryCount = SCAN_MAX_RETRY;
     currentState = STATE_RESULT_DISPLAY;
     stateHoldUntil = millis() + 4000;
   }
 
   if (currentState == STATE_SCANNING_SENT && millis() > stateHoldUntil) {
-    displayOfflineAlert();
+    // เดิมขึ้นจอแดงแล้วปฏิเสธนิสิตไปเฉย ๆ โดยไม่เหลือร่องรอยอะไรไว้
+    // ตอนนี้บันทึกการแตะลงหน่วยความจำถาวรก่อน แล้วให้แม่ค้าจ่ายอาหารไปได้เลย
+    String tappedUid = String(pendingScanPacket.uid);
+    tappedUid.trim();
+    if (findOfflineTap(tappedUid) >= 0) {
+      displayOfflineSaved(tappedUid, true);
+    } else if (enqueueOfflineTap(tappedUid)) {
+      displayOfflineSaved(tappedUid, false);
+    } else {
+      displayOfflineAlert();   // คิวเต็ม รับเพิ่มไม่ได้จริง ๆ
+    }
     currentState = STATE_RESULT_DISPLAY;
-    stateHoldUntil = millis() + 2500;
+    stateHoldUntil = millis() + 3200;
+  }
+
+  // ลิงก์กลับมาแล้วและยังมีรายการค้าง ส่งเข้าระบบเองโดยไม่ต้องให้ใครสั่ง
+  if (currentState != STATE_SYNCING && offlineCount > 0 && isHostOnline &&
+      (long)(millis() - syncRetryNotBefore) >= 0 &&
+      (currentState == STATE_STANDBY || currentState == STATE_STATUS ||
+       currentState == STATE_SCREENSAVER)) {
+    startOfflineSync();
+  }
+
+  if (currentState == STATE_SYNCING) {
+    if (syncAckReceived) {
+      syncAckReceived = false;
+      if (strcmp(receivedPacketBuffer.status, "SUCCESS") == 0) {
+        syncDone++;
+        totalSuccessToday++;
+        pushStationTap(receivedPacketBuffer.studentId);
+      } else {
+        syncRejected++;   // แม่ข่ายตอบว่าซ้ำหรือไม่พบบัตร ถือว่าส่งถึงแล้วเช่นกัน
+      }
+      popOfflineTap();
+      syncRetry = 0;
+      if (offlineCount > 0) {
+        if (!syncQuiet && isScreenOn) displaySyncProgress(syncDone + syncRejected, syncTotal);
+        sendOfflineTap();
+      } else {
+        finishOfflineSync(false);
+      }
+    } else if (millis() - syncSentAt > SYNC_ACK_TIMEOUT_MS) {
+      syncRetry++;
+      if (syncRetry >= 3) finishOfflineSync(true);
+      else sendOfflineTap();
+    }
   }
 
   if (currentState == STATE_RESULT_DISPLAY && millis() > stateHoldUntil) {
@@ -2037,8 +2390,9 @@ void loop() {
     sendToHost((uint8_t *)&hbPkt, sizeof(StationPacket));
   }
 
-  if (currentState != STATE_SCREENSAVER && currentState != STATE_CREDIT && 
-      currentState != STATE_SCANNING_SENT && currentState != STATE_RESULT_DISPLAY && 
+  if (currentState != STATE_SCREENSAVER && currentState != STATE_CREDIT &&
+      currentState != STATE_SCANNING_SENT && currentState != STATE_RESULT_DISPLAY &&
+      currentState != STATE_SYNCING &&
       (millis() - lastActivityTime >= TIMEOUT_SCREENSAVER)) {
     currentState = STATE_SCREENSAVER;
     renderScreensaver(true);
