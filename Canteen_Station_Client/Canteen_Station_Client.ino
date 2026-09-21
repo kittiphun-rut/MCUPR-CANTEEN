@@ -2,7 +2,7 @@
  * ============================================================================
  * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
  * System: Vendor Station Client & Dynamic Theme Suite
- * Version: 118.0.0 (Hardened: HSPI Display Bus, Live Header, Theme Sync)
+ * Version: 118.1.0 (Display Mode Follows Host: Theme, Screensaver, Backlight)
  * Release Date: กันยายน 2569 (September 2026)
  * 
  * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
@@ -30,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "118.0.0"
+#define APP_VERSION         "118.1.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -151,17 +151,25 @@ typedef struct __attribute__((packed)) {
   uint16_t servedCount;
 } HostResponsePacket;
 
+// คำสั่งโหมดการแสดงผลจากเครื่องแม่ข่าย
+//   darkMode    แม่ข่ายเป็นเจ้าของ สถานีเปลี่ยนตามเสมอเมื่อค่าไม่ตรงกัน
+//   screenOn    ทำตามเฉพาะตอน modeSeq เปลี่ยน สถานียังกดปิด/เปิดจอเองได้ภายหลัง
+//   screensaver เช่นเดียวกับ screenOn
+//   modeSeq     แม่ข่ายเพิ่มค่านี้ทุกครั้งที่เจ้าหน้าที่เปลี่ยนโหมดการแสดงผล
 typedef struct __attribute__((packed)) {
   uint8_t magic;
   uint8_t version;
   uint8_t msgType;
   uint8_t stationId;
   uint8_t darkMode;
+  uint8_t screenOn;
+  uint8_t screensaver;
+  uint8_t modeSeq;
 } HostConfigPacket;
 
 static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
 static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
-static_assert(sizeof(HostConfigPacket) == 5, "HostConfigPacket size mismatch");
+static_assert(sizeof(HostConfigPacket) == 8, "HostConfigPacket size mismatch");
 
 enum AppState { 
   STATE_STANDBY, 
@@ -201,8 +209,13 @@ volatile uint16_t pendingServedCount = 0;
 volatile bool pendingTimeSync = false;
 char pendingHostTime[24] = {0};
 
-volatile bool pendingThemeUpdate = false;
-volatile uint8_t pendingThemeDark = 1;
+volatile bool pendingConfigUpdate = false;
+volatile uint8_t cfgDark        = 1;
+volatile uint8_t cfgScreenOn    = 1;
+volatile uint8_t cfgScreensaver = 0;
+volatile uint8_t cfgModeSeq     = 0;
+bool hasAppliedModeSeq   = false;
+uint8_t lastAppliedModeSeq = 0;
 portMUX_TYPE espnowMux = portMUX_INITIALIZER_UNLOCKED;
 
 unsigned long lastHeaderRefresh = 0;
@@ -272,7 +285,8 @@ void updateStationHeaderStatus(bool force);
 uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize);
 void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg);
 void showStationPage(int page, bool fullRedraw);
-void applyPendingTheme();
+void applyHostConfig();
+void showThemeLockedNotice();
 void drawStationBottomBar(String instruction);
 void soundWelcome();
 void soundCreditJingle();
@@ -1000,27 +1014,92 @@ void showStationPage(int page, bool fullRedraw) {
   else                displayStatusScreen(fullRedraw);
 }
 
-// รับคำสั่งสลับธีมจากเครื่องแม่ข่าย (MSG_CONFIG) แล้ววาดหน้าปัจจุบันใหม่
-void applyPendingTheme() {
-  bool wantDark;
-  portENTER_CRITICAL(&espnowMux);
-  pendingThemeUpdate = false;
-  wantDark = (pendingThemeDark != 0);
-  portEXIT_CRITICAL(&espnowMux);
-
-  if (wantDark == isStationDarkMode) return;
-  isStationDarkMode = wantDark;
-
-  stationPrefs.begin("st_cfg", false);
-  stationPrefs.putBool("dark", isStationDarkMode);
-  stationPrefs.end();
-
+// วาดหน้าปัจจุบันใหม่หลังเปลี่ยนธีม โดยไม่เปลี่ยนสถานะที่ค้างอยู่
+void redrawCurrentScreen() {
   if (!isScreenOn) return;
-  soundThemeSwitch();
   if (currentState == STATE_SCREENSAVER)   renderScreensaver(true);
   else if (currentState == STATE_CREDIT)   renderDeveloperCredit();
   else if (currentState == STATE_STANDBY ||
            currentState == STATE_STATUS)   showStationPage(currentStationPage, true);
+}
+
+// ทำตามคำสั่งโหมดการแสดงผลจากเครื่องแม่ข่าย (MSG_CONFIG)
+//
+// ธีมถูกบังคับให้ตรงกับแม่ข่ายเสมอ ส่วนไฟหน้าจอและโหมดพักหน้าจอจะทำตาม
+// เฉพาะตอนที่ modeSeq เปลี่ยน คือตอนที่เจ้าหน้าที่เปลี่ยนโหมดที่เครื่องแม่ข่ายจริง ๆ
+// สถานีจึงยังกดปิดจอเองได้โดยไม่ถูกแม่ข่ายสั่งเปิดกลับทุก 6 วินาที
+void applyHostConfig() {
+  uint8_t wantDark, wantScreenOn, wantSaver, seq;
+  portENTER_CRITICAL(&espnowMux);
+  pendingConfigUpdate = false;
+  wantDark     = cfgDark;
+  wantScreenOn = cfgScreenOn;
+  wantSaver    = cfgScreensaver;
+  seq          = cfgModeSeq;
+  portEXIT_CRITICAL(&espnowMux);
+
+  bool needRedraw = false;
+
+  if ((wantDark != 0) != isStationDarkMode) {
+    isStationDarkMode = (wantDark != 0);
+    stationPrefs.begin("st_cfg", false);
+    stationPrefs.putBool("dark", isStationDarkMode);
+    stationPrefs.end();
+    if (isScreenOn) soundThemeSwitch();
+    needRedraw = true;
+  }
+
+  bool newCommand = (!hasAppliedModeSeq || seq != lastAppliedModeSeq);
+
+  // กำลังแสดงผลการแตะบัตรอยู่ อย่าเพิ่งเปลี่ยนโหมด รอให้จอผลลัพธ์หมดเวลาก่อน
+  // แล้วค่อยทำตามในรอบถัดไป (ยังไม่จด lastAppliedModeSeq)
+  bool busy = (currentState == STATE_SCANNING_SENT ||
+               currentState == STATE_RESULT_DISPLAY ||
+               currentState == STATE_CONFIG_ID);
+  if (newCommand && busy) {
+    if (needRedraw) redrawCurrentScreen();
+    return;
+  }
+
+  if (newCommand) {
+    hasAppliedModeSeq = true;
+    lastAppliedModeSeq = seq;
+
+    if ((wantScreenOn != 0) != isScreenOn) {
+      setScreenPower(wantScreenOn != 0);
+      if (!isScreenOn) { ledOff(); return; }
+      needRedraw = true;
+    }
+
+    bool inSaver = (currentState == STATE_SCREENSAVER);
+    if ((wantSaver != 0) && !inSaver) {
+      currentState = STATE_SCREENSAVER;
+      lastActivityTime = millis();
+      if (isScreenOn) renderScreensaver(true);
+      return;
+    }
+    if ((wantSaver == 0) && inSaver) {
+      lastActivityTime = millis();
+      if (isScreenOn) { soundHomeBeep(); showStationPage(1, true); }
+      else currentState = STATE_STANDBY;
+      return;
+    }
+  }
+
+  if (needRedraw) redrawCurrentScreen();
+}
+
+// ธีมถูกกำหนดจากเครื่องแม่ข่าย การกดสามครั้งที่สถานีจึงแจ้งให้ทราบแทนการสลับเอง
+void showThemeLockedNotice() {
+  tft.fillScreen(getStBg());
+  drawStationTopBar("DISPLAY MODE");
+  drawStationCard(16, 52, 288, 128, getStCyan(), getStCardBg());
+  drawFitCenteredText(28, 70, 264, 24, "THEME IS SET BY THE HOST", 2, getStTextMain(), getStCardBg());
+  drawFitCenteredText(28, 104, 264, 16, "ALL STATIONS SHARE ONE DISPLAY MODE", 1, getStTextMuted(), getStCardBg());
+  drawFitCenteredText(28, 132, 264, 16, "PRESS 3x AT THE HOST TERMINAL TO SWITCH", 1, getStTextMuted(), getStCardBg());
+  drawStationBottomBar("RETURNING TO THE PREVIOUS PAGE...");
+  delay(1400);
+  showStationPage(currentStationPage, true);
 }
 
 // ============================================================================
@@ -1163,8 +1242,11 @@ void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int l
     // stationId == 0 คือ broadcast ถึงทุกสถานี
     if (cfg.stationId != 0 && cfg.stationId != currentStationId) return;
     portENTER_CRITICAL_ISR(&espnowMux);
-    pendingThemeDark = cfg.darkMode ? 1 : 0;
-    pendingThemeUpdate = true;
+    cfgDark        = cfg.darkMode ? 1 : 0;
+    cfgScreenOn    = cfg.screenOn ? 1 : 0;
+    cfgScreensaver = cfg.screensaver ? 1 : 0;
+    cfgModeSeq     = cfg.modeSeq;
+    pendingConfigUpdate = true;
     portEXIT_CRITICAL_ISR(&espnowMux);
     return;
   }
@@ -1221,8 +1303,11 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
     // stationId == 0 คือ broadcast ถึงทุกสถานี
     if (cfg.stationId != 0 && cfg.stationId != currentStationId) return;
     portENTER_CRITICAL_ISR(&espnowMux);
-    pendingThemeDark = cfg.darkMode ? 1 : 0;
-    pendingThemeUpdate = true;
+    cfgDark        = cfg.darkMode ? 1 : 0;
+    cfgScreenOn    = cfg.screenOn ? 1 : 0;
+    cfgScreensaver = cfg.screensaver ? 1 : 0;
+    cfgModeSeq     = cfg.modeSeq;
+    pendingConfigUpdate = true;
     portEXIT_CRITICAL_ISR(&espnowMux);
     return;
   }
@@ -1497,17 +1582,8 @@ void handlePhysicalButton() {
       renderScreensaver(true);
     }
     else if (clickCount == 3) {
-      isStationDarkMode = !isStationDarkMode;
-      stationPrefs.begin("st_cfg", false);
-      stationPrefs.putBool("dark", isStationDarkMode);
-      stationPrefs.end();
-      soundThemeSwitch();
-      if (isScreenOn) {
-        if (currentState == STATE_SCREENSAVER)      renderScreensaver(true);
-        else if (currentState == STATE_CREDIT)      renderDeveloperCredit();
-        else if (currentState == STATE_STANDBY ||
-                 currentState == STATE_STATUS)      showStationPage(currentStationPage, true);
-      }
+      soundClick();
+      if (isScreenOn) showThemeLockedNotice();
     }
     clickCount = 0;
   }
@@ -1688,7 +1764,7 @@ void loop() {
     }
   }
 
-  if (pendingThemeUpdate) applyPendingTheme();
+  if (pendingConfigUpdate) applyHostConfig();
 
   // รีเฟรชแถบสถานะลิงก์/แบตเตอรี่มุมขวาบนของหน้าปกติ
   if (isScreenOn && (currentState == STATE_STANDBY || currentState == STATE_STATUS) &&

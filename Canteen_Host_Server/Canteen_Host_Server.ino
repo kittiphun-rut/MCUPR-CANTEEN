@@ -165,17 +165,25 @@ typedef struct __attribute__((packed)) {
   uint16_t servedCount;
 } HostResponsePacket;
 
+// คำสั่งโหมดการแสดงผลที่แม่ข่ายส่งให้สถานี
+//   darkMode    บังคับเสมอ สถานีจะเปลี่ยนตามทุกครั้งที่ค่าไม่ตรงกัน
+//   screenOn    สั่งเฉพาะตอน modeSeq เปลี่ยน สถานียังปิด/เปิดจอเองได้ภายหลัง
+//   screensaver เช่นเดียวกับ screenOn
+//   modeSeq     เพิ่มขึ้นทุกครั้งที่เจ้าหน้าที่เปลี่ยนโหมดที่เครื่องแม่ข่าย
 typedef struct __attribute__((packed)) {
   uint8_t magic;
   uint8_t version;
   uint8_t msgType;
   uint8_t stationId;
   uint8_t darkMode;
+  uint8_t screenOn;
+  uint8_t screensaver;
+  uint8_t modeSeq;
 } HostConfigPacket;
 
 static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
 static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
-static_assert(sizeof(HostConfigPacket) == 5, "HostConfigPacket size mismatch");
+static_assert(sizeof(HostConfigPacket) == 8, "HostConfigPacket size mismatch");
 
 struct StationNode {
   bool isOnline = false;
@@ -186,7 +194,6 @@ struct StationNode {
 };
 StationNode stationNodes[4];
 bool stationPeerReady[4] = {false, false, false, false};
-bool stationThemeSent[4] = {false, false, false, false};
 volatile bool hbAckPending[4] = {false, false, false, false};
 
 uint16_t lastScanSeq[4] = {0, 0, 0, 0};
@@ -281,8 +288,10 @@ String getTimeOnlyStr();
 bool isWithinServiceTime();
 bool ensureStationPeer(uint8_t stationId);
 bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len);
-void sendStationTheme(uint8_t stationId);
-void broadcastStationTheme();
+void sendStationConfig(uint8_t stationId);
+void broadcastStationConfig();
+void setHostScreenPower(bool on);
+void announceHostMode();
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void ledStandby();
 void ledApproved();
@@ -347,6 +356,8 @@ uint8_t displayFeedHead  = 0;
 int currentHostPage         = 0;
 const int TOTAL_PAGES       = 3;
 bool isScreensaverActive    = false;
+bool isHostScreenOn         = true;   // ไฟหน้าจอของเครื่องแม่ข่าย
+uint8_t hostModeSeq         = 0;      // นับทุกครั้งที่โหมดการแสดงผลเปลี่ยน
 bool isCreditActive         = false;
 bool isLiveScanDisplaying   = false;
 unsigned long liveScanHoldUntil = 0;
@@ -702,24 +713,42 @@ bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len) {
   return esp_now_send(broadcastAddress, data, len) == ESP_OK;
 }
 
-void sendStationTheme(uint8_t stationId) {
-  HostConfigPacket cfg = {};
+static void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId) {
   cfg.magic = ESPNOW_PROTO_MAGIC;
   cfg.version = ESPNOW_PROTO_VER;
   cfg.msgType = MSG_CONFIG;
   cfg.stationId = stationId;
   cfg.darkMode = isTftDarkMode ? 1 : 0;
+  cfg.screenOn = isHostScreenOn ? 1 : 0;
+  cfg.screensaver = isScreensaverActive ? 1 : 0;
+  cfg.modeSeq = hostModeSeq;
+}
+
+void sendStationConfig(uint8_t stationId) {
+  HostConfigPacket cfg = {};
+  fillStationConfig(cfg, stationId);
   sendToStation(stationId, (uint8_t *)&cfg, sizeof(cfg));
 }
 
-void broadcastStationTheme() {
+void broadcastStationConfig() {
   HostConfigPacket cfg = {};
-  cfg.magic = ESPNOW_PROTO_MAGIC;
-  cfg.version = ESPNOW_PROTO_VER;
-  cfg.msgType = MSG_CONFIG;
-  cfg.stationId = 0;
-  cfg.darkMode = isTftDarkMode ? 1 : 0;
+  fillStationConfig(cfg, 0);
   esp_now_send(broadcastAddress, (uint8_t *)&cfg, sizeof(cfg));
+}
+
+void setHostScreenPower(bool on) {
+  isHostScreenOn = on;
+  digitalWrite(TFT_BLK, on ? HIGH : LOW);
+}
+
+// เรียกทุกครั้งที่โหมดการแสดงผลของแม่ข่ายเปลี่ยน เพื่อให้สถานีเปลี่ยนตามทันที
+// ส่งสามครั้งห่างกันเล็กน้อยเพราะ ESP-NOW แบบ broadcast ไม่มีการยืนยันการรับ
+void announceHostMode() {
+  hostModeSeq++;
+  for (int i = 0; i < 3; i++) {
+    broadcastStationConfig();
+    delay(8);
+  }
 }
 
 int calculateSignalQuality(int rssi) {
@@ -1432,6 +1461,16 @@ void handleHostButton() {
     unsigned long pressDuration = millis() - btnPressStartTime;
     btnWasPressed = false; lastActivity = millis();
     
+    // จอดับอยู่: กดปุ่มใดก็ตามคือสั่งเปิดจอ และสั่งให้สถานีเปิดตาม
+    if (!isHostScreenOn) {
+      setHostScreenPower(true);
+      soundHomeBeep();
+      announceHostMode();
+      renderHostPage(true);
+      clickCount = 0;
+      return;
+    }
+
     if (isLiveScanDisplaying) {
       isLiveScanDisplaying = false;
       renderHostPage(true);
@@ -1439,11 +1478,13 @@ void handleHostButton() {
     }
 
     if (isScreensaverActive || isCreditActive) {
-      isScreensaverActive = false; 
+      bool wasSaver = isScreensaverActive;
+      isScreensaverActive = false;
       isCreditActive = false;
-      currentHostPage = 0; 
-      soundHomeBeep(); 
-      renderHostPage(true); 
+      currentHostPage = 0;
+      soundHomeBeep();
+      renderHostPage(true);
+      if (wasSaver) announceHostMode();
       clickCount = 0;
       return;
     }
@@ -1453,6 +1494,14 @@ void handleHostButton() {
       isScreensaverActive = false;
       soundCreditJingle(); 
       renderDeveloperCredit(); 
+      clickCount = 0;
+    }
+    else if (pressDuration >= 1500) {
+      // กดค้าง 1.5 วินาที = ปิดไฟหน้าจอ และสั่งให้ทุกสถานีดับจอตาม
+      soundBeep();
+      setHostScreenPower(false);
+      ledOff();
+      announceHostMode();
       clickCount = 0;
     }
     else if (pressDuration >= 30) {
@@ -1471,6 +1520,7 @@ void handleHostButton() {
       isScreensaverActive = true;
       soundScreensaverBeep();
       renderScreensaver(true);
+      announceHostMode();
     }
     else if (clickCount >= 3) {
       isTftDarkMode = !isTftDarkMode;
@@ -1478,9 +1528,8 @@ void handleHostButton() {
       preferences.putBool("tft_dark", isTftDarkMode);
       preferences.end();
       soundThemeSwitch();
-      for (int i = 0; i < 4; i++) stationThemeSent[i] = true;
-      broadcastStationTheme();
       renderHostPage(true);
+      announceHostMode();
     }
     clickCount = 0;
   }
@@ -1516,13 +1565,12 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
       }
     }
 
-    if (!stationNodes[stId - 1].isOnline) stationThemeSent[stId - 1] = false;
     stationNodes[stId - 1].isOnline = true;
     stationNodes[stId - 1].rssi = currentRssi;
     stationNodes[stId - 1].systemVoltage = pkt.systemVoltage;
     stationNodes[stId - 1].lastSeen = millis();
     bool macChanged = (memcmp(stationNodes[stId - 1].mac, mac, 6) != 0);
-    if (macChanged) { stationPeerReady[stId - 1] = false; stationThemeSent[stId - 1] = false; }
+    if (macChanged) stationPeerReady[stId - 1] = false;
     memcpy(stationNodes[stId - 1].mac, mac, 6);
   }
 
@@ -1543,8 +1591,10 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
 void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   lastActivity = millis();
   bool wasScreensaver = isScreensaverActive;
+  bool wasScreenOff = !isHostScreenOn;
   isScreensaverActive = false;
   isCreditActive = false;
+  if (wasScreenOff) setHostScreenPower(true);
 
   String uid = String(pkt.uid);
   uid.trim();
@@ -1561,6 +1611,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
                   (uint8_t *)&lastScanResponse[pkt.stationId - 1],
                   sizeof(HostResponsePacket));
     if (wasScreensaver) renderHostPage(true);
+    if (wasScreensaver || wasScreenOff) announceHostMode();
     return;
   }
 
@@ -1588,6 +1639,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     }
     sendToStation(pkt.stationId, (uint8_t *)&resp, sizeof(HostResponsePacket));
     displayHostLiveScan(lastScannedUID, "-", lastScannedStatus, pkt.stationId);
+    if (wasScreensaver || wasScreenOff) announceHostMode();
     return;
   }
 
@@ -1659,6 +1711,8 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   }
   sendToStation(pkt.stationId, (uint8_t *)&resp, sizeof(HostResponsePacket));
   displayHostLiveScan(lastScannedUID, lastScannedStudentId, lastScannedStatus, pkt.stationId);
+  // มีคนมาใช้บริการแล้ว ปลุกทุกสถานีออกจากโหมดพักหน้าจอพร้อมกัน
+  if (wasScreensaver || wasScreenOff) announceHostMode();
 
   if (found && matchedStudent && strcmp(resp.status, "SUCCESS") == 0) {
     String claimType = matchedStudent->isTempCard ? "Temp Card" : "Normal";
@@ -2482,7 +2536,7 @@ void setup() {
   esp_now_add_peer(&peerInfo);
 
   delay(50);
-  broadcastStationTheme();
+  broadcastStationConfig();
 
   MDNS.begin(mdns_hostname);
   MDNS.addService("http", "tcp", 80);
@@ -2677,6 +2731,7 @@ void setup() {
 
   lastActivity = millis();
   renderHostPage(true);
+  broadcastStationConfig();
 }
 
 // ============================================================================
@@ -2706,12 +2761,9 @@ void loop() {
       strncpy(ack.claimTime, getRealTimeStr().c_str(), sizeof(ack.claimTime) - 1);
       ack.servedCount = getStationServedCount(i + 1);
       sendToStation(i + 1, (uint8_t *)&ack, sizeof(HostResponsePacket));
-      // ส่งธีมครั้งเดียวตอนสถานีเพิ่งออนไลน์ ถ้าส่งทุก heartbeat จะไปทับ
-      // การสลับธีมที่ผู้ใช้กดเองที่หน้าเครื่องสถานีภายในไม่กี่วินาที
-      if (!stationThemeSent[i]) {
-        sendStationTheme(i + 1);
-        stationThemeSent[i] = true;
-      }
+      // ย้ำโหมดการแสดงผลทุกครั้งที่ตอบ heartbeat เพื่อให้สถานีที่เพิ่งบูต
+      // หรือที่พลาดคำสั่ง broadcast ไป กลับมาตรงกับแม่ข่ายภายในไม่กี่วินาที
+      sendStationConfig(i + 1);
     }
   }
 
@@ -2720,12 +2772,14 @@ void loop() {
     renderHostPage(true);
   }
 
-  if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && (millis() - lastActivity >= TIMEOUT_SCREENSAVER)) {
-    isScreensaverActive = true; 
+  if (isHostScreenOn && !isLiveScanDisplaying && !isScreensaverActive && !isCreditActive &&
+      (millis() - lastActivity >= TIMEOUT_SCREENSAVER)) {
+    isScreensaverActive = true;
     renderScreensaver(true);
+    announceHostMode();
   }
 
-  if (!isLiveScanDisplaying && (isScreensaverActive || currentHostPage == 0 || currentHostPage == 1) && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
+  if (isHostScreenOn && !isLiveScanDisplaying && (isScreensaverActive || currentHostPage == 0 || currentHostPage == 1) && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
     lastClockRefresh = millis();
     if (isScreensaverActive) renderScreensaver(false);
     else renderHostPage(false);
@@ -2736,10 +2790,9 @@ void loop() {
     for (int i = 0; i < 4; i++) {
       if (stationNodes[i].isOnline && (millis() - stationNodes[i].lastSeen > STATION_OFFLINE_TIMEOUT)) {
         stationNodes[i].isOnline = false;
-        stationThemeSent[i] = false;
       }
     }
-    if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
+    if (isHostScreenOn && !isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
       renderHostPage(false);
     }
   }
