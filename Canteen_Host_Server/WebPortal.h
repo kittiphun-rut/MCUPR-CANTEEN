@@ -666,6 +666,27 @@ String getHTML() {
             <button type="submit" class="btn btn-indigo" style="width: 100%;">💾 บันทึกกำหนดเวลา</button>
           </form>
         </div>
+
+        <div class="col-span-12 bento-card">
+          <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;" data-th="📺 หน้าจอสาธารณะสำหรับมอนิเตอร์จอใหญ่" data-en="📺 Public Display Screen">📺 หน้าจอสาธารณะสำหรับมอนิเตอร์จอใหญ่</h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+            หน้า <code>/display</code> ออกแบบไว้ต่อกับมอนิเตอร์จอใหญ่ให้นิสิตและร้านค้าดูยอดการใช้บริการแบบเรียลไทม์
+            เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ จึงไม่กินช่องผู้ใช้งานของเจ้าหน้าที่
+            หน้านี้ <b>ไม่แสดงชื่อนิสิต ไม่แสดงเลขบัตร และไม่มีปุ่มสั่งงานใด ๆ</b>
+            รหัสนิสิตในรายการล่าสุดถูกปิดบังเหลือห้าหลักแรก และแสดงเฉพาะรายการที่ตัดสิทธิ์สำเร็จเท่านั้น
+          </p>
+          <form method="POST" action="/api/settings/display" data-ajax="1" style="display:flex; gap:1rem; align-items:flex-end; flex-wrap:wrap;">
+            <div style="flex:1; min-width:16rem;">
+              <label style="font-size: 0.85rem; font-weight: 700;">สถานะหน้าจอสาธารณะ:</label>
+              <select name="enabled" class="form-input" style="margin-bottom:0;">
+                <option value="1" )rawliteral" + String(publicDisplayEnabled ? "selected" : "") + R"rawliteral(>เปิดใช้งาน (ทุกคนในเครือข่ายเปิดดูได้)</option>
+                <option value="0" )rawliteral" + String(!publicDisplayEnabled ? "selected" : "") + R"rawliteral(>ปิดใช้งาน (ต้องเข้าสู่ระบบก่อนจึงจะเปิดได้)</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-indigo">💾 บันทึก</button>
+            <a href="/display" target="_blank" rel="noopener" class="btn btn-emerald">📺 เปิดหน้าจอสาธารณะ</a>
+          </form>
+        </div>
       </div>
     </div>
 
@@ -1430,4 +1451,267 @@ String getHTML() {
 </body>
 </html>)rawliteral";
   return html;
+}
+
+// ============================================================================
+// PUBLIC DISPLAY — หน้าจอสาธารณะสำหรับต่อออกมอนิเตอร์จอใหญ่
+// เปิดได้โดยไม่ต้องเข้าสู่ระบบ จึงต้องไม่มีข้อมูลส่วนบุคคลและไม่มีปุ่มสั่งงานใด ๆ
+// ใช้ฟอนต์ของระบบล้วน ๆ เพราะเครือข่ายของเครื่องแม่ข่ายไม่มีทางออกอินเทอร์เน็ต
+// ที่จะโหลดเว็บฟอนต์ได้
+// ============================================================================
+String getDisplayHTML() {
+  return String(R"rawliteral(<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>โรงอาหาร มจร. แพร่ - สถานะการให้บริการ</title>
+<style>
+  :root{
+    --bg:#070b12; --panel:#111a28; --panel-2:#16202f; --line:#243147;
+    --ink:#f4f8ff; --dim:#8fa3c0;
+    --green:#3ddc97; --cyan:#38d6f0; --amber:#ffc53d; --rose:#ff6b81;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--ink); overflow:hidden;
+    font-family:"Noto Sans Thai","IBM Plex Sans Thai",system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;
+    display:flex; flex-direction:column; height:100dvh;
+  }
+  body.idle{cursor:none}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:2vmin;
+    padding:1.6vmin 2.4vmin; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0d1522,#070b12);
+  }
+  .brand{display:flex;align-items:center;gap:1.4vmin;min-width:0}
+  .brand-mark{
+    width:clamp(34px,4.6vmin,64px); height:clamp(34px,4.6vmin,64px); border-radius:28%;
+    background:linear-gradient(135deg,var(--green),var(--cyan)); color:#062018;
+    display:grid; place-items:center; font-weight:800; font-size:clamp(14px,2.1vmin,28px); flex:0 0 auto;
+  }
+  .brand-txt h1{font-size:clamp(15px,2.3vmin,32px);font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+  .brand-txt p{font-size:clamp(11px,1.5vmin,19px);color:var(--dim);white-space:nowrap}
+  .head-right{display:flex;align-items:center;gap:1.8vmin;flex:0 0 auto}
+  .svc{
+    font-size:clamp(11px,1.6vmin,21px); font-weight:700; padding:.7vmin 1.6vmin; border-radius:999px;
+    border:1px solid transparent; white-space:nowrap;
+  }
+  .svc.open{color:var(--green);background:rgba(61,220,151,.14);border-color:rgba(61,220,151,.4)}
+  .svc.shut{color:var(--rose);background:rgba(255,107,129,.14);border-color:rgba(255,107,129,.4)}
+  #clock{font-size:clamp(26px,5.4vmin,76px);font-weight:700;letter-spacing:-.02em;line-height:1}
+  #today{font-size:clamp(10px,1.4vmin,18px);color:var(--dim);text-align:right}
+
+  /* ---------- main ---------- */
+  main{flex:1;display:grid;grid-template-columns:1fr;gap:1.6vmin;padding:1.6vmin 2.4vmin;min-height:0}
+  @media (min-width:900px){ main{grid-template-columns:5fr 4fr} }
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:2vmin;padding:2vmin 2.4vmin;min-height:0;display:flex;flex-direction:column}
+  .panel h2{font-size:clamp(12px,1.7vmin,22px);font-weight:700;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:1vmin}
+
+  .big{display:flex;align-items:baseline;gap:1.2vmin;flex-wrap:wrap}
+  #used{font-size:clamp(56px,15vmin,220px);font-weight:800;color:var(--green);line-height:.92;letter-spacing:-.03em}
+  .of{font-size:clamp(16px,2.6vmin,38px);color:var(--dim);font-weight:600}
+  .bar{height:clamp(10px,1.6vmin,22px);background:var(--panel-2);border-radius:999px;overflow:hidden;margin:1.8vmin 0 1.2vmin}
+  #barFill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--green),var(--cyan));transition:width .6s ease}
+  .mid{margin:auto 0;text-align:center;padding:1vmin 0}
+  .mid-k{font-size:clamp(11px,1.6vmin,21px);color:var(--dim);letter-spacing:.04em}
+  .mid-v{font-size:clamp(30px,7.4vmin,116px);font-weight:800;color:var(--amber);line-height:1.05;letter-spacing:-.02em}
+  .row2{display:flex;justify-content:space-between;gap:2vmin;flex-wrap:wrap;padding-top:1.4vmin;border-top:1px solid var(--line)}
+  .stat .k{font-size:clamp(10px,1.4vmin,18px);color:var(--dim)}
+  .stat .v{font-size:clamp(20px,3.4vmin,48px);font-weight:800;line-height:1.1}
+  .v-amber{color:var(--amber)}
+
+  /* ---------- feed ---------- */
+  .feed-head{display:flex;align-items:center;justify-content:space-between;gap:1vmin}
+  .live{display:inline-flex;align-items:center;gap:.7vmin;font-size:clamp(10px,1.4vmin,18px);color:var(--green);font-weight:700}
+  .live i{width:.9vmin;height:.9vmin;min-width:6px;min-height:6px;border-radius:50%;background:var(--green);animation:blip 1.6s infinite}
+  @keyframes blip{0%,100%{opacity:1}50%{opacity:.2}}
+  #feed{list-style:none;flex:1;overflow:hidden;display:flex;flex-direction:column;gap:.9vmin;margin-top:1vmin}
+  #feed li{
+    display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:1.4vmin;
+    background:var(--panel-2);border:1px solid var(--line);border-left:.5vmin solid var(--green);
+    border-radius:1.2vmin;padding:1vmin 1.6vmin;
+  }
+  #feed li.fresh{animation:pop .9s ease-out}
+  @keyframes pop{0%{background:rgba(61,220,151,.3);transform:translateY(-.8vmin)}100%{background:var(--panel-2);transform:none}}
+  .f-time{font-size:clamp(12px,1.9vmin,26px);color:var(--dim)}
+  .f-id{font-size:clamp(18px,3.1vmin,44px);font-weight:700;letter-spacing:.06em}
+  .f-shop{font-size:clamp(11px,1.7vmin,23px);color:var(--cyan);font-weight:600;text-align:right;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .empty{color:var(--dim);font-size:clamp(13px,2vmin,26px);text-align:center;margin:auto;padding:2vmin}
+
+  /* ---------- shops ---------- */
+  .shops{display:grid;grid-template-columns:repeat(2,1fr);gap:1.4vmin;padding:0 2.4vmin 2vmin}
+  @media (min-width:900px){ .shops{grid-template-columns:repeat(4,1fr)} }
+  .shop{background:var(--panel);border:1px solid var(--line);border-radius:1.6vmin;padding:1.4vmin 1.8vmin;min-width:0}
+  .shop.off{border-color:rgba(255,107,129,.35)}
+  .shop-top{display:flex;align-items:center;gap:.8vmin;min-width:0}
+  .dot{width:1vmin;height:1vmin;min-width:7px;min-height:7px;border-radius:50%;background:var(--green);flex:0 0 auto}
+  .shop.off .dot{background:var(--rose)}
+  .shop-name{font-size:clamp(11px,1.7vmin,23px);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .shop-nums{display:flex;align-items:baseline;gap:1vmin;margin-top:.6vmin;flex-wrap:wrap}
+  .shop-cnt{font-size:clamp(22px,4vmin,58px);font-weight:800;color:var(--green);line-height:1}
+  .shop-unit{font-size:clamp(10px,1.4vmin,18px);color:var(--dim)}
+  .shop-amt{font-size:clamp(12px,1.8vmin,24px);color:var(--amber);font-weight:700;margin-left:auto}
+
+  /* ---------- connection banner ---------- */
+  #warn{
+    flex:0 0 auto; display:none; text-align:center;
+    background:#4a121f; border-top:2px solid var(--rose); color:#ffd7dd;
+    padding:1.1vmin 2.4vmin; font-size:clamp(12px,1.8vmin,24px); font-weight:700;
+  }
+  #warn.on{display:block}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">มจร</div>
+    <div class="brand-txt">
+      <h1>โรงอาหารนิสิต มจร. วิทยาเขตแพร่</h1>
+      <p>สวัสดิการอาหารกลางวัน 35 บาท / คน / วัน</p>
+    </div>
+  </div>
+  <div class="head-right">
+    <span class="svc" id="svc">—</span>
+    <div>
+      <div id="clock" class="mono">--:--:--</div>
+      <div id="today">—</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>ใช้สิทธิ์แล้ววันนี้</h2>
+    <div class="big">
+      <span id="used" class="mono">0</span>
+      <span class="of">/ <span id="total" class="mono">0</span> คน</span>
+    </div>
+    <div class="bar"><div id="barFill"></div></div>
+    <div class="mid">
+      <div class="mid-k">ยอดจัดสรรสวัสดิการวันนี้</div>
+      <div class="mid-v mono" id="amount">0 บาท</div>
+    </div>
+    <div class="row2">
+      <div class="stat"><div class="k">คงเหลือสิทธิ์</div><div class="v mono" id="remain">0</div></div>
+      <div class="stat" style="text-align:right"><div class="k">คิดเป็นสัดส่วนผู้มีสิทธิ์</div><div class="v mono" id="pct">0%</div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="feed-head">
+      <h2 style="margin:0">รายการล่าสุด</h2>
+      <span class="live"><i></i> อัปเดตอัตโนมัติ</span>
+    </div>
+    <ul id="feed"><li class="empty">กำลังเชื่อมต่อกับเครื่องแม่ข่าย...</li></ul>
+  </section>
+</main>
+
+<div class="shops" id="shops"></div>
+<div id="warn">⚠️ ขาดการเชื่อมต่อกับเครื่องแม่ข่าย — ตัวเลขที่เห็นอาจไม่ใช่ข้อมูลล่าสุด กำลังลองเชื่อมต่อใหม่...</div>
+
+<script>
+var seen = {};
+var first = true;
+var fails = 0;
+
+function el(tag, cls, txt){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt !== undefined) e.textContent = txt;
+  return e;
+}
+function nf(n){ return Number(n).toLocaleString('th-TH'); }
+
+function renderShops(shops){
+  var wrap = document.getElementById('shops');
+  wrap.innerHTML = '';
+  shops.forEach(function(s){
+    var card = el('div', 'shop' + (s.online ? '' : ' off'));
+    var top = el('div', 'shop-top');
+    top.appendChild(el('span', 'dot'));
+    top.appendChild(el('span', 'shop-name', s.name));
+    var nums = el('div', 'shop-nums');
+    nums.appendChild(el('span', 'shop-cnt mono', nf(s.count)));
+    nums.appendChild(el('span', 'shop-unit', 'จาน'));
+    nums.appendChild(el('span', 'shop-amt mono', nf(s.amount) + ' บาท'));
+    card.appendChild(top);
+    card.appendChild(nums);
+    wrap.appendChild(card);
+  });
+}
+
+function renderFeed(events, shops){
+  var list = document.getElementById('feed');
+  list.innerHTML = '';
+  if (!events.length){
+    var e = el('li', 'empty', 'ยังไม่มีการใช้สิทธิ์ในวันนี้');
+    list.appendChild(e);
+    return;
+  }
+  var fresh = {};
+  events.forEach(function(ev){
+    var key = ev.time + '|' + ev.id + '|' + ev.station;
+    var li = el('li');
+    li.appendChild(el('span', 'f-time mono', ev.time));
+    li.appendChild(el('span', 'f-id mono', ev.id));
+    var shop = shops[ev.station - 1];
+    li.appendChild(el('span', 'f-shop', shop ? shop.name : ('จุดบริการ ' + ev.station)));
+    if (!first && !seen[key]) li.classList.add('fresh');
+    fresh[key] = true;
+    list.appendChild(li);
+  });
+  seen = fresh;
+  first = false;
+}
+
+function tick(){
+  fetch('/api/display', { cache: 'no-store' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) throw new Error('disabled');
+      fails = 0;
+      document.getElementById('warn').classList.remove('on');
+
+      document.getElementById('clock').textContent  = d.clock;
+      document.getElementById('today').textContent  = d.date;
+      document.getElementById('used').textContent   = nf(d.used);
+      document.getElementById('total').textContent  = nf(d.total);
+      document.getElementById('remain').textContent = nf(d.remaining);
+      document.getElementById('amount').textContent = nf(d.disbursed) + ' บาท';
+      document.getElementById('pct').textContent     = d.quotaPct + '%';
+      document.getElementById('barFill').style.width = d.quotaPct + '%';
+
+      var svc = document.getElementById('svc');
+      svc.textContent = (d.serviceOpen ? '● เปิดให้บริการ ' : '● นอกเวลาให้บริการ ') + d.window;
+      svc.className = 'svc ' + (d.serviceOpen ? 'open' : 'shut');
+
+      renderShops(d.shops);
+      renderFeed(d.events, d.shops);
+    })
+    .catch(function(){
+      if (++fails >= 2) document.getElementById('warn').classList.add('on');
+    });
+}
+
+tick();
+setInterval(tick, 2000);
+
+/* ซ่อนเคอร์เซอร์เมื่อไม่มีการขยับเมาส์ เพื่อให้จอดูสะอาดตา */
+var idleTimer = null;
+function wake(){
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(function(){ document.body.classList.add('idle'); }, 4000);
+}
+['mousemove','touchstart','keydown'].forEach(function(evt){ document.addEventListener(evt, wake); });
+wake();
+</script>
+</body>
+</html>)rawliteral");
 }

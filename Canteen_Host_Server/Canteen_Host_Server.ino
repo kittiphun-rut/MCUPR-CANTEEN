@@ -112,6 +112,8 @@ uint8_t broadcastAddress[]   = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 const uint8_t ESPNOW_CHANNEL = 1;
 
 bool timeWindowEnabled = true;
+// หน้าจอสาธารณะ /display สำหรับต่อออกมอนิเตอร์จอใหญ่ให้นิสิตและร้านค้าดู
+bool publicDisplayEnabled = true;
 int serviceStartHour   = 10;
 int serviceStartMin    = 0;
 int serviceEndHour     = 13;
@@ -241,6 +243,10 @@ int parseCsvLine(const String &line, String *out, int maxFields);
 uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize);
 void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg);
 void handleDashboardAPI();
+void handleDisplayAPI();
+String getDisplayHTML();
+String maskStudentId(const String &id);
+void pushDisplayEvent(const String &studentId, uint8_t station);
 void handleManualClaim();
 void handleDailyReset();
 void handleSaveShops();
@@ -325,6 +331,18 @@ int loginFailCount           = 0;
 unsigned long loginLockUntil = 0;
 const int LOGIN_MAX_FAILS         = 5;
 const unsigned long LOGIN_LOCK_MS = 60000;
+
+// คิววนของรายการที่ตัดสิทธิ์สำเร็จ ใช้แสดงบนหน้าจอสาธารณะเท่านั้น
+// เก็บเฉพาะรหัสนิสิตที่ปิดบังแล้ว เวลา และหมายเลขจุดบริการ — ไม่มีชื่อและไม่มีเลขบัตร
+#define DISPLAY_FEED_SIZE 12
+struct DisplayEvent {
+  char maskedId[20];
+  char timeStr[12];
+  uint8_t station;
+};
+DisplayEvent displayFeed[DISPLAY_FEED_SIZE] = {};
+uint8_t displayFeedCount = 0;
+uint8_t displayFeedHead  = 0;
 
 int currentHostPage         = 0;
 const int TOTAL_PAGES       = 3;
@@ -581,6 +599,28 @@ void drawBentoBottomBar(String instruction) {
 String maskUID(String uid) {
   if (uid.length() < 4 || uid == "-") return uid;
   return uid.substring(0, uid.length() - 4) + "****";
+}
+
+// ปิดบังรหัสนิสิตสำหรับจอสาธารณะ: เหลือห้าหลักแรกพอให้เจ้าตัวจำได้ว่าเป็นของตน
+String maskStudentId(const String &id) {
+  if (id.length() == 0 || id == "-") return "-";
+  if (id.length() <= 5) return id;
+  String out = id.substring(0, 5);
+  for (size_t i = 5; i < id.length(); i++) out += '*';
+  return out;
+}
+
+void pushDisplayEvent(const String &studentId, uint8_t station) {
+  DisplayEvent &e = displayFeed[displayFeedHead];
+  String masked = maskStudentId(studentId);
+  strncpy(e.maskedId, masked.c_str(), sizeof(e.maskedId) - 1);
+  e.maskedId[sizeof(e.maskedId) - 1] = '\0';
+  String t = getTimeOnlyStr();
+  strncpy(e.timeStr, t.c_str(), sizeof(e.timeStr) - 1);
+  e.timeStr[sizeof(e.timeStr) - 1] = '\0';
+  e.station = station;
+  displayFeedHead = (displayFeedHead + 1) % DISPLAY_FEED_SIZE;
+  if (displayFeedCount < DISPLAY_FEED_SIZE) displayFeedCount++;
 }
 
 uint16_t getStationServedCount(uint8_t stationId) {
@@ -1623,6 +1663,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   if (found && matchedStudent && strcmp(resp.status, "SUCCESS") == 0) {
     String claimType = matchedStudent->isTempCard ? "Temp Card" : "Normal";
     appendLogToFS(matchedStudent->studentId, matchedStudent->fullName, matchedStudent->uid, matchedStudent->refNo, matchedStudent->claimTime, pkt.stationId, claimType);
+    pushDisplayEvent(matchedStudent->studentId, pkt.stationId);
     
     if (matchedStudent->isTempCard) {
       if (matchedStudent->originalUid != "") {
@@ -1714,6 +1755,66 @@ void handleDashboardAPI() {
   server.send(200, "application/json; charset=utf-8", j);
 }
 
+// ---------------------------------------------------------------------------
+// ข้อมูลสำหรับจอสาธารณะ — เปิดได้โดยไม่ต้องเข้าสู่ระบบ จึงส่งเฉพาะข้อมูลที่
+// เปิดเผยได้: ยอดรวม สถานะร้าน และรายการที่ปิดบังรหัสนิสิตแล้ว
+// ไม่มีชื่อนิสิต ไม่มีเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์แม่ข่าย
+// ---------------------------------------------------------------------------
+void handleDisplayAPI() {
+  if (!publicDisplayEnabled) {
+    server.send(403, "application/json; charset=utf-8", "{\"ok\":false,\"msg\":\"DISPLAY_DISABLED\"}");
+    return;
+  }
+
+  int usedCount = 0;
+  int shopCounts[4] = {0, 0, 0, 0};
+  for (const auto& st : db) {
+    if (st.claimed) {
+      usedCount++;
+      if (st.station >= 1 && st.station <= 4) shopCounts[st.station - 1]++;
+    }
+  }
+  int total = (int)db.size();
+  int quotaPct = (total > 0) ? (usedCount * 100) / total : 0;
+
+  char win[16];
+  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d", serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+
+  String j = "{\"ok\":true";
+  j += ",\"clock\":\"" + jsonEscape(getTimeOnlyStr()) + "\"";
+  j += ",\"date\":\"" + jsonEscape(getDateFormattedStr()) + "\"";
+  j += ",\"serviceOpen\":" + String(isWithinServiceTime() ? "true" : "false");
+  j += ",\"window\":\"" + String(win) + "\"";
+  j += ",\"used\":" + String(usedCount);
+  j += ",\"total\":" + String(total);
+  j += ",\"remaining\":" + String(total - usedCount);
+  j += ",\"disbursed\":" + String(usedCount * 35);
+  j += ",\"quotaPct\":" + String(quotaPct);
+
+  j += ",\"shops\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
+    j += ",\"count\":" + String(shopCounts[i]);
+    j += ",\"amount\":" + String(shopCounts[i] * 35);
+    j += ",\"online\":" + String(stationNodes[i].isOnline ? "true" : "false") + "}";
+  }
+  j += "]";
+
+  // เรียงจากรายการใหม่สุดไปเก่าสุด
+  j += ",\"events\":[";
+  for (int i = 0; i < displayFeedCount; i++) {
+    int idx = (displayFeedHead - 1 - i + DISPLAY_FEED_SIZE * 2) % DISPLAY_FEED_SIZE;
+    if (i) j += ",";
+    j += "{\"id\":\"" + jsonEscape(String(displayFeed[idx].maskedId)) + "\"";
+    j += ",\"time\":\"" + jsonEscape(String(displayFeed[idx].timeStr)) + "\"";
+    j += ",\"station\":" + String(displayFeed[idx].station) + "}";
+  }
+  j += "]}";
+
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
 void handleManualClaim() {
   if (!requireAuth()) return;
   String id = server.arg("id"); id.trim();
@@ -1729,6 +1830,7 @@ void handleManualClaim() {
       lastScannedStation = station; lastScannedStatus = "APPROVED";
       lastScannedRefNo = st.refNo;
       appendLogToFS(st.studentId, st.fullName, st.uid, st.refNo, st.claimTime, station, st.isTempCard ? "Temp Card" : "Normal");
+      pushDisplayEvent(st.studentId, (uint8_t)station);
 
       if (st.isTempCard) {
         st.uid = st.originalUid;
@@ -1772,6 +1874,8 @@ void handleDailyReset() {
     st.claimed = false; st.claimTime = "-"; st.refNo = "-"; st.station = 0; st.isTempCard = false;
   }
   saveDatabaseToFS();
+  displayFeedCount = 0;
+  displayFeedHead = 0;
   lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedRefNo = "-";
   lastScannedStation = 0; lastScannedStatus = "RESET";
   renderHostPage(true);
@@ -2354,10 +2458,12 @@ void setup() {
   serviceEndHour    = preferences.getInt("end_h", 13);
   serviceEndMin     = preferences.getInt("end_m", 30);
   isTftDarkMode     = preferences.getBool("tft_dark", true);
+  publicDisplayEnabled = preferences.getBool("pub_disp", true);
   preferences.end();
 
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 4);
+  // เดิมรับได้ 4 เครื่อง ซึ่งจอสาธารณะจะกินไปหนึ่งช่อง เหลือให้เจ้าหน้าที่แค่สาม
+  WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 8);
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
   esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
@@ -2482,6 +2588,13 @@ void setup() {
   server.on("/export.csv", HTTP_GET, handleExportCSV);
   server.on("/api/archive/download", HTTP_GET, handleDownloadArchive);
   server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);
+
+  // จอสาธารณะ: เปิดได้โดยไม่ต้องเข้าสู่ระบบ จึงไม่กินช่อง session ของเจ้าหน้าที่
+  server.on("/display", HTTP_GET, []() {
+    if (!publicDisplayEnabled) { redirectToLogin(); return; }
+    server.send(200, "text/html; charset=utf-8", getDisplayHTML());
+  });
+  server.on("/api/display", HTTP_GET, handleDisplayAPI);
   server.on("/api/system/health", HTTP_GET, handleDashboardAPI);
 
   server.on("/api/rtc/set", HTTP_POST, handleSetRTCTime);
@@ -2495,6 +2608,17 @@ void setup() {
   server.on("/api/shops/save", HTTP_POST, handleSaveShops);
   server.on("/api/claim/manual", HTTP_POST, handleManualClaim);
   server.on("/api/system/reset", HTTP_POST, handleDailyReset);
+
+  server.on("/api/settings/display", HTTP_POST, []() {
+    if (!requireAuth()) return;
+    publicDisplayEnabled = (server.arg("enabled") == "1");
+    preferences.begin("sys_cfg", false);
+    preferences.putBool("pub_disp", publicDisplayEnabled);
+    preferences.end();
+    sendJson(true, publicDisplayEnabled
+                     ? "เปิดหน้าจอสาธารณะแล้ว เปิดดูได้ที่ /display"
+                     : "ปิดหน้าจอสาธารณะแล้ว ผู้ที่ไม่ได้เข้าสู่ระบบจะเปิดหน้านี้ไม่ได้");
+  });
 
   server.on("/api/settings/time", HTTP_POST, []() {
     if (!requireAuth()) return;

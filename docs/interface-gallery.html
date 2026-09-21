@@ -111,6 +111,7 @@
   .t-host{color:var(--cyan); background:color-mix(in srgb,var(--cyan) 15%, transparent)}
   .t-stn{color:var(--amber); background:color-mix(in srgb,var(--amber) 16%, transparent)}
   .t-web{color:var(--indigo); background:color-mix(in srgb,var(--indigo) 18%, transparent)}
+  .t-disp{color:var(--green); background:color-mix(in srgb,var(--green) 16%, transparent)}
   .cap-note{color:var(--ink-dim); font-size:.84rem; margin-top:5px}
 
   .callout{
@@ -172,7 +173,7 @@
       <span class="chip">ESP32-S3 <b>N16R8</b></span>
       <span class="chip">ST7789V <b>320×240</b></span>
       <span class="chip">ESP-NOW <b>CH 1</b></span>
-      <span class="chip">ภาพทั้งหมด <b id="total">31</b> ภาพ</span>
+      <span class="chip">ภาพทั้งหมด <b id="total">34</b> ภาพ</span>
       <button class="zip-btn dl-only" id="zipBtn">⬇︎ บันทึกทุกภาพเป็น .zip</button>
     </div>
   </div>
@@ -181,6 +182,7 @@
 <nav>
   <div class="navrow">
     <a href="#web">🖥️ เว็บพอร์ทัลเจ้าหน้าที่</a>
+    <a href="#display">📺 จอสาธารณะ</a>
     <a href="#host">📟 จอเครื่องแม่ข่าย</a>
     <a href="#station">💳 จอเครื่องประจำร้านค้า</a>
   </div>
@@ -195,6 +197,16 @@
       หลังเชื่อมต่อ Wi-Fi <code>MCU_CANTEEN_HOST</code> — ข้อมูลในภาพเป็นชุดตัวอย่างสำหรับสาธิต
     </p>
     <div class="grid web" id="g-web"></div>
+  </section>
+
+  <section id="display">
+    <div class="sec-head"><h2>📺 จอสาธารณะสำหรับมอนิเตอร์จอใหญ่</h2><span class="count" id="c-disp"></span></div>
+    <p class="sec-note">
+      หน้า <code>/display</code> ออกแบบไว้ต่อกับมอนิเตอร์จอใหญ่ในโรงอาหารให้นิสิตและร้านค้าเห็นยอดการใช้บริการแบบเรียลไทม์
+      เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ และ <b>ไม่แสดงชื่อนิสิต ไม่แสดงเลขบัตร และไม่มีปุ่มสั่งงานใด ๆ</b>
+      รหัสนิสิตถูกปิดบังเหลือห้าหลักแรก และแสดงเฉพาะรายการที่ตัดสิทธิ์สำเร็จ
+    </p>
+    <div class="grid web" id="g-disp"></div>
   </section>
 
   <section id="host">
@@ -254,6 +266,11 @@ const WEB = [
   ['web-08-settings','ตั้งค่านาฬิกาและเวลาให้บริการ','ตรวจรูปแบบเวลาและบังคับให้เวลาเปิดมาก่อนเวลาปิดก่อนบันทึกลง Preferences'],
   ['web-09-mobile','มุมมองบนโทรศัพท์','เมนูยุบเป็นปุ่มแฮมเบอร์เกอร์ การ์ดเรียงเป็นคอลัมน์เดียว'],
 ];
+const DISPLAY = [
+  ['display-01-fullhd','จอสาธารณะบนมอนิเตอร์ 1920×1080','ยอดใช้สิทธิ์ ยอดจัดสรร รายการล่าสุด และสถานะร้านทั้งสี่ รีเฟรชเองทุก 2 วินาที รายการใหม่จะไฮไลต์สีเขียวชั่วครู่'],
+  ['display-02-hd','จอสาธารณะบนมอนิเตอร์ 1366×768','ขนาดตัวอักษรอิงหน่วย vmin จึงปรับตามขนาดจอเองโดยไม่ต้องตั้งค่า'],
+  ['display-03-offline','เมื่อขาดการเชื่อมต่อ','ถ้าดึงข้อมูลไม่สำเร็จสองครั้งติดกันจะขึ้นแถบเตือนท้ายจอ และยังพยายามเชื่อมต่อใหม่ต่อไปเอง'],
+];
 const HOST = [
   ['tft-host-01-overview','หน้า 1/3 — ภาพรวมโควตา','ยอดใช้สิทธิ์ แถบความคืบหน้า ยอดจัดสรรรวม อุณหภูมิแกน CPU และเวลามาตรฐานจาก DS3231'],
   ['tft-host-02-stations','หน้า 2/3 — จุดบริการ 4 จุด','แต่ละการ์ดแสดงยอดจ่าย ยอดเงิน ความแรงสัญญาณ และระดับแบตเตอรี่ของสถานีนั้น'],
@@ -301,10 +318,12 @@ function build(list, hostId, tagClass, tagText){
   document.getElementById(hostId).appendChild(frag);
 }
 build(WEB,'g-web','t-web','WEB');
+build(DISPLAY,'g-disp','t-disp','DISPLAY');
 build(HOST,'g-host','t-host','HOST');
 build(STN,'g-stn','t-stn','STATION');
 
 document.getElementById('c-web').textContent  = WEB.length + ' ภาพ';
+document.getElementById('c-disp').textContent = DISPLAY.length + ' ภาพ';
 document.getElementById('c-host').textContent = HOST.length + ' ภาพ';
 document.getElementById('c-stn').textContent  = STN.length + ' ภาพ';
 document.getElementById('total').textContent  = ALL.length;
