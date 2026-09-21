@@ -68,6 +68,13 @@ String getLoginHTML(const String &errorMsg) {
     html += "<div class='error-box'>⚠️ " + htmlEscape(errorMsg) + "</div>";
   }
 
+  if (publicDisplayEnabled) {
+    html += R"rawliteral(<div style="background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.4); border-radius: 1rem; padding: 0.85rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: #a5f3fc; text-align: left;">
+      ไม่ใช่เจ้าหน้าที่ใช่ไหม? ดูยอดการให้บริการแบบเรียลไทม์ได้ที่
+      <a href="/display" style="color:#67e8f9; font-weight:700;">หน้าสถานะโรงอาหาร</a>
+    </div>)rawliteral";
+  }
+
   html += R"rawliteral(
     <form method="POST" action="/login">
       <div class="form-group">
@@ -910,17 +917,24 @@ String getHTML() {
     /* ---------------------------------------------------------------
        ธีมและภาษา
        --------------------------------------------------------------- */
+    /* หน้าต่าง captive portal ของ iOS/Android และโหมดไม่ระบุตัวตนของเบราว์เซอร์
+       จะโยน SecurityError ทันทีที่แตะ localStorage การอ่าน-เขียนทุกจุดจึงต้องหุ้ม
+       try/catch ไว้ ไม่เช่นนั้นสคริปต์จะตายตั้งแต่บรรทัดแรกและทั้งหน้าใช้งานไม่ได้ */
+    function lsGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+    function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { } }
+
     function initTheme() {
-      var savedTheme = localStorage.getItem('canteen_theme') || 'dark';
+      var savedTheme = lsGet('canteen_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', savedTheme);
-      document.getElementById('themeBtn').innerText = (savedTheme === 'dark') ? '🌙' : '☀️';
+      var btn = document.getElementById('themeBtn');
+      if (btn) btn.innerText = (savedTheme === 'dark') ? '🌙' : '☀️';
     }
 
     function toggleTheme() {
       var curTheme = document.documentElement.getAttribute('data-theme');
       var newTheme = (curTheme === 'dark') ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', newTheme);
-      localStorage.setItem('canteen_theme', newTheme);
+      lsSet('canteen_theme', newTheme);
       document.getElementById('themeBtn').innerText = (newTheme === 'dark') ? '🌙' : '☀️';
       drawAnalyticsChart();
     }
@@ -1159,7 +1173,7 @@ String getHTML() {
       }
       var m = document.getElementById('navMenu');
       if (m) m.classList.remove('open');
-      try { localStorage.setItem('canteen_tab', tabId); } catch (e) { }
+      lsSet('canteen_tab', tabId);
       if (tabId === 'dashboard') { refreshDashboard(); }
       else if (tabId === 'students') loadStudents(curPage);
     }
@@ -1437,16 +1451,15 @@ String getHTML() {
       }
     }
 
-    initTheme();
-    bindAjaxForms();
-    bindDelegatedActions();
+    /* เรียกทีละขั้นแบบหุ้ม try/catch เพื่อไม่ให้ขั้นใดขั้นหนึ่งล้มแล้วลากส่วนที่เหลือตายไปด้วย */
+    [initTheme, bindAjaxForms, bindDelegatedActions].forEach(function (fn) {
+      try { fn(); } catch (e) { console.warn('init skipped:', e && e.message); }
+    });
     refreshDashboard();
     dashboardTimer = setInterval(refreshDashboard, 3000);
 
-    try {
-      var savedTab = localStorage.getItem('canteen_tab');
-      if (savedTab && document.getElementById('tab-' + savedTab)) switchTab(savedTab);
-    } catch (e) { }
+    var savedTab = lsGet('canteen_tab');
+    if (savedTab && document.getElementById('tab-' + savedTab)) switchTab(savedTab);
   </script>
 </body>
 </html>)rawliteral";

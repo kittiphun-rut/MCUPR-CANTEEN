@@ -267,6 +267,7 @@ void restoreDailyLogs();
 void appendLogToFS(String studentId, String fullName, String uid, String refNo, String timestamp, int station, String type);
 bool isAuthenticated();
 void redirectToLogin();
+void handleCaptivePortal();
 String generateSessionToken();
 String generateRefNo(int stationId);
 void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi);
@@ -929,6 +930,20 @@ bool isAuthenticated() {
 void redirectToLogin() {
   server.sendHeader("Location", "/login", true);
   server.send(302, "text/plain", "");
+}
+
+// ปลายทางของทุกคำขอที่ไม่ตรงเส้นทางใด รวมถึง URL ที่ระบบปฏิบัติการใช้ตรวจว่า
+// เครือข่ายนี้ออกอินเทอร์เน็ตได้หรือไม่ (generate_204, hotspot-detect.html,
+// connecttest.txt, ncsi.txt และอื่น ๆ) การตอบ 302 ทำให้เครื่องรู้ว่าติดหน้าล็อกอิน
+// แล้วเปิดหน้าต่างพอร์ทัลขึ้นมาเอง
+void handleCaptivePortal() {
+  String target = "http://" + WiFi.softAPIP().toString() + "/login";
+  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  server.sendHeader("Location", target, true);
+  server.send(302, "text/html; charset=utf-8",
+              "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+              "<meta http-equiv='refresh' content='0; url=" + target + "'></head>"
+              "<body>Redirecting to <a href='" + target + "'>" + target + "</a></body></html>");
 }
 
 void playBootAnimation() {
@@ -2523,6 +2538,10 @@ void setup() {
   esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
   esp_wifi_set_max_tx_power(68);
 
+  // ตั้งค่าที่ captive portal ต้องการ: ตอบทุกโดเมนมาที่ตัวเอง และ TTL = 0
+  // เพื่อไม่ให้โทรศัพท์จำการชี้โดเมนนี้ไว้หลังตัดการเชื่อมต่อไปแล้ว
+  dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+  dnsServer.setTTL(0);
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
   esp_now_init();
@@ -2708,9 +2727,14 @@ void setup() {
 
   server.on("/upload", HTTP_POST, mergeImportedStudents, handleFileUpload);
 
-  server.on("/generate_204", HTTP_GET, []() { server.sendHeader("Location", "/login", true); server.send(302, "text/plain", ""); });
-  server.on("/hotspot-detect.html", HTTP_GET, []() { server.sendHeader("Location", "/login", true); server.send(302, "text/plain", ""); });
-  server.onNotFound([]() { server.sendHeader("Location", "/login", true); server.send(302, "text/plain", ""); });
+  // เบราว์เซอร์ขอ favicon เองทุกครั้ง ถ้าปล่อยให้ตกไปที่ onNotFound จะกลายเป็น
+  // การโหลดหน้าล็อกอินทั้งหน้ามาเป็นไอคอน เปลืองทั้งเวลาและแรมของแม่ข่าย
+  server.on("/favicon.ico", HTTP_GET, []() { server.send(204, "image/x-icon", ""); });
+
+  // ทุก URL ที่ไม่รู้จักถูกพาไปหน้าล็อกอิน ซึ่งเป็นกลไกที่ทำให้โทรศัพท์และคอมพิวเตอร์
+  // เด้งหน้าต่าง "เข้าสู่ระบบเครือข่าย" ขึ้นมาเองเมื่อเชื่อมต่อ Wi-Fi ของแม่ข่าย
+  // ใช้ URL แบบเต็มเพราะตัวตรวจจับของบางระบบปฏิบัติการดูโฮสต์ในส่วนหัว Location
+  server.onNotFound(handleCaptivePortal);
 
   server.begin();
   playBootAnimation();
