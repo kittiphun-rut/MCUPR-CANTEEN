@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canteen Interface Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* โทนสว่างเป็นค่าเริ่มต้น แล้วสลับเป็นโทนมืดตามการตั้งค่าของเครื่องผู้ใช้ */
+  :root{
+    --bg:#f2f5f9; --surface:#ffffff; --surface-2:#f7f9fc; --line:#dde5ef;
+    --ink:#0f172a; --ink-dim:#4a5568; --ink-faint:#7b8794;
+    --green:#059669; --cyan:#0891b2; --amber:#b45309; --rose:#e11d48; --indigo:#4f46e5;
+    --shadow:0 12px 28px rgba(15,23,42,.08);
+    --radius:18px;
+    color-scheme:light dark;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0a0e16; --surface:#131a27; --surface-2:#1b2434; --line:#27324a;
+      --ink:#eef2f9; --ink-dim:#93a1bb; --ink-faint:#64748b;
+      --green:#34d399; --cyan:#22d3ee; --amber:#fbbf24; --rose:#fb7185; --indigo:#818cf8;
+      --shadow:0 18px 40px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0a0e16; --surface:#131a27; --surface-2:#1b2434; --line:#27324a;
+    --ink:#eef2f9; --ink-dim:#93a1bb; --ink-faint:#64748b;
+    --green:#34d399; --cyan:#22d3ee; --amber:#fbbf24; --rose:#fb7185; --indigo:#818cf8;
+    --shadow:0 18px 40px rgba(0,0,0,.45);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"IBM Plex Sans Thai",system-ui,-apple-system,"Segoe UI",sans-serif;
+    line-height:1.6; overflow-x:hidden;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+
+  /* ---------- header ---------- */
+  header{
+    padding:56px 0 34px; border-bottom:1px solid var(--line);
+    background:
+      radial-gradient(1100px 380px at 12% -18%, color-mix(in srgb,var(--green) 16%, transparent), transparent 70%),
+      radial-gradient(900px 340px at 88% -22%, color-mix(in srgb,var(--indigo) 14%, transparent), transparent 70%);
+  }
+  .eyebrow{
+    display:inline-block; font-size:.72rem; font-weight:700; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--green);
+    background:color-mix(in srgb,var(--green) 14%, transparent);
+    border:1px solid color-mix(in srgb,var(--green) 34%, transparent);
+    padding:5px 12px; border-radius:999px; margin-bottom:16px;
+  }
+  h1{font-size:clamp(1.65rem,4.6vw,2.6rem); font-weight:700; letter-spacing:-.02em; line-height:1.25}
+  .lede{color:var(--ink-dim); margin-top:10px; max-width:64ch; font-size:clamp(.95rem,2.4vw,1.05rem)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .chip{
+    font-family:"JetBrains Mono",ui-monospace,monospace; font-size:.74rem; font-weight:600;
+    color:var(--ink-dim); background:var(--surface); border:1px solid var(--line);
+    padding:5px 11px; border-radius:999px; white-space:nowrap;
+  }
+  .chip b{color:var(--ink)}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:sticky; top:0; z-index:20; backdrop-filter:blur(14px);
+    background:color-mix(in srgb,var(--bg) 86%, transparent);
+    border-bottom:1px solid var(--line);
+  }
+  .navrow{display:flex;gap:6px;overflow-x:auto;padding:10px 16px;max-width:1180px;margin:0 auto;scrollbar-width:none}
+  .navrow::-webkit-scrollbar{display:none}
+  .navrow a{
+    flex:0 0 auto; text-decoration:none; color:var(--ink-dim); font-size:.86rem; font-weight:600;
+    padding:7px 14px; border-radius:999px; border:1px solid transparent; white-space:nowrap;
+  }
+  .navrow a:hover{color:var(--ink); background:var(--surface-2)}
+
+  /* ---------- sections ---------- */
+  section{padding:46px 0 8px; scroll-margin-top:62px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  h2{font-size:clamp(1.15rem,3vw,1.45rem); font-weight:700; letter-spacing:-.01em}
+  .count{font-family:"JetBrains Mono",monospace;font-size:.76rem;color:var(--ink-faint)}
+  .sec-note{color:var(--ink-dim); font-size:.9rem; max-width:72ch; margin-bottom:24px}
+
+  .grid{display:grid;gap:20px}
+  .grid.web{grid-template-columns:1fr}
+  .grid.tft{grid-template-columns:1fr}
+  @media (min-width:640px){ .grid.tft{grid-template-columns:repeat(2,1fr)} }
+  @media (min-width:900px){ .grid.web{grid-template-columns:repeat(2,1fr)} .grid.tft{grid-template-columns:repeat(3,1fr)} }
+
+  figure{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    overflow:hidden; box-shadow:var(--shadow); display:flex; flex-direction:column;
+  }
+  .shot{
+    display:block; width:100%; background:var(--surface-2); border:0; padding:0; cursor:zoom-in;
+    border-bottom:1px solid var(--line); line-height:0;
+  }
+  .shot img{width:100%; height:auto; display:block}
+  .tft .shot img{image-rendering:auto}
+  figcaption{padding:14px 16px 16px}
+  .cap-title{font-weight:600; font-size:.95rem; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .tag{
+    font-family:"JetBrains Mono",monospace; font-size:.66rem; font-weight:600; padding:2px 7px;
+    border-radius:6px; letter-spacing:.02em;
+  }
+  .t-host{color:var(--cyan); background:color-mix(in srgb,var(--cyan) 15%, transparent)}
+  .t-stn{color:var(--amber); background:color-mix(in srgb,var(--amber) 16%, transparent)}
+  .t-web{color:var(--indigo); background:color-mix(in srgb,var(--indigo) 18%, transparent)}
+  .cap-note{color:var(--ink-dim); font-size:.84rem; margin-top:5px}
+
+  .callout{
+    border:1px solid var(--line); border-left:3px solid var(--amber);
+    background:var(--surface); border-radius:12px; padding:14px 16px; margin:26px 0 0;
+    font-size:.88rem; color:var(--ink-dim);
+  }
+  .callout b{color:var(--ink)}
+
+  footer{
+    margin-top:60px; padding:30px 0 50px; border-top:1px solid var(--line);
+    color:var(--ink-faint); font-size:.83rem; text-align:center;
+  }
+  footer b{color:var(--ink-dim)}
+
+  /* ---------- lightbox ---------- */
+  dialog{
+    border:0; padding:0; background:transparent; max-width:100vw; max-height:100vh;
+    width:100%; height:100%; overflow:auto;
+  }
+  dialog::backdrop{background:rgba(3,6,12,.9)}
+  .lb{min-height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; gap:12px}
+  .lb img{max-width:100%; max-height:82vh; border-radius:10px; box-shadow:0 30px 60px rgba(0,0,0,.6)}
+  .lb-bar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center}
+  .lb-cap{color:#cbd5e1; font-size:.88rem; text-align:center}
+  .lb-btn{
+    background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.2);
+    border-radius:999px; padding:7px 16px; font:inherit; font-size:.84rem; cursor:pointer;
+  }
+  .lb-btn:hover{background:rgba(255,255,255,.2)}
+  .lb-btn[disabled]{opacity:.55;cursor:progress}
+
+  .dl-only{display:none}
+  body.can-save .dl-only{display:inline-flex}
+  .zip-btn{
+    align-items:center; gap:6px; font:inherit; font-size:.74rem; font-weight:700;
+    font-family:"JetBrains Mono",ui-monospace,monospace;
+    color:#052e20; background:var(--green); border:1px solid transparent;
+    padding:6px 13px; border-radius:999px; cursor:pointer;
+  }
+  .zip-btn:hover{filter:brightness(1.08)}
+  .zip-btn[disabled]{opacity:.6;cursor:progress}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="eyebrow">MCU Phrae Smart Canteen</span>
+    <h1>ภาพหน้าจอระบบบริหารจัดการอาหารกลางวันนิสิต</h1>
+    <p class="lede">
+      รวมหน้าจอทั้งหมดของระบบคูปองอาหารดิจิทัล โควตา 35 บาท/คน/วัน
+      ทั้งเว็บพอร์ทัลสำหรับเจ้าหน้าที่ จอเครื่องแม่ข่าย และจอเครื่องประจำร้านค้า
+      สำหรับใช้ประกอบเอกสารโครงการและคู่มือการใช้งาน
+    </p>
+    <div class="chips">
+      <span class="chip">Host Server <b>v108.0.0</b></span>
+      <span class="chip">Station Client <b>v118.0.0</b></span>
+      <span class="chip">ESP32-S3 <b>N16R8</b></span>
+      <span class="chip">ST7789V <b>320×240</b></span>
+      <span class="chip">ESP-NOW <b>CH 1</b></span>
+      <span class="chip">ภาพทั้งหมด <b id="total">31</b> ภาพ</span>
+      <button class="zip-btn dl-only" id="zipBtn">⬇︎ บันทึกทุกภาพเป็น .zip</button>
+    </div>
+  </div>
+</header>
+
+<nav>
+  <div class="navrow">
+    <a href="#web">🖥️ เว็บพอร์ทัลเจ้าหน้าที่</a>
+    <a href="#host">📟 จอเครื่องแม่ข่าย</a>
+    <a href="#station">💳 จอเครื่องประจำร้านค้า</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <section id="web">
+    <div class="sec-head"><h2>🖥️ เว็บพอร์ทัลเจ้าหน้าที่</h2><span class="count" id="c-web"></span></div>
+    <p class="sec-note">
+      ภาพจากหน้าเว็บจริงที่เฟิร์มแวร์ส่งออกมา เปิดผ่าน <code>http://192.168.4.1</code> หรือ <code>http://canteen.local</code>
+      หลังเชื่อมต่อ Wi-Fi <code>MCU_CANTEEN_HOST</code> — ข้อมูลในภาพเป็นชุดตัวอย่างสำหรับสาธิต
+    </p>
+    <div class="grid web" id="g-web"></div>
+  </section>
+
+  <section id="host">
+    <div class="sec-head"><h2>📟 จอเครื่องแม่ข่าย (Host Server)</h2><span class="count" id="c-host"></span></div>
+    <p class="sec-note">
+      จอ ST7789V ขนาด 2.8 นิ้ว ความละเอียด 320×240 กดปุ่มหนึ่งครั้งเพื่อเปลี่ยนหน้า สองครั้งเข้าโหมดพักหน้าจอ
+      สามครั้งสลับธีม และกดค้าง 5 วินาทีเพื่อดูหน้าเครดิต
+    </p>
+    <div class="grid tft" id="g-host"></div>
+  </section>
+
+  <section id="station">
+    <div class="sec-head"><h2>💳 จอเครื่องประจำร้านค้า (Station Client)</h2><span class="count" id="c-stn"></span></div>
+    <p class="sec-note">
+      เครื่องอ่านบัตร RFID ประจำแต่ละร้าน ทำงานร่วมกับแม่ข่ายผ่าน ESP-NOW ช่อง 1
+      นอกจากการเปลี่ยนหน้าแล้ว ยังกดค้าง 1.5 วินาทีเพื่อปิดไฟหน้าจอ และ 3 วินาทีเพื่อตั้งหมายเลขสถานี
+    </p>
+    <div class="grid tft" id="g-stn"></div>
+
+    <div class="callout">
+      <b>หมายเหตุเรื่องที่มาของภาพ</b> — ภาพเว็บพอร์ทัลถ่ายจากหน้าเว็บจริงที่เฟิร์มแวร์สร้างขึ้น
+      ส่วนภาพจอ TFT สร้างขึ้นใหม่จากพิกัด สี และข้อความชุดเดียวกับที่อยู่ในฟังก์ชันวาดจอของเฟิร์มแวร์
+      (<code>renderHostPage()</code>, <code>displayResult()</code> และอื่น ๆ) จึงตรงตามเลย์เอาต์จริง
+      แต่รูปทรงตัวอักษรจะต่างจากฟอนต์ 5×7 ของ Adafruit GFX บนอุปกรณ์จริงเล็กน้อย
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <p><b>ระบบบริหารจัดการอาหารกลางวันนิสิต</b> — มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่</p>
+  <p style="margin-top:4px">พัฒนาโดย กิตติพันธ์ รัตนคร · นักวิชาการคอมพิวเตอร์</p>
+</footer>
+
+<dialog id="lb">
+  <div class="lb">
+    <img id="lb-img" alt="">
+    <p class="lb-cap" id="lb-cap"></p>
+    <div class="lb-bar">
+      <button class="lb-btn dl-only" id="lb-dl">⬇︎ บันทึกภาพนี้</button>
+      <button class="lb-btn" id="lb-prev">← ก่อนหน้า</button>
+      <button class="lb-btn" id="lb-next">ถัดไป →</button>
+      <button class="lb-btn" id="lb-close">ปิด (Esc)</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const WEB = [
+  ['web-01-login','หน้าเข้าสู่ระบบเจ้าหน้าที่','พิมพ์รหัสผิดครบ 5 ครั้งติดกันจะถูกล็อก 1 นาที และคุกกี้ session ตั้ง SameSite=Strict'],
+  ['web-02-dashboard-dark','แดชบอร์ดหลัก (โหมดมืด)','ทุกตัวเลขดึงสดจาก /api/dashboard ทุก 3 วินาที ทั้งเกจโควตา อุณหภูมิ CPU และการ์ดจุดบริการ 4 จุด'],
+  ['web-03-dashboard-light','แดชบอร์ดหลัก (โหมดสว่าง)','สลับธีมได้จากปุ่มบนแถบเมนู ระบบจำค่าที่เลือกไว้ในเบราว์เซอร์'],
+  ['web-04-students','ทะเบียนผู้มีสิทธิ์รับสวัสดิการ','แถวสร้างด้วย DOM ทั้งหมด ชื่ออย่าง O’Brien, Patrick &lt;test&gt; จึงแสดงเป็นข้อความปกติแทนที่จะทำให้ตารางพัง'],
+  ['web-05-students-light','ทะเบียนผู้มีสิทธิ์ (โหมดสว่าง)','หัวตารางตรึงตำแหน่งขณะเลื่อน และมีแถบ skeleton ระหว่างรอข้อมูล'],
+  ['web-06-toast','การแจ้งผลด้วย Toast','แทน alert() เดิมที่บังคับให้รีโหลดทั้งหน้า ทำให้ไม่เสียแท็บและตำแหน่งที่ค้างอยู่'],
+  ['web-07-manual-claim','หน้าต่างตัดสิทธิ์ด้วยตนเอง','แทน prompt() เดิม ใช้กรณีนิสิตลืมบัตรหรือเครื่องอ่านขัดข้อง ปิดได้ด้วยปุ่ม Esc'],
+  ['web-08-settings','ตั้งค่านาฬิกาและเวลาให้บริการ','ตรวจรูปแบบเวลาและบังคับให้เวลาเปิดมาก่อนเวลาปิดก่อนบันทึกลง Preferences'],
+  ['web-09-mobile','มุมมองบนโทรศัพท์','เมนูยุบเป็นปุ่มแฮมเบอร์เกอร์ การ์ดเรียงเป็นคอลัมน์เดียว'],
+];
+const HOST = [
+  ['tft-host-01-overview','หน้า 1/3 — ภาพรวมโควตา','ยอดใช้สิทธิ์ แถบความคืบหน้า ยอดจัดสรรรวม อุณหภูมิแกน CPU และเวลามาตรฐานจาก DS3231'],
+  ['tft-host-02-stations','หน้า 2/3 — จุดบริการ 4 จุด','แต่ละการ์ดแสดงยอดจ่าย ยอดเงิน ความแรงสัญญาณ และระดับแบตเตอรี่ของสถานีนั้น'],
+  ['tft-host-03-activity','หน้า 3/3 — รายการล่าสุด','เลขอ้างอิงที่แสดงคือค่าที่บันทึกไว้จริง หลังแก้บั๊กที่เดิมสร้างเลขใหม่ทุกครั้งที่วาดจอ'],
+  ['tft-host-04-screensaver','โหมดพักหน้าจอ','เข้าอัตโนมัติเมื่อไม่มีการใช้งาน 5 นาที หรือกดปุ่มสองครั้ง'],
+  ['tft-host-05-approved','แจ้งผล APPROVED','ยึดพื้นที่ทั้งจอด้วยโทนเขียว มองเห็นได้จากระยะไกลของเคาน์เตอร์'],
+  ['tft-host-06-duplicate','แจ้งผล DUPLICATE','ข้อความ 30 ตัวอักษรที่เดิมถูกตัดขอบจอ ตอนนี้ย่อขนาดฟอนต์อัตโนมัติให้พอดี'],
+  ['tft-host-07-timeclosed','แจ้งผล นอกเวลาให้บริการ','แสดงเมื่อแตะบัตรนอกช่วง 10:00-13:30 ที่กำหนดไว้'],
+  ['tft-host-08-rejected','แจ้งผล บัตรไม่อยู่ในทะเบียน','ไม่มีการตัดโควตาและไม่บันทึกลงประวัติ'],
+  ['tft-host-09-credit','หน้าเครดิตผู้พัฒนา','เข้าถึงด้วยการกดปุ่มค้าง 5 วินาที'],
+  ['tft-host-10-overview-light','หน้า 1/3 โหมดสว่าง','กดปุ่มสามครั้งเพื่อสลับธีม และสั่งให้ทุกสถานีเปลี่ยนตามผ่าน ESP-NOW'],
+  ['tft-host-11-stations-light','หน้า 2/3 โหมดสว่าง','ชุดสีโหมดสว่างถูกคาลิเบทแยกจากโหมดมืด'],
+];
+const STN = [
+  ['tft-stn-01-standby','หน้า 1/3 — รอแตะบัตร','หน้าจอหลักที่ใช้งานตลอดช่วงบริการ มุมขวาบนแสดงสัญญาณและแบตเตอรี่แบบสด'],
+  ['tft-stn-02-stats','หน้า 2/3 — ยอดวันนี้','จำนวนที่จ่ายและยอดเงินของสถานีนี้ ซิงค์จากแม่ข่ายทุกครั้งที่ตอบ heartbeat'],
+  ['tft-stn-03-diagnostics','หน้า 3/3 — ตรวจสอบระบบ','เดิมหน้านี้ค่านิ่งและมีช่องว่างเปล่า ตอนนี้อัปเดตทุกครึ่งวินาทีและแสดงครบทุกค่า'],
+  ['tft-stn-04-screensaver','โหมดพักหน้าจอ','แตะบัตรหรือกดปุ่มเพื่อปลุกจอ'],
+  ['tft-stn-05-scanning','กำลังส่งข้อมูลบัตร','เลขบัตรถูกปิดบังสี่หลักท้ายก่อนแสดงผล'],
+  ['tft-stn-06-approved','แจ้งผล APPROVED','จอขึ้นก่อนแล้วจึงเล่นเสียง หลังแก้ลำดับที่เดิมทำให้ช้าเกือบหนึ่งวินาที'],
+  ['tft-stn-07-duplicate','แจ้งผล DUPLICATE','พร้อมเสียงเตือนสามจังหวะ'],
+  ['tft-stn-08-rejected','แจ้งผล บัตรไม่อยู่ในทะเบียน','แสดงชื่อเป็น UNREGISTERED STUDENT'],
+  ['tft-stn-09-offline','เตือนขาดการเชื่อมต่อแม่ข่าย','ขึ้นเมื่อส่งซ้ำครบ 3 ครั้งแล้วยังไม่ได้รับคำตอบภายใน 3 วินาที'],
+  ['tft-stn-10-idsetup','ตั้งหมายเลขสถานี','กดปุ่มค้าง 3 วินาทีเพื่อเข้า แตะเพื่อเลื่อนเลข แล้วปล่อยรอ 3 วินาทีเพื่อบันทึก'],
+  ['tft-stn-11-standby-light','หน้า 1/3 โหมดสว่าง','ธีมเปลี่ยนตามคำสั่งจากแม่ข่าย หรือกดปุ่มสามครั้งที่เครื่องสถานี'],
+];
+
+const ALL = [];
+function build(list, hostId, tagClass, tagText){
+  const frag = document.createDocumentFragment();
+  list.forEach(([file, title, note]) => {
+    const idx = ALL.length;
+    ALL.push({file, title, note});
+    const fig = document.createElement('figure');
+    fig.innerHTML =
+      '<button class="shot" data-i="' + idx + '" aria-label="ขยาย ' + title + '">' +
+        '<img loading="lazy" src="interface/' + file + '.png" alt="' + title + '">' +
+      '</button>' +
+      '<figcaption>' +
+        '<div class="cap-title"><span class="tag ' + tagClass + '">' + tagText + '</span>' + title + '</div>' +
+        '<div class="cap-note">' + note + '</div>' +
+      '</figcaption>';
+    frag.appendChild(fig);
+  });
+  document.getElementById(hostId).appendChild(frag);
+}
+build(WEB,'g-web','t-web','WEB');
+build(HOST,'g-host','t-host','HOST');
+build(STN,'g-stn','t-stn','STATION');
+
+document.getElementById('c-web').textContent  = WEB.length + ' ภาพ';
+document.getElementById('c-host').textContent = HOST.length + ' ภาพ';
+document.getElementById('c-stn').textContent  = STN.length + ' ภาพ';
+document.getElementById('total').textContent  = ALL.length;
+
+/* ---------------------------------------------------------------
+   การบันทึกไฟล์ต้องผ่าน capability "downloads" ของ Artifact
+   ลิงก์ download ธรรมดาใช้ไม่ได้ในหน้าต่างแสดงผล จึงซ่อนปุ่มไว้
+   จนกว่า claude.use() จะตอบกลับมาว่าใช้ได้
+   --------------------------------------------------------------- */
+let saver = null;
+(async () => {
+  try {
+    if (!window.claude || typeof claude.use !== 'function') return;
+    saver = await claude.use('downloads');
+    if (saver) document.body.classList.add('can-save');
+  } catch (e) { /* ไม่รองรับก็ปล่อยให้ปุ่มซ่อนไว้ */ }
+})();
+
+async function grab(file) {
+  const res = await fetch('interface/' + file + '.png');
+  if (!res.ok) throw new Error('fetch failed');
+  return res;
+}
+
+async function saveOne(item, btn) {
+  if (!saver) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'กำลังเตรียมไฟล์...';
+  try {
+    const blob = await (await grab(item.file)).blob();
+    await saver.save({ filename: item.file + '.png', data: blob });
+    btn.textContent = '✓ บันทึกแล้ว';
+  } catch (err) {
+    btn.textContent = (err && err.code === 'declined') ? 'ยกเลิกแล้ว' : 'บันทึกไม่สำเร็จ';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 1800);
+}
+
+/* ZIP แบบเก็บอย่างเดียว (ไม่บีบอัดซ้ำ เพราะ PNG ถูกบีบอัดมาแล้ว) */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(entries) {
+  const enc = new TextEncoder();
+  const body = [], central = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const nb = enc.encode(name), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true);
+    lh.setUint16(6, 0, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, 0, true); lh.setUint16(12, 0, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+    lh.setUint16(26, nb.length, true); lh.setUint16(28, 0, true);
+    body.push(new Uint8Array(lh.buffer), nb, data);
+
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0, true); ch.setUint16(10, 0, true); ch.setUint16(12, 0, true); ch.setUint16(14, 0, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true);
+    ch.setUint16(28, nb.length, true); ch.setUint16(30, 0, true); ch.setUint16(32, 0, true);
+    ch.setUint16(34, 0, true); ch.setUint16(36, 0, true); ch.setUint32(38, 0, true);
+    ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), nb);
+    offset += 30 + nb.length + data.length;
+  }
+  const cdSize = central.reduce((a, p) => a + p.length, 0);
+  const eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0, 0x06054b50, true); eo.setUint16(4, 0, true); eo.setUint16(6, 0, true);
+  eo.setUint16(8, entries.length, true); eo.setUint16(10, entries.length, true);
+  eo.setUint32(12, cdSize, true); eo.setUint32(16, offset, true); eo.setUint16(20, 0, true);
+  return new Blob([...body, ...central, new Uint8Array(eo.buffer)], { type: 'application/zip' });
+}
+
+const zipBtn = document.getElementById('zipBtn');
+zipBtn.addEventListener('click', async () => {
+  if (!saver) return;
+  zipBtn.disabled = true;
+  try {
+    const entries = [];
+    for (let i = 0; i < ALL.length; i++) {
+      zipBtn.textContent = 'กำลังรวมไฟล์ ' + (i + 1) + '/' + ALL.length + '...';
+      const buf = await (await grab(ALL[i].file)).arrayBuffer();
+      entries.push([ALL[i].file + '.png', new Uint8Array(buf)]);
+    }
+    zipBtn.textContent = 'กำลังบันทึก...';
+    await saver.save({ filename: 'mcu-canteen-interface.zip', data: makeZip(entries) });
+    zipBtn.textContent = '✓ บันทึกครบ ' + ALL.length + ' ภาพแล้ว';
+  } catch (err) {
+    zipBtn.textContent = (err && err.code === 'declined') ? 'ยกเลิกแล้ว' : 'บันทึกไม่สำเร็จ';
+  }
+  setTimeout(() => { zipBtn.disabled = false; zipBtn.textContent = '⬇︎ บันทึกทุกภาพเป็น .zip'; }, 2200);
+});
+
+const lb = document.getElementById('lb');
+const lbImg = document.getElementById('lb-img');
+const lbCap = document.getElementById('lb-cap');
+const lbDl  = document.getElementById('lb-dl');
+let at = 0;
+
+function show(i){
+  at = (i + ALL.length) % ALL.length;
+  const it = ALL[at];
+  lbImg.src = 'interface/' + it.file + '.png';
+  lbImg.alt = it.title;
+  lbCap.textContent = it.title + ' — ' + (at + 1) + '/' + ALL.length;
+  lbDl.disabled = false; lbDl.textContent = '⬇︎ บันทึกภาพนี้';
+  if (!lb.open) lb.showModal();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.shot');
+  if (b) show(+b.dataset.i);
+});
+lbDl.addEventListener('click', () => saveOne(ALL[at], lbDl));
+document.getElementById('lb-next').addEventListener('click', () => show(at + 1));
+document.getElementById('lb-prev').addEventListener('click', () => show(at - 1));
+document.getElementById('lb-close').addEventListener('click', () => lb.close());
+lb.addEventListener('click', e => { if (e.target === lb) lb.close(); });
+document.addEventListener('keydown', e => {
+  if (!lb.open) return;
+  if (e.key === 'ArrowRight') show(at + 1);
+  if (e.key === 'ArrowLeft') show(at - 1);
+});
+</script>
+</body>
+</html>
