@@ -2,7 +2,7 @@
  * ============================================================================
  * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
  * System: Vendor Station Client & Dynamic Theme Suite
- * Version: 117.0.7 (Production Master: Stabilized Screensaver & Calibrated Alert)
+ * Version: 118.0.0 (Hardened: HSPI Display Bus, Live Header, Theme Sync)
  * Release Date: กันยายน 2569 (September 2026)
  * 
  * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
@@ -10,6 +10,12 @@
  * Organization: มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
  * 
  * Target Board: ESP32-S3 N16R8 + 2.8" ST7789V TFT (320x240) + RC522 + RGB LED
+ *
+ * SPI BUS MAP (สำคัญ: จอกับเครื่องอ่านบัตรต้องอยู่คนละบัส)
+ *   - TFT ST7789V : HSPI (SPI3_HOST) ผ่าน SPI_TFT  -> SCLK 14 / MOSI 13 / CS 10
+ *   - RC522       : FSPI (SPI2_HOST) ผ่าน SPI ตัวมาตรฐานที่ไลบรารี MFRC522 เรียกใช้
+ *     บน ESP32-S3 ตัวแปร SPI มาตรฐานผูกกับ FSPI อยู่แล้ว ถ้าปล่อยให้จอใช้ FSPI ด้วย
+ *     ทั้งสองอุปกรณ์จะแย่ง peripheral เดียวกันคนละขา ทำให้จอเพี้ยนหลัง PCD_Init()
  * ============================================================================
  */
 
@@ -24,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "117.0.7"
+#define APP_VERSION         "118.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -92,7 +98,7 @@ uint16_t getStCyan()        { return isStationDarkMode ? DARK_ACCENT_CYAN : LIGH
 uint16_t getStYellow()      { return isStationDarkMode ? DARK_ACCENT_YELLOW : LIGHT_ACCENT_YELLOW; }
 uint16_t getStRose()        { return isStationDarkMode ? DARK_ACCENT_ROSE : LIGHT_ACCENT_ROSE; }
 
-SPIClass SPI_TFT(FSPI);
+SPIClass SPI_TFT(HSPI);   // จอแยกไปบัส HSPI เพื่อไม่ชนกับ RC522 ที่ใช้ SPI (FSPI)
 Adafruit_ST7789 tft = Adafruit_ST7789(&SPI_TFT, TFT_CS, TFT_DC, TFT_RST);
 MFRC522 mfrc522(RC522_SS, RC522_RST);
 Preferences stationPrefs;
@@ -155,6 +161,7 @@ typedef struct __attribute__((packed)) {
 
 static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
 static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
+static_assert(sizeof(HostConfigPacket) == 5, "HostConfigPacket size mismatch");
 
 enum AppState { 
   STATE_STANDBY, 
@@ -193,6 +200,13 @@ volatile bool hasServedCountUpdate  = false;
 volatile uint16_t pendingServedCount = 0;
 volatile bool pendingTimeSync = false;
 char pendingHostTime[24] = {0};
+
+volatile bool pendingThemeUpdate = false;
+volatile uint8_t pendingThemeDark = 1;
+portMUX_TYPE espnowMux = portMUX_INITIALIZER_UNLOCKED;
+
+unsigned long lastHeaderRefresh = 0;
+const unsigned long HEADER_REFRESH_MS = 1000;
 
 uint16_t nextScanSeq = 1;
 uint16_t pendingScanSeq = 0;
@@ -248,12 +262,17 @@ void ledDuplicate();
 void ledRejected();
 void ledOffline();
 void ledOff();
-float readBatteryVoltage();
+float readBatteryVoltage(bool forceFresh = false);
 int getBatteryPercentage(float voltage);
 void drawStationCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor);
 void drawStationPillBadge(int x, int y, int w, int h, const char* text, uint16_t fgColor, uint16_t bgColor);
-void drawStationBatteryHUD(int x, int y);
+void drawStationBatteryHUD(int x, int y, bool force);
 void drawStationTopBar(String title);
+void updateStationHeaderStatus(bool force);
+uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize);
+void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg);
+void showStationPage(int page, bool fullRedraw);
+void applyPendingTheme();
 void drawStationBottomBar(String instruction);
 void soundWelcome();
 void soundCreditJingle();
@@ -273,7 +292,6 @@ int calculateSignalQuality(int rssi);
 uint16_t getSignalColor(int rssi, bool isOnline);
 int getActiveSignalBarsCount(int rssi, bool isOnline);
 void drawSignalBars(int x, int y, int rssi, bool isOnline, uint16_t bg);
-void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw);
 void syncInternalClock(const char* timeStr);
 String getTimeOnlyStr();
 String getDateFormattedStr();
@@ -313,15 +331,26 @@ void ledRejected()  { setLedColor(65, 0, 0); }
 void ledOffline()   { setLedColor(65, 0, 0); }    
 void ledOff()       { setLedColor(0, 0, 0); }
 
-float readBatteryVoltage() {
+float cachedBatteryVoltage        = 0.0f;
+unsigned long lastBatteryReadMs   = 0;
+const unsigned long BATTERY_CACHE_MS = 3000;
+
+// อ่านแรงดันแบตเตอรี่แบบมีแคช 3 วินาที และไม่ใช้ delay() ที่บล็อกลูปหลัก
+float readBatteryVoltage(bool forceFresh) {
+  unsigned long now = millis();
+  if (!forceFresh && lastBatteryReadMs != 0 && (now - lastBatteryReadMs) < BATTERY_CACHE_MS) {
+    return cachedBatteryVoltage;
+  }
   uint32_t sum = 0;
   for (int i = 0; i < 8; i++) {
     sum += analogRead(BATTERY_ADC_PIN);
-    delay(2);
+    delayMicroseconds(300);
   }
   float avgRaw = sum / 8.0f;
   float pinVoltage = (avgRaw / 4095.0f) * 3.3f;
-  return pinVoltage * 2.0f;
+  cachedBatteryVoltage = pinVoltage * 2.0f;
+  lastBatteryReadMs = (millis() == 0) ? 1 : millis();
+  return cachedBatteryVoltage;
 }
 
 int getBatteryPercentage(float voltage) {
@@ -331,6 +360,30 @@ int getBatteryPercentage(float voltage) {
   if (percent > 100) percent = 100;
   if (percent < 0) percent = 0;
   return percent;
+}
+
+// เลือกขนาดฟอนต์ที่ใหญ่ที่สุดที่ยังพอดีกับความกว้างที่กำหนด (ฟอนต์ GFX = 6px/ตัว ต่อ 1 size)
+uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize) {
+  int len = (int)strlen(text);
+  if (len <= 0) return 1;
+  for (uint8_t sz = maxSize; sz > 1; sz--) {
+    if (len * 6 * (int)sz <= maxWidth) return sz;
+  }
+  return 1;
+}
+
+// วางข้อความกึ่งกลางกรอบ (x,y,w,h) โดยย่อขนาดอัตโนมัติถ้าล้นกรอบ
+void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg) {
+  uint8_t sz = fitTextSize(text, w - 6, maxSize);
+  int textW = (int)strlen(text) * 6 * (int)sz;
+  int textX = x + (w - textW) / 2;
+  if (textX < x + 2) textX = x + 2;
+  int textY = y + (h - 8 * (int)sz) / 2;
+  if (textY < y) textY = y;
+  tft.setTextSize(sz);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(textX, textY);
+  tft.print(text);
 }
 
 void drawStationCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor) {
@@ -348,9 +401,16 @@ void drawStationPillBadge(int x, int y, int w, int h, const char* text, uint16_t
   tft.print(text);
 }
 
-void drawStationBatteryHUD(int x, int y) {
+void drawStationBatteryHUD(int x, int y, bool force = false) {
   float volt = readBatteryVoltage();
   int pct = getBatteryPercentage(volt);
+
+  static int lastDrawnPct = -999;
+  static bool lastDrawnCharging = false;
+  bool charging = (volt > 4.05f);
+  if (!force && pct == lastDrawnPct && charging == lastDrawnCharging) return;
+  lastDrawnPct = pct;
+  lastDrawnCharging = charging;
 
   tft.fillRect(x, y, 52, 18, getStBg());
   tft.drawRect(x, y + 2, 44, 14, getStTextMain());
@@ -360,7 +420,7 @@ void drawStationBatteryHUD(int x, int y) {
   if (fillWidth < 1 && pct > 0) fillWidth = 1;
 
   uint16_t fillColor = (pct > 20) ? getStGreen() : getStRose();
-  if (volt > 4.05f) fillColor = getStCyan();
+  if (charging) fillColor = getStCyan();
 
   tft.fillRect(x + 2, y + 4, fillWidth, 10, fillColor);
 
@@ -382,8 +442,10 @@ void drawStationTopBar(String title) {
   tft.setTextColor(getStCyan(), getStBg());
   tft.setTextSize(1);
   tft.setCursor(8, 8);
-  tft.println(title);
-  drawStationBatteryHUD(260, 3);
+  // หัวข้อยาวสุด 30 ตัวอักษร เพื่อไม่ให้ทับบล็อกสถานะสัญญาณที่ x=190
+  if (title.length() > 30) title = title.substring(0, 30);
+  tft.print(title);
+  updateStationHeaderStatus(true);
 }
 
 void drawStationBottomBar(String instruction) {
@@ -435,7 +497,8 @@ void displayOfflineAlert() {
   tft.fillScreen(0x8000);
 
   drawStationCard(10, 16, 300, 208, 0xF800, 0x4800);
-  drawStationPillBadge(24, 28, 272, 24, "GATEWAY OFFLINE LINK", 0xFFFF, 0xF800);
+  tft.fillRoundRect(24, 28, 272, 24, 3, 0xF800);
+  drawFitCenteredText(24, 28, 272, 24, "GATEWAY OFFLINE LINK", 1, 0xFFFF, 0xF800);
 
   tft.setTextColor(0xFCAE, 0x4800);
   tft.setTextSize(1);
@@ -536,10 +599,15 @@ void drawSignalBars(int x, int y, int rssi, bool isOnline, uint16_t bg) {
   }
 }
 
-void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw = false) {
+// แถบสถานะมุมขวาบน: ความแรงสัญญาณ ESP-NOW + ระดับแบตเตอรี่
+// เดิมฟังก์ชันนี้เขียนไว้แต่ไม่เคยถูกเรียก ทำให้สถานี "ไม่เคย" แสดงสถานะลิงก์เลย
+void updateStationHeaderStatus(bool force = false) {
   static int lastDrawnRssi = -999;
   static bool lastDrawnOnline = false;
   static int lastBars = -1;
+
+  int rssi = lastHostRssi;
+  bool online = isHostOnline;
 
   int currentBars = 0;
   int q = calculateSignalQuality(rssi);
@@ -547,32 +615,33 @@ void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw = false)
     if (q >= 85) currentBars = 4;
     else if (q >= 60) currentBars = 3;
     else if (q >= 35) currentBars = 2;
-    else currentBars = 1; // แก้ไขจุด activeBars ให้เป็น currentBars เรียบร้อยแล้ว
+    else currentBars = 1;
   }
 
-  if (!forceRedraw && (online == lastDrawnOnline) && (currentBars == lastBars) && (abs(rssi - lastDrawnRssi) < 3)) {
-    return;
+  bool signalChanged = force || (online != lastDrawnOnline) || (currentBars != lastBars) ||
+                       (abs(rssi - lastDrawnRssi) >= 3);
+
+  if (signalChanged) {
+    lastDrawnRssi = rssi;
+    lastDrawnOnline = online;
+    lastBars = currentBars;
+
+    tft.fillRect(190, 3, 66, 18, getStBg());
+    tft.setTextSize(1);
+    if (online) {
+      tft.setTextColor(getStTextMuted(), getStBg());
+      tft.setCursor(194, 8);
+      tft.printf("%ddB", rssi);
+      drawSignalBars(228, 6, rssi, true, getStBg());
+    } else {
+      tft.setTextColor(getStRose(), getStBg());
+      tft.setCursor(192, 8);
+      tft.print("OFFLINE");
+      drawSignalBars(228, 6, -100, false, getStBg());
+    }
   }
 
-  lastDrawnRssi = rssi;
-  lastDrawnOnline = online;
-  lastBars = currentBars;
-
-  tft.fillRect(190, 3, 66, 18, getStBg());
-  tft.setTextSize(1);
-  if (online) {
-    tft.setTextColor(getStTextMuted(), getStBg());
-    tft.setCursor(194, 8);
-    tft.printf("%ddB", rssi);
-    drawSignalBars(228, 6, rssi, true, getStBg());
-  } else {
-    tft.setTextColor(getStRose(), getStBg());
-    tft.setCursor(192, 8);
-    tft.print("OFFLINE");
-    drawSignalBars(228, 6, -100, false, getStBg());
-  }
-
-  drawStationBatteryHUD(260, 3);
+  drawStationBatteryHUD(260, 3, force);
 }
 
 void syncInternalClock(const char* timeStr) {
@@ -737,7 +806,7 @@ void displayStatsDashboard() {
   tft.setTextColor(getStGreen(), getStCardBg());
   tft.setTextSize(3);
   tft.setCursor(14, 62);
-  tft.printf("%d", totalSuccessToday);
+  tft.printf("%u", (unsigned)totalSuccessToday);
   tft.setTextSize(1);
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.print(" pax");
@@ -745,7 +814,7 @@ void displayStatsDashboard() {
   tft.setTextColor(getStYellow(), getStCardBg());
   tft.setTextSize(2);
   tft.setCursor(14, 110);
-  tft.printf("%d B.", totalSuccessToday * 35);
+  tft.printf("%u B.", (unsigned)(totalSuccessToday * 35));
   tft.setTextSize(1);
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setCursor(14, 136);
@@ -817,7 +886,7 @@ void renderScreensaver(bool fullRedraw) {
     tft.print(dateStr);
 
     char statBuf[48];
-    snprintf(statBuf, sizeof(statBuf), "SERVED: %3d STUDENTS (%5d THB)", usedCount, usedCount * 35);
+    snprintf(statBuf, sizeof(statBuf), "SERVED: %3d STUDENTS (%5d THB)", (int)usedCount, (int)usedCount * 35);
     int statLen = strlen(statBuf) * 6;
     int posX = max(24, (320 - statLen) / 2);
     tft.setTextColor(getStGreen(), getStCardBg());
@@ -827,7 +896,8 @@ void renderScreensaver(bool fullRedraw) {
 
     float hVolt = readBatteryVoltage();
     char statBuf2[48];
-    snprintf(statBuf2, sizeof(statBuf2), "BATT: %d%% | CORE: %.1fC | PSRAM: 8MB", getBatteryPercentage(hVolt), getChipTemperature());
+    snprintf(statBuf2, sizeof(statBuf2), "BATT: %d%% | CORE: %.1fC | HEAP: %uKB",
+             getBatteryPercentage(hVolt), getChipTemperature(), (unsigned)(ESP.getFreeHeap() / 1024));
     int statLen2 = strlen(statBuf2) * 6;
     int posX2 = max(24, (320 - statLen2) / 2);
     tft.setTextColor(getStTextMuted(), getStCardBg());
@@ -877,7 +947,8 @@ void displayStatusScreen(bool fullRedraw) {
   float chipT = getChipTemperature();
   float cpuL = calculateCpuLoad();
 
-  bool updateDynamic = (millis() - lastCpuDisplayUpdate >= 500) ||
+  bool updateDynamic = fullRedraw ||
+                       (millis() - lastCpuDisplayUpdate >= 500) ||
                        fabs(chipT - lastDisplayedCpuTemperature) >= 0.1f ||
                        fabs(cpuL - lastDisplayedCpuLoad) >= 1.0f;
   if (updateDynamic) {
@@ -900,7 +971,56 @@ void displayStatusScreen(bool fullRedraw) {
     tft.setCursor(140, 86);
     tft.setTextColor((chipT < 65.0) ? getStGreen() : getStYellow(), getStCardBg());
     tft.printf("%.1f C (CPU: %.0f%%)", chipT, cpuL);
+
+    // เดิมหน้านี้มีหัวข้อ BATTERY VOLTAGE / TODAY SERVED แต่ไม่เคยพิมพ์ค่าออกมา
+    float volt = readBatteryVoltage();
+    int pct = getBatteryPercentage(volt);
+    tft.fillRect(140, 106, 166, 14, getStCardBg());
+    tft.setCursor(140, 108);
+    tft.setTextColor((pct > 20) ? getStGreen() : getStRose(), getStCardBg());
+    tft.printf("%.2f V (%d%%)", volt, pct);
+
+    tft.fillRect(140, 128, 166, 14, getStCardBg());
+    tft.setCursor(140, 130);
+    tft.setTextColor(getStTextMain(), getStCardBg());
+    tft.printf("%u pax = %u THB", (unsigned)totalSuccessToday, (unsigned)(totalSuccessToday * 35));
+
+    updateStationHeaderStatus(false);
   }
+}
+
+// เปลี่ยนหน้าแบบรวมศูนย์ จุดสำคัญคือต้องตั้ง currentState ให้ตรงกับหน้าที่แสดงอยู่
+// ของเดิมเปลี่ยนแค่ currentStationPage แต่ไม่เคยตั้ง STATE_STATUS ทำให้หน้า 3 ค้างนิ่ง
+void showStationPage(int page, bool fullRedraw) {
+  if (page < 1 || page > 3) page = 1;
+  currentStationPage = page;
+  currentState = (page == 3) ? STATE_STATUS : STATE_STANDBY;
+  if (page == 1)      displayTapCardStandby();
+  else if (page == 2) displayStatsDashboard();
+  else                displayStatusScreen(fullRedraw);
+}
+
+// รับคำสั่งสลับธีมจากเครื่องแม่ข่าย (MSG_CONFIG) แล้ววาดหน้าปัจจุบันใหม่
+void applyPendingTheme() {
+  bool wantDark;
+  portENTER_CRITICAL(&espnowMux);
+  pendingThemeUpdate = false;
+  wantDark = (pendingThemeDark != 0);
+  portEXIT_CRITICAL(&espnowMux);
+
+  if (wantDark == isStationDarkMode) return;
+  isStationDarkMode = wantDark;
+
+  stationPrefs.begin("st_cfg", false);
+  stationPrefs.putBool("dark", isStationDarkMode);
+  stationPrefs.end();
+
+  if (!isScreenOn) return;
+  soundThemeSwitch();
+  if (currentState == STATE_SCREENSAVER)   renderScreensaver(true);
+  else if (currentState == STATE_CREDIT)   renderDeveloperCredit();
+  else if (currentState == STATE_STANDBY ||
+           currentState == STATE_STATUS)   showStationPage(currentStationPage, true);
 }
 
 // ============================================================================
@@ -919,10 +1039,13 @@ void displayResult(String status, String name, String id, String refNo, String c
   const char* headerTitle;
   const char* footerDesc;
 
+  // เสียงถูกย้ายไปเล่น "หลัง" วาดจอเสร็จ เพราะ tone()+delay() เดิมบล็อกนานถึง 750 ms
+  // ทำให้หน้าจอผลลัพธ์ขึ้นช้ากว่าที่ผู้ใช้แตะบัตรเกือบหนึ่งวินาที
+  enum { SFX_SUCCESS, SFX_ALARM, SFX_ERROR } sfx;
+
   if (status == "SUCCESS") {
-    totalSuccessToday++;
     ledApproved();
-    soundSuccess();
+    sfx = SFX_SUCCESS;
     screenBg    = 0x02E5;             // สีพื้นหลังเฉดเขียวเข้ม
     cardBg      = 0x01C3;             // สีพื้นการ์ดโทนเขียวมรกตลึก
     bannerBg    = DARK_ACCENT_GREEN;  // แบนเนอร์สีเขียวนีออน (0x07E0)
@@ -934,7 +1057,7 @@ void displayResult(String status, String name, String id, String refNo, String c
   } 
   else if (status == "ALREADY_USED") {
     ledDuplicate();
-    soundAlarm();
+    sfx = SFX_ALARM;
     screenBg    = 0x8200;             // สีพื้นหลังเฉดส้มอิฐเข้ม
     cardBg      = 0x4900;             // สีพื้นการ์ดโทนส้มเข้ม
     bannerBg    = ST77XX_ORANGE;      // แบนเนอร์สีส้มสด (0xFD20)
@@ -946,7 +1069,7 @@ void displayResult(String status, String name, String id, String refNo, String c
   } 
   else if (status == "TIME_CLOSED") {
     ledDuplicate();
-    soundError();
+    sfx = SFX_ERROR;
     screenBg    = 0x6200;             // พื้นหลังโทนส้มอมน้ำตาล
     cardBg      = 0x3900;             // พื้นหลังการ์ดโทนน้ำตาลเข้ม
     bannerBg    = DARK_ACCENT_YELLOW; // แถบแบนเนอร์สีเหลืองเตือนภัย (0xFFE0 ตามไฟล์คาลิเบท)
@@ -958,7 +1081,7 @@ void displayResult(String status, String name, String id, String refNo, String c
   } 
   else {
     ledRejected();
-    soundError();
+    sfx = SFX_ERROR;
     screenBg    = 0x8000;             // สีพื้นหลังเฉดแดงทึบเข้ม
     cardBg      = 0x4800;             // สีพื้นการ์ดโทนแดงเข้ม
     bannerBg    = DARK_ACCENT_ROSE;   // แบนเนอร์สีแดงสด (0xF800 ตามไฟล์คาลิเบท)
@@ -972,12 +1095,8 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.fillScreen(screenBg);
 
   tft.fillRect(0, 0, 320, 34, bannerBg);
-  tft.setTextSize(2);
-  tft.setTextColor(bannerFg, bannerBg);
-  int titleLen = strlen(headerTitle) * 12;
-  int titleX = max(4, (320 - titleLen) / 2);
-  tft.setCursor(titleX, 9);
-  tft.print(headerTitle);
+  // ย่อฟอนต์อัตโนมัติ: ข้อความอย่าง "! DUPLICATE: ALREADY CLAIMED !" ยาว 360px เกินจอ 320px
+  drawFitCenteredText(0, 0, 320, 34, headerTitle, 2, bannerFg, bannerBg);
 
   tft.fillRoundRect(8, 40, 304, 192, 8, cardBg);
   tft.drawRoundRect(8, 40, 304, 192, 8, accentColor);
@@ -1023,18 +1142,32 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.print(displayName);
 
   tft.fillRoundRect(16, 186, 288, 36, 6, bannerBg);
-  tft.setTextSize(1);
-  tft.setTextColor(bannerFg, bannerBg);
-  int descLen = strlen(footerDesc) * 6;
-  int descX = max(20, (320 - descLen) / 2);
-  tft.setCursor(descX, 200);
-  tft.print(footerDesc);
+  drawFitCenteredText(16, 186, 288, 36, footerDesc, 1, bannerFg, bannerBg);
+
+  // จอพร้อมแล้วค่อยเล่นเสียงแจ้งเตือน
+  if (sfx == SFX_SUCCESS)      soundSuccess();
+  else if (sfx == SFX_ALARM)   soundAlarm();
+  else                         soundError();
 }
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
   const uint8_t *mac = recv_info->src_addr;
   lastHostRssi = recv_info->rx_ctrl->rssi;
+
+  if (len == sizeof(HostConfigPacket)) {
+    HostConfigPacket cfg;
+    memcpy(&cfg, data, sizeof(cfg));
+    if (cfg.magic != ESPNOW_PROTO_MAGIC || cfg.version != ESPNOW_PROTO_VER) return;
+    if (cfg.msgType != MSG_CONFIG) return;
+    // stationId == 0 คือ broadcast ถึงทุกสถานี
+    if (cfg.stationId != 0 && cfg.stationId != currentStationId) return;
+    portENTER_CRITICAL_ISR(&espnowMux);
+    pendingThemeDark = cfg.darkMode ? 1 : 0;
+    pendingThemeUpdate = true;
+    portEXIT_CRITICAL_ISR(&espnowMux);
+    return;
+  }
 
   if (len != sizeof(HostResponsePacket)) return;
 
@@ -1052,9 +1185,11 @@ void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int l
   isHostOnline = true;
 
   if (pkt.claimTime[0] != '\0' && strcmp(pkt.claimTime, "-") != 0) {
+    portENTER_CRITICAL_ISR(&espnowMux);
     strncpy(pendingHostTime, pkt.claimTime, sizeof(pendingHostTime) - 1);
     pendingHostTime[sizeof(pendingHostTime) - 1] = '\0';
     pendingTimeSync = true;
+    portEXIT_CRITICAL_ISR(&espnowMux);
   }
 
   if (pkt.msgType == MSG_HEARTBEAT) {
@@ -1078,6 +1213,20 @@ void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
 void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   lastHostRssi = -60;
 
+  if (len == sizeof(HostConfigPacket)) {
+    HostConfigPacket cfg;
+    memcpy(&cfg, data, sizeof(cfg));
+    if (cfg.magic != ESPNOW_PROTO_MAGIC || cfg.version != ESPNOW_PROTO_VER) return;
+    if (cfg.msgType != MSG_CONFIG) return;
+    // stationId == 0 คือ broadcast ถึงทุกสถานี
+    if (cfg.stationId != 0 && cfg.stationId != currentStationId) return;
+    portENTER_CRITICAL_ISR(&espnowMux);
+    pendingThemeDark = cfg.darkMode ? 1 : 0;
+    pendingThemeUpdate = true;
+    portEXIT_CRITICAL_ISR(&espnowMux);
+    return;
+  }
+
   if (len != sizeof(HostResponsePacket)) return;
 
   HostResponsePacket pkt;
@@ -1094,9 +1243,11 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   isHostOnline = true;
 
   if (pkt.claimTime[0] != '\0' && strcmp(pkt.claimTime, "-") != 0) {
+    portENTER_CRITICAL_ISR(&espnowMux);
     strncpy(pendingHostTime, pkt.claimTime, sizeof(pendingHostTime) - 1);
     pendingHostTime[sizeof(pendingHostTime) - 1] = '\0';
     pendingTimeSync = true;
+    portEXIT_CRITICAL_ISR(&espnowMux);
   }
 
   if (pkt.msgType == MSG_HEARTBEAT) {
@@ -1242,15 +1393,8 @@ void runStationIdConfigMode() {
   tft.printf("0%d", currentStationId);
   delay(700);
 
-  currentState = STATE_STANDBY;
   lastActivityTime = millis();
-  if (currentStationPage == 1) {
-    displayTapCardStandby();
-  } else if (currentStationPage == 2) {
-    displayStatsDashboard();
-  } else {
-    displayStatusScreen(true);
-  }
+  showStationPage(currentStationPage, true);
 }
 
 void handlePhysicalButton() {
@@ -1268,7 +1412,7 @@ void handlePhysicalButton() {
     holdUiShown = false;
   }
 
-  if (btnState && btnWasPressed && currentState == STATE_STANDBY) {
+  if (btnState && btnWasPressed && (currentState == STATE_STANDBY || currentState == STATE_STATUS)) {
     unsigned long held = millis() - btnPressStart;
     if (held >= 200 && !holdUiShown) {
       wakeScreenIfNeeded();
@@ -1306,10 +1450,8 @@ void handlePhysicalButton() {
 
     if (holdUiShown) {
       holdUiShown = false;
-      if (pressDuration < STATION_ID_HOLD_MS && currentState == STATE_STANDBY) {
-        if (currentStationPage == 1) displayTapCardStandby();
-        else if (currentStationPage == 2) displayStatsDashboard();
-        else displayStatusScreen(true);
+      if (pressDuration < STATION_ID_HOLD_MS) {
+        showStationPage(currentStationPage, true);
       }
       clickCount = 0;
       return;
@@ -1317,10 +1459,8 @@ void handlePhysicalButton() {
 
     if (currentState == STATE_SCREENSAVER || currentState == STATE_CREDIT || !isScreenOn) {
       wakeScreenIfNeeded();
-      currentState = STATE_STANDBY;
-      currentStationPage = 1;
       soundHomeBeep();
-      displayTapCardStandby();
+      showStationPage(1, true);
       clickCount = 0;
       return;
     }
@@ -1348,11 +1488,8 @@ void handlePhysicalButton() {
 
   if (clickCount > 0 && (millis() - lastReleaseTime > MULTI_CLICK_GAP)) {
     if (clickCount == 1) {
-      currentStationPage = (currentStationPage % 3) + 1;
       soundClick();
-      if (currentStationPage == 1) displayTapCardStandby();
-      else if (currentStationPage == 2) displayStatsDashboard();
-      else if (currentStationPage == 3) displayStatusScreen(true);
+      showStationPage((currentStationPage % 3) + 1, true);
     }
     else if (clickCount == 2) {
       currentState = STATE_SCREENSAVER;
@@ -1366,11 +1503,10 @@ void handlePhysicalButton() {
       stationPrefs.end();
       soundThemeSwitch();
       if (isScreenOn) {
-        if (currentState == STATE_STANDBY && currentStationPage == 1) displayTapCardStandby();
-        else if (currentState == STATE_STANDBY && currentStationPage == 2) displayStatsDashboard();
-        else if (currentState == STATE_STATUS) displayStatusScreen(true);
-        else if (currentState == STATE_SCREENSAVER) renderScreensaver(true);
-        else if (currentState == STATE_CREDIT) renderDeveloperCredit();
+        if (currentState == STATE_SCREENSAVER)      renderScreensaver(true);
+        else if (currentState == STATE_CREDIT)      renderDeveloperCredit();
+        else if (currentState == STATE_STANDBY ||
+                 currentState == STATE_STATUS)      showStationPage(currentStationPage, true);
       }
     }
     clickCount = 0;
@@ -1451,6 +1587,7 @@ void setup() {
   
   analogSetAttenuation(ADC_11db);
 
+  // จอใช้ HSPI, RC522 ใช้ SPI มาตรฐาน (FSPI) — คนละ peripheral จึงไม่ชนกัน
   SPI_TFT.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
   SPI.begin(RC522_SCK, RC522_MISO, RC522_MOSI, RC522_SS);
 
@@ -1501,8 +1638,7 @@ void setup() {
 
   playBootAnimation();
   lastActivityTime = millis();
-  currentStationPage = 1;
-  displayTapCardStandby();
+  showStationPage(1, true);
 
   for (int i = 0; i < 3; i++) {
     StationPacket hbPkt = {};
@@ -1529,23 +1665,36 @@ void loop() {
 
   if (hasServedCountUpdate) {
     hasServedCountUpdate = false;
-    totalSuccessToday = pendingServedCount;
-    stationPrefs.begin("st_stats", false);
-    stationPrefs.putUInt("served", totalSuccessToday);
-    stationPrefs.end();
+    uint32_t hostServed = pendingServedCount;
+    // เขียน NVS เฉพาะตอนค่าจริง ๆ เปลี่ยน เพื่อลดการสึกหรอของแฟลช (heartbeat มาทุก 6 วินาที)
+    if (hostServed != totalSuccessToday) {
+      totalSuccessToday = hostServed;
+      stationPrefs.begin("st_stats", false);
+      stationPrefs.putUInt("served", totalSuccessToday);
+      stationPrefs.end();
+    }
 
     if (currentState == STATE_STANDBY && currentStationPage == 2 && isScreenOn) {
       tft.fillRect(12, 60, 90, 28, getStCardBg());
       tft.setTextColor(getStGreen(), getStCardBg());
       tft.setTextSize(3);
       tft.setCursor(14, 62);
-      tft.printf("%d", totalSuccessToday);
+      tft.printf("%u", (unsigned)totalSuccessToday);
       tft.fillRect(12, 108, 130, 22, getStCardBg());
       tft.setTextColor(getStYellow(), getStCardBg());
       tft.setTextSize(2);
       tft.setCursor(14, 110);
-      tft.printf("%d B.", totalSuccessToday * 35);
+      tft.printf("%u B.", (unsigned)(totalSuccessToday * 35));
     }
+  }
+
+  if (pendingThemeUpdate) applyPendingTheme();
+
+  // รีเฟรชแถบสถานะลิงก์/แบตเตอรี่มุมขวาบนของหน้าปกติ
+  if (isScreenOn && (currentState == STATE_STANDBY || currentState == STATE_STATUS) &&
+      (millis() - lastHeaderRefresh >= HEADER_REFRESH_MS)) {
+    lastHeaderRefresh = millis();
+    updateStationHeaderStatus(false);
   }
 
   if (currentState == STATE_SCANNING_SENT &&
@@ -1559,6 +1708,8 @@ void loop() {
 
   if (hasNewPacket) {
     hasNewPacket = false;
+    // นับยอดที่นี่ ไม่ใช่ซ่อนไว้ใน displayResult() ซึ่งเป็นฟังก์ชันวาดจอ
+    if (strcmp(receivedPacketBuffer.status, "SUCCESS") == 0) totalSuccessToday++;
     displayResult(String(receivedPacketBuffer.status), 
                   String(receivedPacketBuffer.name), 
                   String(receivedPacketBuffer.studentId), 
@@ -1577,9 +1728,7 @@ void loop() {
   }
 
   if (currentState == STATE_RESULT_DISPLAY && millis() > stateHoldUntil) {
-    currentState = STATE_STANDBY;
-    currentStationPage = 1;
-    displayTapCardStandby();
+    showStationPage(1, true);
   }
 
   if (millis() - lastHostAckTime > HOST_OFFLINE_TIMEOUT) {
@@ -1590,11 +1739,11 @@ void loop() {
 
   if (pendingTimeSync) {
     char timeCopy[24];
-    noInterrupts();
+    portENTER_CRITICAL(&espnowMux);
     strncpy(timeCopy, pendingHostTime, sizeof(timeCopy) - 1);
     timeCopy[sizeof(timeCopy) - 1] = '\0';
     pendingTimeSync = false;
-    interrupts();
+    portEXIT_CRITICAL(&espnowMux);
     syncInternalClock(timeCopy);
   }
 
@@ -1608,7 +1757,7 @@ void loop() {
     hbPkt.msgType = MSG_HEARTBEAT;
     hbPkt.stationId = currentStationId;
     hbPkt.seq = 0;
-    hbPkt.systemVoltage = readBatteryVoltage();
+    hbPkt.systemVoltage = readBatteryVoltage(true);
     sendToHost((uint8_t *)&hbPkt, sizeof(StationPacket));
   }
 
