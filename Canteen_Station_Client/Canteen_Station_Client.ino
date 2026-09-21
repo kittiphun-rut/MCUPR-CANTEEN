@@ -288,6 +288,7 @@ void showStationPage(int page, bool fullRedraw);
 void applyHostConfig();
 void showThemeLockedNotice();
 void drawStationBottomBar(String instruction);
+void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uint16_t bgColor);
 void soundWelcome();
 void soundCreditJingle();
 void soundSuccess();
@@ -460,6 +461,27 @@ void drawStationTopBar(String title) {
   if (title.length() > 30) title = title.substring(0, 30);
   tft.print(title);
   updateStationHeaderStatus(true);
+}
+
+// สัญลักษณ์แตะบัตร RFID: ตัวบัตรพร้อมชิป และคลื่นสัญญาณสามชั้นแบบ contactless
+// วาดด้วยพรีมิทีฟของ Adafruit GFX ล้วน ๆ จึงไม่กินแฟลชเพิ่มเหมือนการฝังบิตแมป
+// drawCircleHelper ใช้บิต 0x2 (เสี้ยวบนขวา) และ 0x4 (เสี้ยวล่างขวา) รวมกันเป็นครึ่งขวา
+void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uint16_t bgColor) {
+  // ตัวบัตร วาดสองชั้นให้เส้นหนาขึ้นเพื่อให้มองเห็นชัดจากระยะไกล
+  tft.drawRoundRect(cx - 33, cy - 15, 42, 30, 5, cardColor);
+  tft.drawRoundRect(cx - 32, cy - 14, 40, 28, 4, cardColor);
+
+  // ชิปสัมผัสบนหน้าบัตร
+  tft.fillRoundRect(cx - 27, cy - 8, 12, 10, 2, cardColor);
+  tft.drawFastHLine(cx - 27, cy - 4, 12, bgColor);
+  tft.drawFastVLine(cx - 21, cy - 8, 10, bgColor);
+
+  // คลื่นสัญญาณสามชั้น ไล่รัศมีออกไปทางขวา
+  for (int i = 0; i < 3; i++) {
+    int r = 9 + i * 6;
+    tft.drawCircleHelper(cx + 14, cy, r, 0x6, waveColor);
+    tft.drawCircleHelper(cx + 14, cy, r + 1, 0x6, waveColor);
+  }
 }
 
 void drawStationBottomBar(String instruction) {
@@ -782,24 +804,39 @@ void displayTapCardStandby() {
 
   drawStationTopBar(String(dynamicShopLabel) + " TERMINAL");
 
-  drawStationCard(16, 36, 288, 128, getStGreen(), getStCardBg());
-  drawStationPillBadge(32, 48, 256, 20, "READY FOR RFID CARD TAP", isStationDarkMode ? 0x0000 : 0xFFFF, getStGreen());
+  // การ์ดบน: ป้ายสถานะ สัญลักษณ์แตะบัตร และคำสั่งหลัก
+  drawStationCard(10, 30, 300, 116, getStGreen(), getStCardBg());
+  drawStationPillBadge(26, 36, 268, 18, "READY FOR RFID CARD TAP",
+                       isStationDarkMode ? 0x0000 : 0xFFFF, getStGreen());
 
+  drawRfidTapIcon(160, 82, getStTextMain(), getStGreen(), getStCardBg());
+
+  // "TAP CARD HERE" ขนาด 3 กว้าง 234px จัดกึ่งกลางจอ 320px
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(3);
-  tft.setCursor(48, 86);
-  tft.println("TAP CARD HERE");
+  tft.setCursor(43, 114);
+  tft.print("TAP CARD HERE");
 
-  tft.setTextColor(getStYellow(), getStCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(68, 126);
-  tft.println("Subsidy Quota: 35 THB / Day");
+  // การ์ดล่าง: สิทธิ์ต่อวัน ยกตัวเลขขึ้นมาเป็นขนาด 3 ให้อ่านได้จากระยะไกล
+  drawStationCard(10, 152, 300, 46, getStYellow(), getStCardBg());
 
-  drawStationCard(16, 172, 288, 38, getStCardBorder(), getStCardBg());
+  // "SUBSIDY QUOTA" ขนาด 1 กว้าง 78px จัดกึ่งกลางการ์ดกว้าง 300px
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
-  tft.setCursor(28, 184);
-  tft.println("Protocol: ESP-NOW Channel 1 Secured");
+  tft.setCursor(121, 158);
+  tft.print("SUBSIDY QUOTA");
+
+  // ตัวเลขสิทธิ์ ขนาด 3 กว้าง 216px จัดกึ่งกลางเช่นกัน
+  tft.setTextColor(getStYellow(), getStCardBg());
+  tft.setTextSize(3);
+  tft.setCursor(52, 170);
+  tft.print("35 THB / DAY");
+
+  // บรรทัดโปรโตคอลย้ายมาอยู่นอกการ์ด จัดกึ่งกลางจอ
+  tft.setTextColor(getStTextMuted(), getStBg());
+  tft.setTextSize(1);
+  tft.setCursor(55, 204);
+  tft.print("Protocol: ESP-NOW Channel 1 Secured");
 
   drawStationBottomBar("PAGE 1/3 | PRESS BUTTON TO CYCLE");
 }
