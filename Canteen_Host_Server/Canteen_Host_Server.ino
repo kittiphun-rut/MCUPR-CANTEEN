@@ -2,7 +2,7 @@
  * ============================================================================
  * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
  * System: Central Host Server & Gateway Monitor
- * Version: 107.0.1 (Production Master: Stabilized Screensaver & Color Takeover)
+ * Version: 108.0.0 (Hardened: Safe CSV, Session Security, Live Bento Portal)
  * Release Date: กันยายน 2569 (September 2026)
  * 
  * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
@@ -31,8 +31,9 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <RTClib.h>
+#include <esp_random.h>
 
-#define APP_VERSION         "107.0.1"
+#define APP_VERSION         "108.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -170,6 +171,10 @@ typedef struct __attribute__((packed)) {
   uint8_t darkMode;
 } HostConfigPacket;
 
+static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
+static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
+static_assert(sizeof(HostConfigPacket) == 5, "HostConfigPacket size mismatch");
+
 struct StationNode {
   bool isOnline = false;
   int rssi = -100;
@@ -179,6 +184,7 @@ struct StationNode {
 };
 StationNode stationNodes[4];
 bool stationPeerReady[4] = {false, false, false, false};
+bool stationThemeSent[4] = {false, false, false, false};
 volatile bool hbAckPending[4] = {false, false, false, false};
 
 uint16_t lastScanSeq[4] = {0, 0, 0, 0};
@@ -224,9 +230,20 @@ void renderScreensaver(bool fullRedraw);
 void renderDeveloperCredit();
 void displayHostLiveScan(String uid, String studentId, String status, int stId);
 void playBootAnimation();
-String getLoginHTML(bool hasError = false);
+String getLoginHTML(const String &errorMsg = "");
 String getHTML();
-void sendAlert(String message, String redirectUrl = "/");
+void sendJson(bool ok, const String &message);
+bool requireAuth(bool isApi = true);
+String htmlEscape(const String &raw);
+String jsonEscape(const String &raw);
+String csvQuote(const String &field);
+int parseCsvLine(const String &line, String *out, int maxFields);
+uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize);
+void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg);
+void handleDashboardAPI();
+void handleManualClaim();
+void handleDailyReset();
+void handleSaveShops();
 void saveDatabaseToFS();
 void loadDatabaseFromFS();
 void saveAdminsToFS();
@@ -242,7 +259,7 @@ String generateRefNo(int stationId);
 void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi);
 float calculateCpuLoad();
 float getChipTemperature();
-float readHostBatteryVoltage();
+float readHostBatteryVoltage(bool forceFresh = false);
 int getHostBatteryPercentage(float voltage);
 void drawBentoCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor);
 void drawBentoPillBadge(int x, int y, int w, int h, const char* text, uint16_t fgColor, uint16_t bgColor);
@@ -298,9 +315,16 @@ QueueHandle_t scanQueue = NULL;
 File fsUploadFile;
 String lastScannedUID       = "-";
 String lastScannedStudentId = "-";
+String lastScannedRefNo     = "-";   // เก็บเลขอ้างอิงจริงของรายการล่าสุด
 int lastScannedStation      = 0;
 String lastScannedStatus    = "READY";
 uint32_t transactionCounter = 0;
+
+// ป้องกันการเดารหัสผ่านแบบสุ่มซ้ำ ๆ ที่หน้า /login
+int loginFailCount           = 0;
+unsigned long loginLockUntil = 0;
+const int LOGIN_MAX_FAILS         = 5;
+const unsigned long LOGIN_LOCK_MS = 60000;
 
 int currentHostPage         = 0;
 const int TOTAL_PAGES       = 3;
@@ -355,15 +379,26 @@ void ledDuplicate() { setLedColor(65, 25, 0); }
 void ledRejected()  { setLedColor(65, 0, 0); }
 void ledOff()       { setLedColor(0, 0, 0); }
 
-float readHostBatteryVoltage() {
+float cachedHostVoltage            = 0.0f;
+unsigned long lastHostBatteryReadMs = 0;
+const unsigned long BATTERY_CACHE_MS = 3000;
+
+// เดิมฟังก์ชันนี้ใช้ delay(2) แปดรอบ = บล็อกลูปหลัก 16 ms ทุกครั้งที่วาดแถบบน
+float readHostBatteryVoltage(bool forceFresh) {
+  unsigned long now = millis();
+  if (!forceFresh && lastHostBatteryReadMs != 0 && (now - lastHostBatteryReadMs) < BATTERY_CACHE_MS) {
+    return cachedHostVoltage;
+  }
   uint32_t sum = 0;
   for (int i = 0; i < 8; i++) {
     sum += analogRead(BATTERY_ADC_PIN);
-    delay(2);
+    delayMicroseconds(300);
   }
   float avgRaw = sum / 8.0f;
   float pinVoltage = (avgRaw / 4095.0f) * 3.3f;
-  return pinVoltage * 2.0f;
+  cachedHostVoltage = pinVoltage * 2.0f;
+  lastHostBatteryReadMs = (millis() == 0) ? 1 : millis();
+  return cachedHostVoltage;
 }
 
 int getHostBatteryPercentage(float voltage) {
@@ -373,6 +408,102 @@ int getHostBatteryPercentage(float voltage) {
   if (percent > 100) percent = 100;
   if (percent < 0) percent = 0;
   return percent;
+}
+
+// ---------------------------------------------------------------------------
+// ตัวช่วยความปลอดภัยของสตริง: กันชื่อที่มี < > & " ' ทำให้ HTML/JSON/CSV พัง
+// ---------------------------------------------------------------------------
+String htmlEscape(const String &raw) {
+  String out;
+  out.reserve(raw.length() + 8);
+  for (size_t i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    switch (c) {
+      case '&':  out += "&amp;";  break;
+      case '<':  out += "&lt;";   break;
+      case '>':  out += "&gt;";   break;
+      case '"':  out += "&quot;"; break;
+      case '\'': out += "&#39;";  break;
+      default:   out += c;        break;
+    }
+  }
+  return out;
+}
+
+String jsonEscape(const String &raw) {
+  String out;
+  out.reserve(raw.length() + 8);
+  for (size_t i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if (c == '\t') out += "\\t";
+    else if ((uint8_t)c < 0x20) { /* ตัดอักขระควบคุมทิ้ง */ }
+    else out += c;
+  }
+  return out;
+}
+
+// ครอบฟิลด์ด้วยเครื่องหมายคำพูดเสมอ เพื่อให้ชื่อที่มีลูกน้ำไม่ทำให้ระเบียนเพี้ยน
+String csvQuote(const String &field) {
+  String out = "\"";
+  for (size_t i = 0; i < field.length(); i++) {
+    char c = field[i];
+    if (c == '"') out += "\"\"";
+    else if (c == '\r' || c == '\n') out += ' ';
+    else out += c;
+  }
+  out += "\"";
+  return out;
+}
+
+// แยกฟิลด์ CSV โดยเข้าใจเครื่องหมายคำพูด (อ่านไฟล์รุ่นเก่าที่ไม่มีคำพูดได้ด้วย)
+int parseCsvLine(const String &line, String *out, int maxFields) {
+  int count = 0;
+  String cur = "";
+  bool inQuotes = false;
+  for (size_t i = 0; i < line.length(); i++) {
+    char c = line[i];
+    if (inQuotes) {
+      if (c == '"') {
+        if (i + 1 < line.length() && line[i + 1] == '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += c;
+    } else {
+      if (c == '"') inQuotes = true;
+      else if (c == ',') {
+        if (count < maxFields) { cur.trim(); out[count++] = cur; }
+        cur = "";
+        if (count >= maxFields) return count;
+      } else cur += c;
+    }
+  }
+  if (count < maxFields) { cur.trim(); out[count++] = cur; }
+  return count;
+}
+
+// เลือกขนาดฟอนต์ที่ใหญ่ที่สุดที่ยังพอดีกรอบ (ฟอนต์ GFX กว้าง 6px ต่อ 1 size)
+uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize) {
+  int len = (int)strlen(text);
+  if (len <= 0) return 1;
+  for (uint8_t sz = maxSize; sz > 1; sz--) {
+    if (len * 6 * (int)sz <= maxWidth) return sz;
+  }
+  return 1;
+}
+
+void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg) {
+  uint8_t sz = fitTextSize(text, w - 6, maxSize);
+  int textW = (int)strlen(text) * 6 * (int)sz;
+  int textX = x + (w - textW) / 2;
+  if (textX < x + 2) textX = x + 2;
+  int textY = y + (h - 8 * (int)sz) / 2;
+  if (textY < y) textY = y;
+  tft.setTextSize(sz);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(textX, textY);
+  tft.print(text);
 }
 
 void drawBentoCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor) {
@@ -617,14 +748,22 @@ void soundScreensaverBeep() { tone(BUZZER_PIN, 2400, 50); delay(70); tone(BUZZER
 void soundHomeBeep() { tone(BUZZER_PIN, 1800, 70); delay(80); tone(BUZZER_PIN, 2500, 100); }
 void soundScanSuccess() { tone(BUZZER_PIN, 1800, 80); delay(100); tone(BUZZER_PIN, 2400, 100); }
 
-void sendAlert(String message, String redirectUrl) {
-  String html = "<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>";
-  html += "<script>";
-  html += "alert('" + message + "');";
-  html += "window.location.href = '" + redirectUrl + "';";
-  html += "</script>";
-  html += "</body></html>";
-  server.send(200, "text/html; charset=utf-8", html);
+// เดิมตอบกลับเป็นหน้า HTML ที่เรียก alert() แล้วรีโหลดทั้งหน้า ซึ่งทำให้เสียตำแหน่ง
+// แท็บที่ค้างอยู่ และข้อความที่มีเครื่องหมาย ' จะทำให้สคริปต์พัง ตอนนี้ตอบเป็น JSON
+void sendJson(bool ok, const String &message) {
+  String out = "{\"ok\":";
+  out += ok ? "true" : "false";
+  out += ",\"msg\":\"";
+  out += jsonEscape(message);
+  out += "\"}";
+  server.send(ok ? 200 : 400, "application/json; charset=utf-8", out);
+}
+
+bool requireAuth(bool isApi) {
+  if (isAuthenticated()) return true;
+  if (isApi) server.send(401, "application/json; charset=utf-8", "{\"ok\":false,\"msg\":\"UNAUTHORIZED\"}");
+  else redirectToLogin();
+  return false;
 }
 
 String generateRefNo(int stationId) {
@@ -682,11 +821,15 @@ void loadAdminsFromFS() {
   }
 }
 
+// random() ไม่ได้ถูก seed จึงให้ผลชุดเดิมทุกครั้งที่บูต ทำให้เดา session token ได้
+// เปลี่ยนมาใช้ตัวสร้างเลขสุ่มฮาร์ดแวร์ของ ESP32 (128 บิต)
 String generateSessionToken() {
-  String token = "";
-  const char chars[] = "abcdef0123456789";
-  for (int i = 0; i < 24; i++) token += chars[random(0, 16)];
-  return token;
+  char buf[33];
+  for (int i = 0; i < 4; i++) {
+    snprintf(buf + (i * 8), 9, "%08x", (unsigned)esp_random());
+  }
+  buf[32] = '\0';
+  return String(buf);
 }
 
 bool isAuthenticated() {
@@ -701,11 +844,13 @@ bool isAuthenticated() {
 
   for (int i = 0; i < 3; i++) {
     if (activeSessions[i].token.length() > 0 && activeSessions[i].token == token) {
-      if (millis() < activeSessions[i].expiry) {
-        activeSessions[i].expiry = millis() + 7200000;
+      // เทียบแบบ wrap-safe แทน millis() < expiry ที่พังเมื่อ millis() ล้นที่ 49 วัน
+      if ((long)(millis() - activeSessions[i].expiry) < 0) {
+        activeSessions[i].expiry = millis() + 7200000UL;
         return true;
       } else {
         activeSessions[i].token = "";
+        activeSessions[i].username = "";
       }
     }
   }
@@ -717,7 +862,7 @@ void redirectToLogin() {
   server.send(302, "text/plain", "");
 }
 
-String getLoginHTML(bool hasError) {
+String getLoginHTML(const String &errorMsg) {
   String html = R"rawliteral(<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -751,8 +896,8 @@ String getLoginHTML(bool hasError) {
     </div>
 )rawliteral";
 
-  if (hasError) {
-    html += "<div class='error-box'>⚠️ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง</div>";
+  if (errorMsg.length() > 0) {
+    html += "<div class='error-box'>⚠️ " + htmlEscape(errorMsg) + "</div>";
   }
 
   html += R"rawliteral(
@@ -890,10 +1035,10 @@ void renderHostPage(bool fullRedraw) {
     tft.printf("%d", usedCount);
     tft.setTextSize(1);
     tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.printf(" / %d pax", db.size());
+    tft.printf(" / %u pax", (unsigned)db.size());
 
     int barW = 134;
-    int progressW = (db.size() > 0) ? (usedCount * barW) / db.size() : 0;
+    int progressW = (db.size() > 0) ? (int)((usedCount * barW) / db.size()) : 0;
     if (progressW > barW) progressW = barW;
     tft.drawRoundRect(14, 98, barW + 2, 8, 3, getTftCardBorder());
     tft.fillRoundRect(15, 99, barW, 6, 2, getTftCardBg());
@@ -920,11 +1065,11 @@ void renderHostPage(bool fullRedraw) {
     tft.setTextColor(getTftTextMuted(), getTftCardBg());
     tft.print("MEM : ");
     tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.printf("%dMB OPI\n", ESP.getPsramSize() / 1024 / 1024);
+    tft.printf("%uMB OPI\n", (unsigned)(ESP.getPsramSize() / 1024 / 1024));
 
     tft.setCursor(172, 106);
     tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.printf("HEAP: %d KB\n", ESP.getFreeHeap() / 1024);
+    tft.printf("HEAP: %u KB\n", (unsigned)(ESP.getFreeHeap() / 1024));
 
     tft.fillRect(14, 160, 134, 24, getTftCardBg());
     tft.setTextColor(getTftAccentYellow(), getTftCardBg());
@@ -1054,8 +1199,8 @@ void renderHostPage(bool fullRedraw) {
       tft.println("SYSTEM STATUS");
 
       tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setCursor(172, 154); tft.printf("STUDENTS: %d pax\n", db.size());
-      tft.setCursor(172, 168); tft.printf("OFFICERS: %d / 3\n", adminUsers.size());
+      tft.setCursor(172, 154); tft.printf("STUDENTS: %u pax\n", (unsigned)db.size());
+      tft.setCursor(172, 168); tft.printf("OFFICERS: %u / 3\n", (unsigned)adminUsers.size());
       tft.setTextColor(getTftAccentCyan(), getTftCardBg());
       tft.setCursor(172, 182); tft.println("STORAGE : LITTLEFS OK");
 
@@ -1072,7 +1217,9 @@ void renderHostPage(bool fullRedraw) {
       tft.setTextSize(1);
       tft.setCursor(14, 80);
       tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.printf("ID: %s | REF: %s\n", lastScannedStudentId.c_str(), generateRefNo(lastScannedStation).c_str());
+      // เดิมเรียก generateRefNo() ตรงนี้ ทำให้สร้างเลขอ้างอิง "ใหม่" ทุกครั้งที่วาดจอ
+      // เลขบนจอจึงไม่ตรงกับที่บันทึกไว้จริง และ transactionCounter ก็วิ่งขึ้นเรื่อย ๆ
+      tft.printf("ID: %s | REF: %s\n", lastScannedStudentId.c_str(), lastScannedRefNo.c_str());
 
       if (lastScannedStatus == "APPROVED") {
         drawBentoPillBadge(14, 98, 120, 16, "[APPROVED 35B]", getTftAccentGreen(), 0x01E4);
@@ -1117,7 +1264,7 @@ void renderScreensaver(bool fullRedraw) {
     tft.print(dateStr);
 
     char statBuf[48];
-    snprintf(statBuf, sizeof(statBuf), "CLAIMED: %3d / %3d STUDENTS (%5d B.)", usedCount, db.size(), usedCount * 35);
+    snprintf(statBuf, sizeof(statBuf), "CLAIMED: %3d / %3d STUDENTS (%5d B.)", usedCount, (int)db.size(), usedCount * 35);
     int statLen = strlen(statBuf) * 6;
     int posX = max(24, (320 - statLen) / 2);
     tft.setTextColor(getTftAccentGreen(), getTftCardBg());
@@ -1127,7 +1274,8 @@ void renderScreensaver(bool fullRedraw) {
 
     float hVolt = readHostBatteryVoltage();
     char statBuf2[48];
-    snprintf(statBuf2, sizeof(statBuf2), "BATT: %d%% | CORE: %.1fC | PSRAM: 8MB", getHostBatteryPercentage(hVolt), getChipTemperature());
+    snprintf(statBuf2, sizeof(statBuf2), "BATT: %d%% | CORE: %.1fC | HEAP: %uKB",
+             getHostBatteryPercentage(hVolt), getChipTemperature(), (unsigned)(ESP.getFreeHeap() / 1024));
     int statLen2 = strlen(statBuf2) * 6;
     int posX2 = max(24, (320 - statLen2) / 2);
     tft.setTextColor(getTftTextMuted(), getTftCardBg());
@@ -1213,12 +1361,8 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
   tft.fillScreen(screenBg);
 
   tft.fillRect(0, 0, 320, 36, bannerBg);
-  tft.setTextSize(2);
-  tft.setTextColor(bannerFg, bannerBg);
-  int titleLen = strlen(headerTitle) * 12;
-  int titleX = max(4, (320 - titleLen) / 2);
-  tft.setCursor(titleX, 10);
-  tft.print(headerTitle);
+  // ย่อฟอนต์อัตโนมัติ: หัวข้อยาว 30 ตัวอักษรที่ size 2 กว้าง 360px ล้นจอ 320px
+  drawFitCenteredText(0, 0, 320, 36, headerTitle, 2, bannerFg, bannerBg);
 
   tft.fillRoundRect(8, 44, 304, 188, 8, cardBg);
   tft.drawRoundRect(8, 44, 304, 188, 8, accentColor);
@@ -1258,12 +1402,7 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
   tft.print(maskUID(uid));
 
   tft.fillRoundRect(16, 184, 288, 36, 6, bannerBg);
-  tft.setTextSize(1);
-  tft.setTextColor(bannerFg, bannerBg);
-  int descLen = strlen(footerDesc) * 6;
-  int descX = max(20, (320 - descLen) / 2);
-  tft.setCursor(descX, 198);
-  tft.print(footerDesc);
+  drawFitCenteredText(16, 184, 288, 36, footerDesc, 1, bannerFg, bannerBg);
 }
 
 void renderDeveloperCredit() {
@@ -1293,7 +1432,7 @@ void renderDeveloperCredit() {
 
   tft.setTextColor(getTftTextMuted(), getTftCardBg());
   tft.setCursor(22, 134); tft.printf("Firmware: v%s (Bento Edition)\n", APP_VERSION);
-  tft.setCursor(22, 150); tft.printf("Hardware: ESP32-S3 DevKitC (N16R8, PSRAM %dMB)\n", ESP.getPsramSize()/1024/1024);
+  tft.setCursor(22, 150); tft.printf("Hardware: ESP32-S3 DevKitC (N16R8, PSRAM %uMB)\n", (unsigned)(ESP.getPsramSize()/1024/1024));
   tft.setCursor(22, 166); tft.println("Display : 2.8\" ST7789V 320x240 Modular Bento");
 
   drawBentoBottomBar("[ PRESS BUTTON TO RETURN TO DASHBOARD ]");
@@ -1359,6 +1498,7 @@ void handleHostButton() {
       preferences.putBool("tft_dark", isTftDarkMode);
       preferences.end();
       soundThemeSwitch();
+      for (int i = 0; i < 4; i++) stationThemeSent[i] = true;
       broadcastStationTheme();
       renderHostPage(true);
     }
@@ -1396,12 +1536,13 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
       }
     }
 
+    if (!stationNodes[stId - 1].isOnline) stationThemeSent[stId - 1] = false;
     stationNodes[stId - 1].isOnline = true;
     stationNodes[stId - 1].rssi = currentRssi;
     stationNodes[stId - 1].systemVoltage = pkt.systemVoltage;
     stationNodes[stId - 1].lastSeen = millis();
     bool macChanged = (memcmp(stationNodes[stId - 1].mac, mac, 6) != 0);
-    if (macChanged) stationPeerReady[stId - 1] = false;
+    if (macChanged) { stationPeerReady[stId - 1] = false; stationThemeSent[stId - 1] = false; }
     memcpy(stationNodes[stId - 1].mac, mac, 6);
   }
 
@@ -1430,6 +1571,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
 
   lastScannedUID = uid;
   lastScannedStation = pkt.stationId;
+  lastScannedRefNo = "-";
 
   if (pkt.stationId >= 1 && pkt.stationId <= 4 &&
       pkt.seq != 0 &&
@@ -1497,6 +1639,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         String msg = "SHOP 0" + String(s.station);
         strncpy(resp.message, msg.c_str(), sizeof(resp.message) - 1);
         lastScannedStatus = "DUPLICATE";
+        lastScannedRefNo = s.refNo;
       } else {
         String currentTimestamp = getRealTimeStr();
         String currentRefNo = generateRefNo(pkt.stationId);
@@ -1506,6 +1649,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         s.claimTime = currentTimestamp;
         s.refNo = currentRefNo;
         lastScannedStatus = "APPROVED";
+        lastScannedRefNo = currentRefNo;
 
         strncpy(resp.status, "SUCCESS", sizeof(resp.status) - 1);
         strncpy(resp.refNo, currentRefNo.c_str(), sizeof(resp.refNo) - 1);
@@ -1554,14 +1698,173 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   }
 }
 
+// แดชบอร์ดสดของเว็บพอร์ทัล: ตัวเลขโควตา ฮาร์ดแวร์แม่ข่าย และสถานะจุดบริการทั้ง 4
+void handleDashboardAPI() {
+  if (!requireAuth()) return;
+
+  int usedCount = 0;
+  int shopCounts[4] = {0, 0, 0, 0};
+  int tempWaiting = 0;
+  for (const auto& st : db) {
+    if (st.claimed) {
+      usedCount++;
+      if (st.station >= 1 && st.station <= 4) shopCounts[st.station - 1]++;
+    }
+    if (st.isTempCard && !st.claimed) tempWaiting++;
+  }
+
+  int total = (int)db.size();
+  int quotaPct = (total > 0) ? (usedCount * 100) / total : 0;
+  float volt = readHostBatteryVoltage();
+
+  char win[16];
+  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d", serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+
+  String j = "{";
+  j += "\"temp\":" + String(getChipTemperature(), 1);
+  j += ",\"cpu\":" + String(calculateCpuLoad(), 1);
+  j += ",\"heap\":" + String((unsigned)(ESP.getFreeHeap() / 1024));
+  j += ",\"uptime\":" + String((unsigned long)(millis() / 1000));
+  j += ",\"battPct\":" + String(getHostBatteryPercentage(volt));
+  j += ",\"battVolt\":" + String(volt, 2);
+  j += ",\"used\":" + String(usedCount);
+  j += ",\"total\":" + String(total);
+  j += ",\"remaining\":" + String(total - usedCount);
+  j += ",\"disbursed\":" + String(usedCount * 35);
+  j += ",\"quotaPct\":" + String(quotaPct);
+  j += ",\"tempWaiting\":" + String(tempWaiting);
+  j += ",\"officers\":" + String((unsigned)adminUsers.size());
+  j += ",\"clock\":\"" + jsonEscape(getRealTimeStr()) + "\"";
+  j += ",\"serviceOpen\":" + String(isWithinServiceTime() ? "true" : "false");
+  j += ",\"window\":\"" + String(win) + "\"";
+
+  j += ",\"shops\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
+    j += ",\"vendor\":\"" + jsonEscape(shops[i].vendor) + "\"";
+    j += ",\"count\":" + String(shopCounts[i]);
+    j += ",\"amount\":" + String(shopCounts[i] * 35) + "}";
+  }
+  j += "]";
+
+  j += ",\"stations\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    bool on = stationNodes[i].isOnline;
+    j += "{\"id\":" + String(i + 1);
+    j += ",\"online\":" + String(on ? "true" : "false");
+    j += ",\"rssi\":" + String(on ? stationNodes[i].rssi : -100);
+    j += ",\"quality\":" + String(on ? calculateSignalQuality(stationNodes[i].rssi) : 0);
+    j += ",\"battPct\":" + String(on ? getHostBatteryPercentage(stationNodes[i].systemVoltage) : 0);
+    j += ",\"volt\":" + String(on ? stationNodes[i].systemVoltage : 0.0f, 2);
+    j += ",\"ageSec\":" + String(on ? (unsigned long)((millis() - stationNodes[i].lastSeen) / 1000UL) : 0UL);
+    j += "}";
+  }
+  j += "]";
+
+  j += ",\"lastScan\":{";
+  j += "\"uid\":\"" + jsonEscape(maskUID(lastScannedUID)) + "\"";
+  j += ",\"id\":\"" + jsonEscape(lastScannedStudentId) + "\"";
+  j += ",\"ref\":\"" + jsonEscape(lastScannedRefNo) + "\"";
+  j += ",\"status\":\"" + jsonEscape(lastScannedStatus) + "\"";
+  j += ",\"station\":" + String(lastScannedStation) + "}";
+  j += "}";
+
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
+void handleManualClaim() {
+  if (!requireAuth()) return;
+  String id = server.arg("id"); id.trim();
+  int station = server.arg("station").toInt();
+  if (station < 1 || station > 4) { sendJson(false, "หมายเลขจุดบริการต้องอยู่ระหว่าง 1-4"); return; }
+
+  for (auto& st : db) {
+    if (st.studentId == id) {
+      if (st.claimed) { sendJson(false, "นิสิต " + id + " ใช้สิทธิ์ของวันนี้ไปแล้ว"); return; }
+      st.claimed = true; st.station = station;
+      st.claimTime = getRealTimeStr(); st.refNo = generateRefNo(station);
+      lastScannedUID = st.uid; lastScannedStudentId = st.studentId;
+      lastScannedStation = station; lastScannedStatus = "APPROVED";
+      lastScannedRefNo = st.refNo;
+      appendLogToFS(st.studentId, st.fullName, st.uid, st.refNo, st.claimTime, station, st.isTempCard ? "Temp Card" : "Normal");
+
+      if (st.isTempCard) {
+        st.uid = st.originalUid;
+        st.originalUid = "";
+        st.isTempCard = false;
+      }
+      saveDatabaseToFS();
+      renderHostPage(true);
+      sendJson(true, "ตัดสิทธิ์ด้วยตนเองให้รหัส " + id + " ที่จุดบริการ " + String(station) + " เรียบร้อย");
+      return;
+    }
+  }
+  sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ");
+}
+
+void handleDailyReset() {
+  if (!requireAuth()) return;
+
+  if (LittleFS.exists("/daily_log.csv")) {
+    DateTime now = rtc.now();
+    char arcName[40];
+    snprintf(arcName, sizeof(arcName), "/arc_%04d%02d%02d_%02d%02d%02d.csv",
+             now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
+    File src = LittleFS.open("/daily_log.csv", "r");
+    File dst = LittleFS.open(arcName, "w");
+    if (src && dst) {
+      uint8_t buf[256];
+      while (src.available()) {
+        size_t n = src.read(buf, sizeof(buf));
+        dst.write(buf, n);
+      }
+    }
+    if (src) src.close();
+    if (dst) dst.close();
+    LittleFS.remove("/daily_log.csv");
+  }
+
+  for (auto& st : db) {
+    if (st.isTempCard) { st.uid = st.originalUid; }
+    st.originalUid = "";
+    st.claimed = false; st.claimTime = "-"; st.refNo = "-"; st.station = 0; st.isTempCard = false;
+  }
+  saveDatabaseToFS();
+  lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedRefNo = "-";
+  lastScannedStation = 0; lastScannedStatus = "RESET";
+  renderHostPage(true);
+  sendJson(true, "ปิดยอดประจำวันและจัดเก็บประวัติเรียบร้อยแล้ว");
+}
+
+void handleSaveShops() {
+  if (!requireAuth()) return;
+  for (int i = 0; i < 4; i++) {
+    String name = server.arg("sname" + String(i));
+    String vendor = server.arg("vname" + String(i));
+    name.trim(); vendor.trim();
+    if (name.length() == 0) { sendJson(false, "กรุณากรอกชื่อร้านที่ " + String(i + 1)); return; }
+    if (name.length() > 48 || vendor.length() > 64) { sendJson(false, "ชื่อร้าน/ผู้ประกอบการยาวเกินกำหนด"); return; }
+    shops[i].name = name;
+    shops[i].vendor = vendor;
+  }
+  saveShopsToFS();
+  renderHostPage(true);
+  sendJson(true, "บันทึกข้อมูลร้านค้าเรียบร้อยแล้ว");
+}
+
 void handleGetStudentsAPI() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!requireAuth()) return;
   int page = server.hasArg("page") ? server.arg("page").toInt() : 1;
   int limit = server.hasArg("limit") ? server.arg("limit").toInt() : 20;
   String search = server.hasArg("search") ? server.arg("search") : "";
   search.trim(); search.toUpperCase();
   if (page < 1) page = 1;
+  // เดิมไม่จำกัดเพดาน limit ผู้ใช้จึงขอ 1000 แถวได้ แล้วเอกสาร JSON ขนาด 8KB
+  // จะล้นจนสตริงที่ส่งกลับไม่สมบูรณ์ ทำให้หน้าเว็บค้าง
   if (limit < 1) limit = 20;
+  if (limit > 100) limit = 100;
 
   std::vector<int> matchedIndices;
   for (size_t i = 0; i < db.size(); i++) {
@@ -1583,7 +1886,7 @@ void handleGetStudentsAPI() {
   int startIdx = (page - 1) * limit;
   int endIdx = min(startIdx + limit, totalItems);
 
-  DynamicJsonDocument doc(8192);
+  DynamicJsonDocument doc(1024 + (size_t)limit * 420);
   doc["totalItems"] = totalItems;
   doc["totalPages"] = totalPages;
   doc["currentPage"] = page;
@@ -1624,7 +1927,7 @@ void handleExportCSV() {
   csv += "--- Summary Payout By Shop ---\n";
   csv += "No.,Shop Name,Vendor,Total Orders,Total Payout (THB)\n";
   for (int i = 0; i < 4; i++) {
-    csv += String(i + 1) + ",\"" + shops[i].name + "\",\"" + shops[i].vendor + "\"," 
+    csv += String(i + 1) + "," + csvQuote(shops[i].name) + "," + csvQuote(shops[i].vendor) + ","
         + String(shopCounts[i]) + "," + String(shopCounts[i] * 35) + "\n";
   }
   csv += "Total Payout,,," + String(totalClaimed) + "," + String(totalClaimed * 35) + "\n\n";
@@ -1640,15 +1943,15 @@ void handleExportCSV() {
     String cardType = s.isTempCard ? "Temporary Card" : "Standard Card";
 
     csv += String(rowNumber++) + ",";
-    csv += "\"" + s.studentId + "\",";
-    csv += "\"" + s.fullName + "\",";
-    csv += "\"" + s.uid + "\",";
-    csv += "\"" + s.refNo + "\",";
-    csv += "\"" + s.claimTime + "\",";
-    csv += "\"" + shopName + "\",";
-    csv += "\"" + vendorName + "\",";
+    csv += csvQuote(s.studentId) + ",";
+    csv += csvQuote(s.fullName) + ",";
+    csv += csvQuote(s.uid) + ",";
+    csv += csvQuote(s.refNo) + ",";
+    csv += csvQuote(s.claimTime) + ",";
+    csv += csvQuote(shopName) + ",";
+    csv += csvQuote(vendorName) + ",";
     csv += "35,";
-    csv += "\"" + cardType + "\"\n";
+    csv += csvQuote(cardType) + "\n";
   }
 
   server.sendHeader("Content-Disposition", "attachment; filename=MCU_Canteen_Claim_Report.csv");
@@ -1656,28 +1959,47 @@ void handleExportCSV() {
 }
 
 void handleSetRTCTime() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!requireAuth()) return;
   if (server.hasArg("date") && server.hasArg("time")) {
     String dStr = server.arg("date");
     String tStr = server.arg("time");
-    int y, m, d, h, mi, s;
+    int y, m, d, h, mi, sec;
     if (sscanf(dStr.c_str(), "%d-%d-%d", &y, &m, &d) == 3 &&
-        sscanf(tStr.c_str(), "%d:%d:%d", &h, &mi, &s) == 3) {
-      rtc.adjust(DateTime(y, m, d, h, mi, s));
-      sendAlert("ตั้งค่านาฬิกา RTC DS3231 สำเร็จเรียบร้อย!", "/");
+        sscanf(tStr.c_str(), "%d:%d:%d", &h, &mi, &sec) == 3 &&
+        y >= 2000 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31 &&
+        h >= 0 && h <= 23 && mi >= 0 && mi <= 59 && sec >= 0 && sec <= 59) {
+      rtc.adjust(DateTime(y, m, d, h, mi, sec));
+      sendJson(true, "ตั้งค่านาฬิกา RTC DS3231 สำเร็จเรียบร้อย");
       return;
     }
   }
-  sendAlert("รูปแบบวันที่หรือเวลาไม่ถูกต้อง", "/");
+  sendJson(false, "รูปแบบวันที่หรือเวลาไม่ถูกต้อง");
+}
+
+// อนุญาตเฉพาะไฟล์ประวัติชื่อ arc_*.csv ที่อยู่ระดับรากเท่านั้น
+// เดิมพารามิเตอร์ file ไม่ถูกกรอง จึงดาวน์โหลด /admins.json ที่เก็บรหัสผ่านได้
+bool isSafeArchiveName(const String &name) {
+  if (!name.startsWith("arc_") || !name.endsWith(".csv")) return false;
+  if (name.length() > 48) return false;
+  for (size_t i = 0; i < name.length(); i++) {
+    char c = name[i];
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+    if (!ok) return false;
+  }
+  if (name.indexOf("..") != -1) return false;
+  return true;
 }
 
 void handleDownloadArchive() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
-  if (server.hasArg("file")) {
-    String filename = server.arg("file");
-    if (!filename.startsWith("/")) filename = "/" + filename;
-    if (LittleFS.exists(filename)) {
-      File f = LittleFS.open(filename, "r");
+  if (!requireAuth(false)) return;
+  String filename = server.arg("file");
+  filename.trim();
+  if (filename.startsWith("/")) filename = filename.substring(1);
+  if (isSafeArchiveName(filename) && LittleFS.exists("/" + filename)) {
+    File f = LittleFS.open("/" + filename, "r");
+    if (f) {
+      server.sendHeader("Content-Disposition", "attachment; filename=" + filename);
       server.streamFile(f, "text/csv");
       f.close();
       return;
@@ -1687,40 +2009,77 @@ void handleDownloadArchive() {
 }
 
 void handleDeleteArchive() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
-  if (server.hasArg("file")) {
-    String filename = server.arg("file");
-    if (!filename.startsWith("/")) filename = "/" + filename;
-    
-    if (filename.startsWith("/arc_") && LittleFS.exists(filename)) {
-      LittleFS.remove(filename);
-      sendAlert("ลบไฟล์ประวัติ " + filename.substring(1) + " เรียบร้อยแล้ว!", "/");
-      return;
-    }
+  if (!requireAuth()) return;
+  String filename = server.arg("file");
+  filename.trim();
+  if (filename.startsWith("/")) filename = filename.substring(1);
+  if (isSafeArchiveName(filename) && LittleFS.exists("/" + filename)) {
+    LittleFS.remove("/" + filename);
+    sendJson(true, "ลบไฟล์ประวัติ " + filename + " เรียบร้อยแล้ว");
+    return;
   }
-  sendAlert("ไม่สามารถลบไฟล์ได้", "/");
+  sendJson(false, "ไม่สามารถลบไฟล์ได้");
 }
 
 void handleSaveStudent() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!requireAuth()) return;
   String oldId = server.arg("oldStudentId"); String sId = server.arg("studentId");
   String name = server.arg("fullName"); String uid = server.arg("uid");
-  sId.trim(); name.trim(); uid.trim();
+  oldId.trim(); sId.trim(); name.trim(); uid.trim();
+
+  if (sId.length() == 0) { sendJson(false, "กรุณากรอกรหัสนิสิต"); return; }
+  if (sId.length() > 24 || name.length() > 96 || uid.length() > 15) {
+    sendJson(false, "ข้อมูลยาวเกินกำหนด (รหัส 24 / ชื่อ 96 / UID 15 อักขระ)"); return;
+  }
+  // กันรหัสนิสิตซ้ำ ซึ่งเดิมเพิ่มซ้ำได้และทำให้การตัดสิทธิ์ไปโดนระเบียนผิดตัว
+  for (const auto& s : db) {
+    if (s.studentId == sId && sId != oldId) { sendJson(false, "รหัสนิสิต " + sId + " มีอยู่ในระบบแล้ว"); return; }
+  }
+  if (uid.length() > 0) {
+    for (const auto& s : db) {
+      if (s.uid == uid && s.studentId != oldId && s.studentId != sId) {
+        sendJson(false, "เลขบัตรนี้ถูกผูกกับรหัส " + s.studentId + " อยู่แล้ว"); return;
+      }
+    }
+  }
+
   if (oldId != "") {
-    for (auto& s : db) { if (s.studentId == oldId) { s.studentId = sId; s.fullName = name; s.uid = uid; break; } }
+    bool found = false;
+    for (auto& s : db) {
+      if (s.studentId == oldId) {
+        s.studentId = sId; s.fullName = name;
+        // แก้ไข UID ของบัตรสำรองต้องไปเขียนที่ originalUid ไม่ใช่ทับบัตรชั่วคราว
+        if (s.isTempCard) s.originalUid = uid;
+        else s.uid = uid;
+        found = true; break;
+      }
+    }
+    if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + oldId + " ในระบบ"); return; }
   } else {
     Student s; s.studentId = sId; s.fullName = name; s.uid = uid; s.originalUid = ""; s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
     db.push_back(s);
   }
-  saveDatabaseToFS(); renderHostPage(true); sendAlert("Beneficiary Saved Successfully!", "/");
+  saveDatabaseToFS(); renderHostPage(true);
+  sendJson(true, "บันทึกข้อมูลผู้มีสิทธิ์เรียบร้อยแล้ว");
 }
 
 void handleSaveTempCard() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!requireAuth()) return;
   String sId = server.arg("studentId"); String uid = server.arg("uid");
-  sId.trim(); uid.trim(); bool found = false;
+  sId.trim(); uid.trim();
+  if (sId.length() == 0 || uid.length() == 0) { sendJson(false, "กรุณากรอกรหัสนิสิตและเลขบัตรสำรอง"); return; }
+  if (uid.length() > 15) { sendJson(false, "เลขบัตรยาวเกิน 15 อักขระ"); return; }
+
+  for (const auto& s : db) {
+    if (s.uid == uid && s.studentId != sId) {
+      sendJson(false, "บัตรใบนี้ถูกผูกกับรหัส " + s.studentId + " อยู่แล้ว"); return;
+    }
+  }
+
+  bool found = false;
   for (auto& s : db) {
     if (s.studentId == sId) {
+      if (s.claimed) { sendJson(false, "นิสิต " + sId + " ใช้สิทธิ์ของวันนี้ไปแล้ว"); return; }
       if (s.originalUid == "") s.originalUid = s.uid;
       s.uid = uid;
       s.isTempCard = true;
@@ -1728,38 +2087,56 @@ void handleSaveTempCard() {
       break;
     }
   }
-  if (!found) { sendAlert("Student ID Not Found!", "/"); return; }
-  saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Assigned Successfully!", "/");
+  if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + sId + " ในระบบ"); return; }
+  saveDatabaseToFS(); renderHostPage(true);
+  sendJson(true, "ผูกบัตรสำรองให้รหัส " + sId + " เรียบร้อยแล้ว");
 }
 
 void handleRemoveTempCard() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
-  String id = server.arg("id");
+  if (!requireAuth()) return;
+  String id = server.arg("id"); id.trim();
+  bool found = false;
   for (auto& s : db) {
     if (s.studentId == id) {
-      if (s.originalUid != "") s.uid = s.originalUid;
+      s.uid = s.originalUid;   // ว่างได้ ถ้าเดิมนิสิตยังไม่เคยมีบัตรประจำตัว
       s.originalUid = "";
       s.isTempCard = false;
+      found = true;
       break;
     }
   }
-  saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Revoked Successfully!", "/");
+  if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ"); return; }
+  saveDatabaseToFS(); renderHostPage(true);
+  sendJson(true, "ยกเลิกบัตรสำรองของรหัส " + id + " เรียบร้อยแล้ว");
 }
 
 void handleDeleteStudent() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
-  String id = server.arg("id");
-  for (auto it = db.begin(); it != db.end(); ++it) { if (it->studentId == id) { db.erase(it); break; } }
-  saveDatabaseToFS(); renderHostPage(true); sendAlert("Beneficiary Removed Successfully!", "/");
+  if (!requireAuth()) return;
+  String id = server.arg("id"); id.trim();
+  bool found = false;
+  for (auto it = db.begin(); it != db.end(); ++it) {
+    if (it->studentId == id) { db.erase(it); found = true; break; }
+  }
+  if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ"); return; }
+  saveDatabaseToFS(); renderHostPage(true);
+  sendJson(true, "ลบรายชื่อรหัส " + id + " เรียบร้อยแล้ว");
 }
 
 void handleSaveAdmin() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!requireAuth()) return;
   String oldUser = server.arg("oldUsername");
   String user = server.arg("username");
   String pass = server.arg("password");
   String dName = server.arg("displayName");
-  user.trim(); pass.trim(); dName.trim();
+  oldUser.trim(); user.trim(); pass.trim(); dName.trim();
+
+  if (user.length() < 3 || user.length() > 24) { sendJson(false, "ชื่อผู้ใช้ต้องยาว 3-24 อักขระ"); return; }
+  if (dName.length() == 0 || dName.length() > 64) { sendJson(false, "กรุณากรอกชื่อ-ตำแหน่ง (ไม่เกิน 64 อักขระ)"); return; }
+  if (oldUser == "" && pass.length() < 8) { sendJson(false, "รหัสผ่านต้องยาวอย่างน้อย 8 อักขระ"); return; }
+  if (pass.length() > 0 && pass.length() < 8) { sendJson(false, "รหัสผ่านต้องยาวอย่างน้อย 8 อักขระ"); return; }
+  for (const auto& u : adminUsers) {
+    if (u.username == user && u.username != oldUser) { sendJson(false, "ชื่อผู้ใช้นี้มีในระบบแล้ว"); return; }
+  }
 
   if (oldUser != "") {
     for (auto& u : adminUsers) {
@@ -1772,14 +2149,8 @@ void handleSaveAdmin() {
     }
   } else {
     if (adminUsers.size() >= 3) {
-      sendAlert("ระบบจำกัดเจ้าหน้าที่ไม่เกิน 3 ท่าน!", "/");
+      sendJson(false, "ระบบจำกัดเจ้าหน้าที่ไม่เกิน 3 ท่าน");
       return;
-    }
-    for (const auto& u : adminUsers) {
-      if (u.username == user) {
-        sendAlert("ชื่อผู้ใช้นี้มีในระบบแล้ว!", "/");
-        return;
-      }
     }
     AdminUser nu;
     nu.username = user;
@@ -1788,24 +2159,31 @@ void handleSaveAdmin() {
     adminUsers.push_back(nu);
   }
   saveAdminsToFS();
-  sendAlert("บันทึกข้อมูลเจ้าหน้าที่เรียบร้อยแล้ว!", "/");
+  sendJson(true, "บันทึกข้อมูลเจ้าหน้าที่เรียบร้อยแล้ว");
 }
 
 void handleDeleteAdmin() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!requireAuth()) return;
   if (adminUsers.size() <= 1) {
-    sendAlert("ไม่สามารถลบได้ ต้องมีเจ้าหน้าที่อย่างน้อย 1 ท่านในระบบ!", "/");
+    sendJson(false, "ไม่สามารถลบได้ ต้องมีเจ้าหน้าที่อย่างน้อย 1 ท่านในระบบ");
     return;
   }
-  String user = server.arg("user");
+  String user = server.arg("user"); user.trim();
+  bool found = false;
   for (auto it = adminUsers.begin(); it != adminUsers.end(); ++it) {
     if (it->username == user) {
+      // ปิด session ที่ยังเปิดค้างของบัญชีที่ถูกลบทันที
+      for (int i = 0; i < 3; i++) {
+        if (activeSessions[i].username == user) { activeSessions[i].token = ""; activeSessions[i].username = ""; }
+      }
       adminUsers.erase(it);
+      found = true;
       break;
     }
   }
+  if (!found) { sendJson(false, "ไม่พบผู้ใช้ " + user + " ในระบบ"); return; }
   saveAdminsToFS();
-  sendAlert("ลบเจ้าหน้าที่เรียบร้อยแล้ว!", "/");
+  sendJson(true, "ลบเจ้าหน้าที่เรียบร้อยแล้ว");
 }
 
 void saveShopsToFS() {
@@ -1837,7 +2215,10 @@ void loadShopsFromFS() {
 void appendLogToFS(String studentId, String fullName, String uid, String refNo, String timestamp, int station, String type) {
   File logFile = LittleFS.open("/daily_log.csv", FILE_APPEND);
   if (logFile) {
-    logFile.printf("%s,%s,%s,%s,%s,%d,35,%s\n", studentId.c_str(), fullName.c_str(), uid.c_str(), refNo.c_str(), timestamp.c_str(), station, type.c_str());
+    // ครอบทุกฟิลด์ด้วยเครื่องหมายคำพูด ชื่อที่มีลูกน้ำจึงไม่ดันฟิลด์อื่นเพี้ยน
+    String line = csvQuote(studentId) + "," + csvQuote(fullName) + "," + csvQuote(uid) + "," +
+                  csvQuote(refNo) + "," + csvQuote(timestamp) + "," + String(station) + ",35," + csvQuote(type);
+    logFile.println(line);
     logFile.close();
   }
 }
@@ -1850,20 +2231,17 @@ void restoreDailyLogs() {
     String line = logFile.readStringUntil('\n');
     line.trim();
     if (line.length() == 0) continue;
-    int c1 = line.indexOf(','); int c2 = line.indexOf(',', c1 + 1);
-    int c3 = line.indexOf(',', c2 + 1); int c4 = line.indexOf(',', c3 + 1);
-    int c5 = line.indexOf(',', c4 + 1); int c6 = line.indexOf(',', c5 + 1);
-    int c7 = line.indexOf(',', c6 + 1);
-    if (c1 != -1 && c2 != -1 && c3 != -1 && c4 != -1 && c5 != -1 && c6 != -1) {
-      String sId = line.substring(0, c1);
-      String ref = line.substring(c3 + 1, c4);
-      String tStamp = line.substring(c4 + 1, c5);
-      int st = line.substring(c5 + 1, c6).toInt();
-      String type = (c7 != -1) ? line.substring(c7 + 1) : "Normal";
+    String f[8];
+    int n = parseCsvLine(line, f, 8);
+    if (n >= 6) {
+      String sId = f[0];
+      String ref = f[3];
+      String tStamp = f[4];
+      int st = f[5].toInt();
+      String type = (n >= 8) ? f[7] : "Normal";
       for (auto& s : db) {
         if (s.studentId == sId) {
           s.claimed = true; s.refNo = ref; s.claimTime = tStamp; s.station = st;
-          if (type == "Temp Card") s.isTempCard = true;
           break;
         }
       }
@@ -1877,8 +2255,8 @@ void saveDatabaseToFS() {
   if (!file) return;
   file.println("studentId,fullName,uid");
   for (const auto& s : db) {
-    String permUid = (s.originalUid != "") ? s.originalUid : s.uid;
-    file.printf("%s,%s,%s\n", s.studentId.c_str(), s.fullName.c_str(), permUid.c_str());
+    String permUid = s.isTempCard ? s.originalUid : s.uid;
+    file.println(csvQuote(s.studentId) + "," + csvQuote(s.fullName) + "," + csvQuote(permUid));
   }
   file.close();
 }
@@ -1893,14 +2271,14 @@ void loadDatabaseFromFS() {
     String line = file.readStringUntil('\n');
     line.trim();
     if (line.length() == 0) continue;
-    if (isHeader) { isHeader = false; continue; }
-    int c1 = line.indexOf(','); int c2 = line.indexOf(',', c1 + 1);
-    if (c1 != -1 && c2 != -1) {
+    if (isHeader) { isHeader = false; if (line.indexOf("studentId") != -1) continue; }
+    String f[3];
+    int n = parseCsvLine(line, f, 3);
+    if (n >= 1 && f[0].length() > 0) {
       Student s;
-      s.studentId = line.substring(0, c1);
-      s.fullName = line.substring(c1 + 1, c2);
-      s.uid = line.substring(c2 + 1);
-      s.uid.trim();
+      s.studentId = f[0];
+      s.fullName = (n >= 2) ? f[1] : "";
+      s.uid = (n >= 3) ? f[2] : "";
       s.originalUid = "";
       s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
       db.push_back(s);
@@ -1911,10 +2289,10 @@ void loadDatabaseFromFS() {
 }
 
 void mergeImportedStudents() {
-  if (!isAuthenticated()) { redirectToLogin(); return; }
-  if (!LittleFS.exists("/temp_import.csv")) { sendAlert("No file uploaded!", "/"); return; }
+  if (!requireAuth()) return;
+  if (!LittleFS.exists("/temp_import.csv")) { sendJson(false, "ไม่พบไฟล์ที่อัปโหลด"); return; }
   File file = LittleFS.open("/temp_import.csv", "r");
-  if (!file) { sendAlert("Failed to open uploaded file!", "/"); return; }
+  if (!file) { sendJson(false, "เปิดไฟล์ที่อัปโหลดไม่สำเร็จ"); return; }
 
   bool isHeader = true;
   int newCount = 0;
@@ -1930,13 +2308,12 @@ void mergeImportedStudents() {
       if (line.indexOf("studentId") != -1 || line.indexOf("รหัส") != -1) continue;
     }
 
-    int c1 = line.indexOf(',');
-    int c2 = line.indexOf(',', c1 + 1);
-    if (c1 != -1) {
-      String sId = line.substring(0, c1);
-      String fName = (c2 != -1) ? line.substring(c1 + 1, c2) : line.substring(c1 + 1);
-      String uId = (c2 != -1) ? line.substring(c2 + 1) : "";
-      sId.trim(); fName.trim(); uId.trim();
+    String f[3];
+    int n = parseCsvLine(line, f, 3);
+    {
+      String sId = f[0];
+      String fName = (n >= 2) ? f[1] : "";
+      String uId = (n >= 3) ? f[2] : "";
 
       if (sId.length() == 0) continue;
 
@@ -1944,9 +2321,10 @@ void mergeImportedStudents() {
       for (auto& s : db) {
         if (s.studentId == sId) {
           if (fName.length() > 0) s.fullName = fName;
-          if (uId.length() > 0 && !s.isTempCard) {
-            s.uid = uId;
-            s.originalUid = "";
+          if (uId.length() > 0) {
+            // ถ้ากำลังถือบัตรสำรองอยู่ ให้ไปอัปเดตบัตรประจำตัวจริงแทน
+            if (s.isTempCard) s.originalUid = uId;
+            else { s.uid = uId; s.originalUid = ""; }
           }
           exists = true;
           updatedCount++;
@@ -1976,12 +2354,13 @@ void mergeImportedStudents() {
   saveDatabaseToFS();
   renderHostPage(true);
 
-  String msg = "นำเข้าสำเร็จ! เพิ่มใหม่: " + String(newCount) + " รายการ, ปรับปรุง: " + String(updatedCount) + " รายการ";
-  sendAlert(msg, "/");
+  String msg = "นำเข้าสำเร็จ — เพิ่มใหม่ " + String(newCount) + " รายการ, ปรับปรุง " + String(updatedCount) + " รายการ";
+  sendJson(true, msg);
 }
 
 void handleFileUpload() {
   if (!isAuthenticated()) return;
+  // หมายเหตุ: ตัวจัดการอัปโหลดตอบกลับไม่ได้ ผลลัพธ์จริงถูกแจ้งใน mergeImportedStudents()
   HTTPUpload& upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
     LittleFS.remove("/temp_import.csv");
@@ -1999,6 +2378,7 @@ void handleFileUpload() {
 String getHTML() {
   int usedCount = 0;
   int shopCounts[4] = {0, 0, 0, 0};
+  (void)shopCounts;   // ตัวเลขรายร้านถูกดึงสดผ่าน /api/dashboard แทนการฝังลง HTML
   int activeTempWaitingCount = 0;
   for (const auto& s : db) {
     if (s.claimed) {
@@ -2015,18 +2395,23 @@ String getHTML() {
 
   String archivesHtml = "";
   File root = LittleFS.open("/");
-  File file = root.openNextFile();
-  while (file) {
-    String fn = String(file.name());
-    if (fn.startsWith("arc_") || fn.startsWith("/arc_")) {
-      String cleanName = fn.startsWith("/") ? fn.substring(1) : fn;
-      archivesHtml += "<tr><td><b>" + cleanName + "</b></td><td>" + String(file.size() / 1024.0, 1) + " KB</td>";
-      archivesHtml += "<td style='text-align:right;'>";
-      archivesHtml += "<a href='/api/archive/download?file=" + cleanName + "' class='btn btn-emerald' style='padding:0.35rem 0.75rem; font-size:0.8rem;'>📥 Download</a> ";
-      archivesHtml += "<a href='/api/archive/delete?file=" + cleanName + "' onclick=\"return confirm('Delete archive " + cleanName + "?');\" class='btn btn-rose' style='padding:0.35rem 0.75rem; font-size:0.8rem;'>🗑️ Delete</a>";
-      archivesHtml += "</td></tr>";
+  if (root) {
+    File file = root.openNextFile();
+    while (file) {
+      String fn = String(file.name());
+      if (fn.startsWith("arc_") || fn.startsWith("/arc_")) {
+        String cleanName = fn.startsWith("/") ? fn.substring(1) : fn;
+        String safeName = htmlEscape(cleanName);
+        archivesHtml += "<tr><td><b>" + safeName + "</b></td><td>" + String(file.size() / 1024.0, 1) + " KB</td>";
+        archivesHtml += "<td style='text-align:right;'>";
+        archivesHtml += "<a href='/api/archive/download?file=" + safeName + "' class='btn btn-emerald' style='padding:0.35rem 0.75rem; font-size:0.8rem;'>📥 Download</a> ";
+        // ใช้ data-attribute แทน onclick ที่ฝังชื่อไฟล์ลงในสตริง JavaScript
+        archivesHtml += "<button type='button' class='btn btn-rose js-archive-delete' data-file='" + safeName + "' style='padding:0.35rem 0.75rem; font-size:0.8rem;'>🗑️ Delete</button>";
+        archivesHtml += "</td></tr>";
+      }
+      file = root.openNextFile();
     }
-    file = root.openNextFile();
+    root.close();
   }
   if (archivesHtml.length() == 0) {
     archivesHtml = "<tr><td colspan='3' style='text-align:center; color:var(--text-muted); padding:1.5rem;' data-th='ไม่มีไฟล์ประวัติย้อนหลังในระบบ' data-en='No archives found in storage'>ไม่มีไฟล์ประวัติย้อนหลังในระบบ</td></tr>";
@@ -2193,6 +2578,30 @@ String getHTML() {
     .modal { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(12px); z-index: 250; align-items: center; justify-content: center; padding: 1.5rem; }
     .modal.active { display: flex; }
     .dashboard-footer { margin-top: 3.5rem; padding: 2.5rem 1.25rem; border-top: 1px solid var(--border-card); text-align: center; font-size: 0.85rem; color: var(--text-muted); }
+
+    /* --- Toast notifications (แทน alert() ที่ทำให้ต้องรีโหลดทั้งหน้า) --- */
+    .toast-stack { position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 400; display: flex; flex-direction: column; gap: 0.6rem; max-width: min(26rem, calc(100vw - 2.5rem)); }
+    .toast { display: flex; align-items: flex-start; gap: 0.65rem; background: var(--bg-surface-elevated); border: 1px solid var(--border-card); border-left: 4px solid var(--accent-indigo); border-radius: 1rem; padding: 0.9rem 1.1rem; box-shadow: var(--shadow-card); font-size: 0.9rem; font-weight: 600; color: var(--text-main); animation: toast-in 0.22s ease-out; }
+    .toast.ok { border-left-color: var(--accent-green); }
+    .toast.err { border-left-color: var(--accent-rose); }
+    .toast.leaving { opacity: 0; transform: translateY(0.5rem); transition: opacity 0.25s, transform 0.25s; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(0.75rem); } to { opacity: 1; transform: none; } }
+
+    /* --- Skeleton loader ของตาราง --- */
+    .skeleton { display: block; height: 0.85rem; border-radius: 0.5rem; background: linear-gradient(90deg, var(--bg-surface-elevated) 25%, var(--border-card) 50%, var(--bg-surface-elevated) 75%); background-size: 200% 100%; animation: skeleton-shift 1.2s infinite; }
+    @keyframes skeleton-shift { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+    thead th { position: sticky; top: 0; z-index: 2; }
+    tbody tr:hover td { background: var(--bg-surface-elevated); }
+    .table-container { max-height: 68vh; overflow-y: auto; }
+    .live-dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent-green); margin-right: 0.35rem; animation: pulse-dot 1.6s infinite; }
+    @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+    .station-card { background: var(--bg-surface-elevated); border: 1px solid var(--border-card); border-radius: 1.5rem; padding: 1.25rem; }
+    .station-card.offline { border-color: rgba(244,63,94,0.35); }
+    .sig-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 0.85rem; }
+    .sig-bars i { width: 3px; background: var(--border-card); border-radius: 1px; display: block; }
+    .sig-bars i.on { background: currentColor; }
+    [title] { cursor: help; }
   </style>
 </head>
 <body>
@@ -2261,7 +2670,7 @@ String getHTML() {
               <path class="gauge-val" id="gaugeArc" d="M 20 100 A 80 80 0 0 1 180 100" style="stroke-dashoffset: )rawliteral" + String(252 - (quotaPercent * 252) / 100) + R"rawliteral(;"></path>
             </svg>
             <div class="gauge-content">
-              <div class="gauge-number">)rawliteral" + String(usedCount) + R"rawliteral(</div>
+              <div class="gauge-number" id="statUsed">)rawliteral" + String(usedCount) + R"rawliteral(</div>
               <div class="gauge-label" data-th="ใช้สิทธิ์แล้ว (คน)" data-en="CLAIMED STUDENTS">ใช้สิทธิ์แล้ว (คน)</div>
             </div>
           </div>
@@ -2269,11 +2678,11 @@ String getHTML() {
           <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-card); padding-top: 1rem; font-size: 0.85rem;">
             <div>
               <span style="color: var(--text-muted);" data-th="คงเหลือ:" data-en="Remaining:">คงเหลือ:</span>
-              <b style="color: var(--text-main);">)rawliteral" + String(db.size() - usedCount) + R"rawliteral(</b>
+              <b style="color: var(--text-main);" id="statRemaining">)rawliteral" + String((int)db.size() - usedCount) + R"rawliteral(</b>
             </div>
             <div>
               <span style="color: var(--text-muted);" data-th="ยอดจัดสรร:" data-en="Disbursed:">ยอดจัดสรร:</span>
-              <b style="color: var(--accent-green);">)rawliteral" + String(usedCount * 35) + R"rawliteral( THB</b>
+              <b style="color: var(--accent-green);"><span id="statDisbursed">)rawliteral" + String(usedCount * 35) + R"rawliteral(</span> THB</b>
             </div>
           </div>
         </div>
@@ -2304,8 +2713,8 @@ String getHTML() {
           </div>
 
           <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); border-top: 1px solid var(--border-card); padding-top: 0.85rem;">
-            <span>🔋 Batt: <b style="color:var(--text-main);">)rawliteral" + String(hostBattPct) + R"rawliteral(%</b></span>
-            <span>💾 PSRAM: <b style="color:var(--text-main);">8 MB (OPI)</b></span>
+            <span>🔋 Batt: <b style="color:var(--text-main);" id="statBatt">)rawliteral" + String(hostBattPct) + R"rawliteral(%</b></span>
+            <span>💾 Heap: <b style="color:var(--text-main);" id="statHeap">)rawliteral" + String((unsigned)(ESP.getFreeHeap() / 1024)) + R"rawliteral( KB</b></span>
           </div>
         </div>
 
@@ -2315,6 +2724,7 @@ String getHTML() {
             <div style="font-size: 0.85rem; font-weight: 700; color: var(--accent-yellow); text-transform: uppercase;" data-th="เวลามาตรฐานระบบ" data-en="Standard RTC Time">เวลามาตรฐานระบบ</div>
             <div id="clockText" style="font-size: 1.8rem; font-weight: 800; margin: 0.5rem 0; letter-spacing: -0.02em;">)rawliteral" + getRealTimeStr() + R"rawliteral(</div>
             <div style="font-size: 0.82rem; color: var(--text-muted);" data-th="ปรับเทียบผ่านชิป DS3231 Precision I2C" data-en="Synced with DS3231 Precision I2C">ปรับเทียบผ่านชิป DS3231 Precision I2C</div>
+            <div id="serviceBadge" style="margin-top: 0.75rem; display: inline-block; font-size: 0.75rem; font-weight: 800; padding: 0.25rem 0.7rem; border-radius: 9999px; background: var(--accent-green-glow); color: var(--accent-green);">—</div>
           </div>
 
           <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
@@ -2330,31 +2740,11 @@ String getHTML() {
             <span style="font-size: 0.8rem; color: var(--text-muted);">ESP-NOW Channel 1</span>
           </div>
 
-          <div class="bento-grid" style="margin-bottom: 0;">
-  )rawliteral";
-
-  for (int i = 0; i < 4; i++) {
-    int stBattPct = getHostBatteryPercentage(stationNodes[i].systemVoltage);
-    html += "<div class='col-span-6 bento-card' style='padding: 1.25rem; background: var(--bg-surface-elevated); margin-bottom: 0;'>";
-    html += "<div style='display: flex; justify-content: space-between; align-items: flex-start;'>";
-    html += "<div><h4 style='font-size: 1.05rem; font-weight: 800;'>" + shops[i].name + "</h4>";
-    html += "<p style='font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;'>" + shops[i].vendor + "</p></div>";
-    
-    if (stationNodes[i].isOnline) {
-      html += "<span style='background: var(--accent-green-glow); color: var(--accent-green); font-size: 0.72rem; font-weight: 800; padding: 0.25rem 0.6rem; border-radius: 9999px;'>ONLINE</span>";
-    } else {
-      html += "<span style='background: rgba(244,63,94,0.15); color: var(--accent-rose); font-size: 0.72rem; font-weight: 800; padding: 0.25rem 0.6rem; border-radius: 9999px;'>OFFLINE</span>";
-    }
-    html += "</div>";
-
-    html += "<div style='display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; border-top: 1px dashed var(--border-card); padding-top: 0.75rem;'>";
-    html += "<div><span style='font-size: 0.75rem; color: var(--text-muted);'>ORDERS</span><div style='font-size: 1.25rem; font-weight: 800; color: var(--accent-green);'>" + String(shopCounts[i]) + " <span style='font-size:0.75rem; font-weight:400; color:var(--text-muted);'>จาน</span></div></div>";
-    html += "<div><span style='font-size: 0.75rem; color: var(--text-muted);'>TOTAL AMOUNT</span><div style='font-size: 1.25rem; font-weight: 800; color: var(--accent-yellow);'>" + String(shopCounts[i] * 35) + " <span style='font-size:0.75rem; font-weight:400; color:var(--text-muted);'>B.</span></div></div>";
-    html += "<div><span style='font-size: 0.75rem; color: var(--text-muted);'>BATTERY</span><div style='font-size: 1.25rem; font-weight: 800; color: var(--text-main);'>" + (stationNodes[i].isOnline ? String(stBattPct) + "%" : "-") + "</div></div>";
-    html += "</div></div>";
-  }
-
-  html += R"rawliteral(
+          <div class="bento-grid" id="stationGrid" style="margin-bottom: 0;">
+            <div class="col-span-6 station-card"><span class="skeleton" style="width: 60%;"></span></div>
+            <div class="col-span-6 station-card"><span class="skeleton" style="width: 60%;"></span></div>
+            <div class="col-span-6 station-card"><span class="skeleton" style="width: 60%;"></span></div>
+            <div class="col-span-6 station-card"><span class="skeleton" style="width: 60%;"></span></div>
           </div>
         </div>
 
@@ -2376,7 +2766,7 @@ String getHTML() {
           <h2 style="font-size: 1.2rem; font-weight: 800;" data-th="👥 บัญชีรายชื่อผู้มีสิทธิ์รับสวัสดิการ" data-en="👥 Eligible Beneficiary Directory">👥 บัญชีรายชื่อผู้มีสิทธิ์รับสวัสดิการ</h2>
           <div style="display: flex; gap: 0.75rem;">
             <button onclick="openAddModal()" class="btn btn-indigo" data-th="➕ เพิ่มผู้มีสิทธิ์" data-en="➕ Add Student">➕ เพิ่มผู้มีสิทธิ์</button>
-            <a href="/reset" onclick="return confirm(currentLang==='th'?'ต้องการรีเซ็ตสิทธิ์และจัดเก็บข้อมูลวันนี้เข้าคลังใช่หรือไม่?':'Perform daily reset and archive today records?')" class="btn btn-rose" data-th="🔄 ปิดยอดประจำวัน & จัดเก็บประวัติ" data-en="🔄 Daily Reset & Archive">🔄 ปิดยอดประจำวัน & จัดเก็บประวัติ</a>
+              <button type="button" onclick="dailyReset()" class="btn btn-rose" title="จัดเก็บบันทึกของวันนี้เข้าคลังประวัติ แล้วคืนสิทธิ์ให้นิสิตทุกคน" data-th="🔄 ปิดยอดประจำวัน & จัดเก็บประวัติ" data-en="🔄 Daily Reset &amp; Archive">🔄 ปิดยอดประจำวัน & จัดเก็บประวัติ</button>
           </div>
         </div>
         <div style="display: flex; gap: 0.75rem;">
@@ -2436,10 +2826,10 @@ String getHTML() {
         actionBtn = "<span style='color:var(--text-muted); font-size:0.8rem;' data-th='คืนสู่ส่วนกลางแล้ว' data-en='Card Returned'>คืนสู่ส่วนกลางแล้ว</span>";
       } else {
         statusBadge = "<span style='background:rgba(245,158,11,0.2); color:var(--accent-yellow); padding:0.25rem 0.65rem; border-radius:9999px; font-size:0.75rem; font-weight:800;'>WAITING TAP</span>";
-        actionBtn = "<button onclick='removeTempCard(\"" + db[i].studentId + "\")' class='btn btn-slate' style='color:var(--accent-rose); padding:0.35rem 0.65rem; font-size:0.75rem;'>Revoke</button>";
+        actionBtn = "<button type='button' class='btn btn-slate js-temp-revoke' data-id='" + htmlEscape(db[i].studentId) + "' style='color:var(--accent-rose); padding:0.35rem 0.65rem; font-size:0.75rem;'>Revoke</button>";
       }
 
-      html += "<tr><td><b>" + db[i].studentId + "</b></td><td>" + db[i].fullName + "</td><td><code>" + db[i].uid + "</code></td>";
+      html += "<tr><td><b>" + htmlEscape(db[i].studentId) + "</b></td><td>" + htmlEscape(db[i].fullName) + "</td><td><code>" + htmlEscape(db[i].uid) + "</code></td>";
       html += "<td>" + statusBadge + "</td>";
       html += "<td style='text-align: right;'>" + actionBtn + "</td></tr>";
     }
@@ -2498,13 +2888,15 @@ String getHTML() {
 
   for (size_t i = 0; i < adminUsers.size(); i++) {
     html += "<tr><td style='color:var(--text-muted); font-weight:600;'>" + String(i + 1) + "</td>";
-    html += "<td style='font-weight:700;'>" + adminUsers[i].displayName + "</td>";
-    html += "<td><code>" + adminUsers[i].username + "</code></td>";
+    String safeUser = htmlEscape(adminUsers[i].username);
+    String safeName = htmlEscape(adminUsers[i].displayName);
+    html += "<td style='font-weight:700;'>" + safeName + "</td>";
+    html += "<td><code>" + safeUser + "</code></td>";
     html += "<td style='color:var(--text-muted);'>••••••••</td>";
     html += "<td style='text-align:right;'>";
-    html += "<button onclick=\"openEditAdminModal('" + adminUsers[i].username + "','" + adminUsers[i].displayName + "')\" class=\"btn btn-slate\" style=\"padding:0.35rem 0.75rem; font-size:0.8rem;\">✏️ Edit</button> ";
+    html += "<button type=\"button\" class=\"btn btn-slate js-admin-edit\" data-user=\"" + safeUser + "\" data-name=\"" + safeName + "\" style=\"padding:0.35rem 0.75rem; font-size:0.8rem;\">✏️ Edit</button> ";
     if (adminUsers.size() > 1) {
-      html += "<a href=\"/api/admin/delete?user=" + adminUsers[i].username + "\" onclick=\"return confirm('ยืนยันลบเจ้าหน้าที่ " + adminUsers[i].username + " หรือไม่?');\" class=\"btn btn-rose\" style=\"padding:0.35rem 0.75rem; font-size:0.8rem;\">🗑️ Delete</a>";
+      html += "<button type=\"button\" class=\"btn btn-rose js-admin-delete\" data-user=\"" + safeUser + "\" style=\"padding:0.35rem 0.75rem; font-size:0.8rem;\">🗑️ Delete</button>";
     }
     html += "</td></tr>";
   }
@@ -2521,7 +2913,7 @@ String getHTML() {
       <div class="bento-grid">
         <div class="col-span-6 bento-card">
           <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;" data-th="🕒 ตั้งค่าเวลามาตรฐานระบบ" data-en="🕒 System Time Synchronization">🕒 ตั้งค่าเวลามาตรฐานระบบ</h2>
-          <form method="POST" action="/api/rtc/set" style="margin-top: 1rem;">
+          <form data-ajax="1" method="POST" action="/api/rtc/set" style="margin-top: 1rem;">
             <label style="font-size: 0.85rem; font-weight: 700;">กำหนดวันที่:</label>
             <input type="date" name="date" value=")rawliteral" + String(dateInputBuf) + R"rawliteral(" required class="form-input">
             <label style="font-size: 0.85rem; font-weight: 700;">กำหนดเวลา:</label>
@@ -2532,7 +2924,7 @@ String getHTML() {
 
         <div class="col-span-6 bento-card">
           <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;" data-th="⚙️ กำหนดช่วงเวลาเปิดให้บริการอาหาร" data-en="⚙️ Service Hours Window">⚙️ กำหนดช่วงเวลาเปิดให้บริการอาหาร</h2>
-          <form method="POST" action="/api/settings/time" style="margin-top: 1rem;">
+          <form data-ajax="1" method="POST" action="/api/settings/time" style="margin-top: 1rem;">
             <label style="font-size: 0.85rem; font-weight: 700;">สถานะการจำกัดเวลา:</label>
             <select name="enabled" class="form-input">
               <option value="1" )rawliteral" + String(timeWindowEnabled ? "selected" : "") + R"rawliteral(>เปิดใช้งาน (จำกัดเวลาตามกำหนด)</option>
@@ -2559,7 +2951,7 @@ String getHTML() {
       <div class="bento-card col-span-12" style="max-width: 36rem; margin: auto; text-align: center;">
         <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;">📥 นำเข้าบัญชีรายชื่อนิสิต (Smart Upsert)</h2>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">* ระบบจะไม่ลบรายชื่อเก่า: รหัสเดิมจะถูกอัปเดตข้อมูล และรหัสใหม่จะถูกเพิ่มเข้าสู่ฐานข้อมูลอัตโนมัติ</p>
-        <form method="POST" action="/upload" enctype="multipart/form-data" style="border: 2px dashed var(--border-card); border-radius: 1.5rem; padding: 2rem;">
+        <form data-ajax="1" method="POST" action="/upload" enctype="multipart/form-data" style="border: 2px dashed var(--border-card); border-radius: 1.5rem; padding: 2rem;">
           <input type="file" name="csv" accept=".csv" required style="margin-bottom: 1.25rem;"><br>
           <button type="submit" class="btn btn-emerald">🚀 อัปโหลดและผสานข้อมูล</button>
         </form>
@@ -2570,14 +2962,14 @@ String getHTML() {
     <div id="tab-shops" class="tab-content" style="display: none;">
       <div class="bento-card col-span-12" style="max-width: 38rem; margin: auto;">
         <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 1rem;">🏪 จัดการข้อมูลร้านค้าและผู้ประกอบการ</h2>
-        <form method="POST" action="/save-shops">
+        <form method="POST" action="/api/shops/save" data-ajax="1">
   )rawliteral";
 
   for (int i = 0; i < 4; i++) {
     html += "<div style='background: var(--bg-surface-elevated); border: 1px solid var(--border-card); border-radius: 1.25rem; padding: 1.25rem; margin-bottom: 1rem;'>";
     html += "<h4 style='color: var(--accent-indigo); margin-bottom: 0.5rem; font-weight: 800;'>Point " + String(i + 1) + "</h4>";
-    html += "<input type='text' name='sname" + String(i) + "' value='" + shops[i].name + "' required class='form-input'>";
-    html += "<input type='text' name='vname" + String(i) + "' value='" + shops[i].vendor + "' required class='form-input' style='margin-bottom:0;'></div>";
+    html += "<input type='text' name='sname" + String(i) + "' value='" + htmlEscape(shops[i].name) + "' required maxlength='48' class='form-input'>";
+    html += "<input type='text' name='vname" + String(i) + "' value='" + htmlEscape(shops[i].vendor) + "' required maxlength='64' class='form-input' style='margin-bottom:0;'></div>";
   }
 
   html += R"rawliteral(
@@ -2590,7 +2982,7 @@ String getHTML() {
     <div id="studentModal" class="modal">
       <div class="bento-card" style="max-width: 28rem; width: 100%;">
         <h3 id="modalTitle" style="font-size: 1.2rem; font-weight: 800; margin-bottom: 1rem;">Beneficiary Details</h3>
-        <form method="POST" action="/api/student/save">
+        <form data-ajax="1" method="POST" action="/api/student/save">
           <input type="hidden" id="modalOldId" name="oldStudentId">
           <label style="font-size: 0.85rem; font-weight: 700;">รหัสนิสิต:</label>
           <input type="text" id="modalId" name="studentId" required class="form-input">
@@ -2609,7 +3001,7 @@ String getHTML() {
     <div id="tempCardModal" class="modal">
       <div class="bento-card" style="max-width: 28rem; width: 100%;">
         <h3 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 1rem;">ผูกบัตรสำรองกรณีพิเศษ</h3>
-        <form method="POST" action="/api/tempcard/save">
+        <form data-ajax="1" method="POST" action="/api/tempcard/save">
           <label style="font-size: 0.85rem; font-weight: 700;">รหัสนิสิต:</label>
           <input type="text" name="studentId" required class="form-input">
           <label style="font-size: 0.85rem; font-weight: 700;">เลขบัตรสำรอง (10 หลัก):</label>
@@ -2625,7 +3017,7 @@ String getHTML() {
     <div id="adminModal" class="modal">
       <div class="bento-card" style="max-width: 28rem; width: 100%;">
         <h3 id="adminModalTitle" style="font-size: 1.2rem; font-weight: 800; margin-bottom: 1rem;">Officer Details</h3>
-        <form method="POST" action="/api/admin/save">
+        <form data-ajax="1" method="POST" action="/api/admin/save">
           <input type="hidden" id="adminOldUser" name="oldUsername">
           <label style="font-size: 0.85rem; font-weight: 700;">ชื่อ-ตำแหน่งเจ้าหน้าที่ (Display Name):</label>
           <input type="text" id="adminDisplayName" name="displayName" required class="form-input" placeholder="e.g. นายกิตติพันธ์ รัตนคร (IT Officer)">
@@ -2642,6 +3034,42 @@ String getHTML() {
     </div>
   </main>
 
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <!-- Modal: ตัดสิทธิ์ด้วยตนเอง (แทน prompt() เดิม) -->
+  <div id="manualClaimModal" class="modal">
+    <div class="bento-card" style="max-width: 26rem; width: 100%;">
+      <h3 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.35rem;">ตัดสิทธิ์ด้วยตนเอง</h3>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">ใช้กรณีนิสิตลืมบัตรหรือเครื่องอ่านขัดข้อง ระบบจะบันทึกลงประวัติเหมือนการแตะบัตรปกติ</p>
+      <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem;">รหัสนิสิต: <span id="manualClaimId" style="color: var(--accent-indigo);"></span></div>
+      <label style="font-size: 0.85rem; font-weight: 700;">เลือกจุดบริการ:</label>
+      <select id="manualClaimStation" class="form-input">
+        <option value="1">จุดบริการ 1</option>
+        <option value="2">จุดบริการ 2</option>
+        <option value="3">จุดบริการ 3</option>
+        <option value="4">จุดบริการ 4</option>
+      </select>
+      <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button type="button" onclick="closeManualClaim()" class="btn btn-slate">ยกเลิก</button>
+        <button type="button" onclick="confirmManualClaim()" class="btn btn-emerald">ยืนยันตัดสิทธิ์</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: ผูกบัตรสำรองจากตารางรายชื่อ (แทน prompt() เดิม) -->
+  <div id="assignTempModal" class="modal">
+    <div class="bento-card" style="max-width: 26rem; width: 100%;">
+      <h3 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.35rem;">ผูกบัตรสำรอง</h3>
+      <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.75rem;">รหัสนิสิต: <span id="assignTempId" style="color: var(--accent-indigo);"></span></div>
+      <label style="font-size: 0.85rem; font-weight: 700;">เลขบัตรสำรอง (10 หลัก):</label>
+      <input type="text" id="assignTempUid" class="form-input" maxlength="15" placeholder="e.g. 0305419896">
+      <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button type="button" onclick="closeAssignTemp()" class="btn btn-slate">ยกเลิก</button>
+        <button type="button" onclick="confirmAssignTemp()" class="btn btn-emerald">ผูกบัตร</button>
+      </div>
+    </div>
+  </div>
+
   <footer class="dashboard-footer">
     <p style="font-weight: 800; font-size: 0.95rem; color: var(--text-main); margin-bottom: 0.35rem;">
       ระบบบริหารจัดการคูปองอาหารดิจิทัล (Smart Canteen Bento Suite)
@@ -2657,7 +3085,87 @@ String getHTML() {
   <script>
     var curPage = 1, pageSize = 20, totalPages = 1, searchQuery = "", searchTimer = null;
     var currentLang = 'th';
+    var dashboardData = null;
+    var dashboardTimer = null;
 
+    /* ---------------------------------------------------------------
+       Toast: แทน alert() เดิมที่บังคับให้รีโหลดทั้งหน้าและทำให้เสียแท็บที่ค้างอยู่
+       --------------------------------------------------------------- */
+    function toast(message, ok) {
+      var stack = document.getElementById('toastStack');
+      if (!stack) return;
+      var el = document.createElement('div');
+      el.className = 'toast ' + (ok === false ? 'err' : 'ok');
+      var icon = document.createElement('span');
+      icon.textContent = (ok === false) ? '⚠️' : '✅';
+      var text = document.createElement('span');
+      text.textContent = message;          /* textContent = ปลอดภัยจาก HTML injection */
+      el.appendChild(icon);
+      el.appendChild(text);
+      stack.appendChild(el);
+      setTimeout(function () {
+        el.classList.add('leaving');
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
+      }, 4200);
+    }
+
+    /* เรียก API แบบ POST พร้อมจัดการข้อผิดพลาดและ session หมดอายุให้ครบทุกทาง */
+    function api(url, params) {
+      var body = new URLSearchParams();
+      if (params) { for (var k in params) { if (params.hasOwnProperty(k)) body.append(k, params[k]); } }
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        body: body.toString()
+      }).then(function (res) {
+        if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthorized'); }
+        return res.json().catch(function () { return { ok: false, msg: 'เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง' }; });
+      }).then(function (data) {
+        toast(data.msg || (data.ok ? 'สำเร็จ' : 'ไม่สำเร็จ'), data.ok);
+        return data;
+      }).catch(function (err) {
+        if (err && err.message === 'unauthorized') throw err;
+        toast('ติดต่อเครื่องแม่ข่ายไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', false);
+        throw err;
+      });
+    }
+
+    /* ส่งฟอร์มทุกใบแบบ AJAX แล้วรีเฟรชเฉพาะส่วนที่เปลี่ยน */
+    function bindAjaxForms() {
+      document.querySelectorAll('form[data-ajax]').forEach(function (form) {
+        form.addEventListener('submit', function (ev) {
+          ev.preventDefault();
+          var btn = form.querySelector('button[type="submit"]');
+          var original = btn ? btn.innerHTML : '';
+          if (btn) { btn.disabled = true; btn.innerHTML = '⏳ กำลังบันทึก...'; }
+
+          fetch(form.getAttribute('action'), { method: 'POST', body: new FormData(form) })
+            .then(function (res) {
+              if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthorized'); }
+              return res.json().catch(function () { return { ok: false, msg: 'เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง' }; });
+            })
+            .then(function (data) {
+              toast(data.msg || (data.ok ? 'บันทึกสำเร็จ' : 'บันทึกไม่สำเร็จ'), data.ok);
+              if (!data.ok) return;
+              closeModal(); closeTempModal(); closeAdminModal();
+              form.querySelectorAll('input[type="file"]').forEach(function (i) { i.value = ''; });
+              refreshDashboard();
+              if (document.getElementById('tab-students').style.display !== 'none') loadStudents(curPage);
+              if (form.getAttribute('action').indexOf('/api/admin/') === 0 ||
+                  form.getAttribute('action').indexOf('/api/tempcard/') === 0 ||
+                  form.getAttribute('action') === '/upload') {
+                setTimeout(function () { window.location.reload(); }, 900);
+              }
+            })
+            .catch(function () { })
+            .then(function () { if (btn) { btn.disabled = false; btn.innerHTML = original; } });
+        });
+      });
+    }
+
+    /* ---------------------------------------------------------------
+       ธีมและภาษา
+       --------------------------------------------------------------- */
     function initTheme() {
       var savedTheme = localStorage.getItem('canteen_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', savedTheme);
@@ -2676,13 +3184,15 @@ String getHTML() {
     function toggleLanguage() {
       currentLang = (currentLang === 'th') ? 'en' : 'th';
       document.getElementById('langSwitch').innerText = (currentLang === 'th') ? 'EN' : 'TH';
-      document.querySelectorAll('[data-th]').forEach(el => {
-        el.innerText = el.getAttribute('data-' + currentLang);
+      document.querySelectorAll('[data-th]').forEach(function (el) {
+        var v = el.getAttribute('data-' + currentLang);
+        if (v !== null) el.innerText = v;
       });
       var sInput = document.getElementById('search');
       if (sInput) {
         sInput.placeholder = (currentLang === 'th') ? 'ค้นหารหัสนิสิต, ชื่อ-สกุล หรือเลขประจำตัว...' : 'Search Beneficiary ID, Name, or Card UID...';
       }
+      renderStations();
       drawAnalyticsChart();
       loadStudents(curPage);
     }
@@ -2692,42 +3202,157 @@ String getHTML() {
       if (m) m.classList.toggle('open');
     }
 
-    setInterval(() => {
-      fetch('/api/system/health')
-        .then(res => res.json())
-        .then(data => {
-          var tEl = document.getElementById('telemetryTemp');
-          var cEl = document.getElementById('telemetryCpu');
-          if (tEl) tEl.innerText = data.temp + ' °C';
-          if (cEl) cEl.innerText = data.cpu + ' %';
+    /* ---------------------------------------------------------------
+       แดชบอร์ดสด: ดึงตัวเลขจริงจากเครื่องแม่ข่ายทุก 3 วินาที
+       --------------------------------------------------------------- */
+    function setText(id, value) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function refreshDashboard() {
+      return fetch('/api/dashboard')
+        .then(function (res) {
+          if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthorized'); }
+          return res.json();
         })
-        .catch(err => {});
-    }, 3000);
+        .then(function (d) {
+          dashboardData = d;
+
+          setText('telemetryTemp', d.temp.toFixed(1) + ' °C');
+          setText('telemetryCpu', d.cpu.toFixed(1) + ' %');
+          setText('statBatt', d.battPct + '%');
+          setText('statHeap', d.heap + ' KB');
+          setText('statUsed', d.used);
+          setText('statRemaining', d.remaining);
+          setText('statDisbursed', d.disbursed);
+          setText('clockText', d.clock);
+
+          var tEl = document.getElementById('telemetryTemp');
+          if (tEl) tEl.style.color = (d.temp < 65) ? 'var(--accent-green)' : 'var(--accent-rose)';
+
+          var arc = document.getElementById('gaugeArc');
+          if (arc) arc.style.strokeDashoffset = String(252 - Math.round(d.quotaPct * 252 / 100));
+
+          var badge = document.getElementById('serviceBadge');
+          if (badge) {
+            badge.textContent = (d.serviceOpen ? '🟢 เปิดให้บริการ ' : '🔴 นอกเวลาให้บริการ ') + d.window;
+            badge.style.background = d.serviceOpen ? 'var(--accent-green-glow)' : 'rgba(244,63,94,0.15)';
+            badge.style.color = d.serviceOpen ? 'var(--accent-green)' : 'var(--accent-rose)';
+          }
+
+          var tempBadge = document.getElementById('tempCount');
+          if (tempBadge) tempBadge.textContent = d.tempWaiting;
+
+          renderStations();
+          drawAnalyticsChart();
+          return d;
+        })
+        .catch(function () { });
+    }
+
+    function signalBars(quality, online) {
+      var wrap = document.createElement('span');
+      wrap.className = 'sig-bars';
+      var active = 0;
+      if (online) { active = quality >= 85 ? 4 : quality >= 60 ? 3 : quality >= 35 ? 2 : 1; }
+      wrap.style.color = !online ? 'var(--accent-rose)'
+                       : (quality >= 60 ? 'var(--accent-green)' : quality >= 35 ? 'var(--accent-yellow)' : 'var(--accent-rose)');
+      for (var i = 0; i < 4; i++) {
+        var bar = document.createElement('i');
+        bar.style.height = (4 + i * 3) + 'px';
+        if (i < active) bar.className = 'on';
+        wrap.appendChild(bar);
+      }
+      return wrap;
+    }
+
+    function metricBlock(label, value, color) {
+      var box = document.createElement('div');
+      var cap = document.createElement('div');
+      cap.style.cssText = 'font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;';
+      cap.textContent = label;
+      var val = document.createElement('div');
+      val.style.cssText = 'font-size:1.2rem; font-weight:800; color:' + color + ';';
+      val.textContent = value;
+      box.appendChild(cap); box.appendChild(val);
+      return box;
+    }
+
+    function renderStations() {
+      var grid = document.getElementById('stationGrid');
+      if (!grid || !dashboardData) return;
+      grid.innerHTML = '';
+
+      dashboardData.stations.forEach(function (st, idx) {
+        var shop = dashboardData.shops[idx] || { name: 'Station', vendor: '', count: 0, amount: 0 };
+        var card = document.createElement('div');
+        card.className = 'col-span-6 station-card' + (st.online ? '' : ' offline');
+
+        var head = document.createElement('div');
+        head.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start; gap:0.75rem;';
+
+        var titleWrap = document.createElement('div');
+        var title = document.createElement('h4');
+        title.style.cssText = 'font-size:1.05rem; font-weight:800;';
+        title.textContent = shop.name;
+        var vendor = document.createElement('p');
+        vendor.style.cssText = 'font-size:0.82rem; color:var(--text-muted); margin-top:0.2rem;';
+        vendor.textContent = (currentLang === 'th' ? 'ผู้ประกอบการ: ' : 'Vendor: ') + shop.vendor;
+        titleWrap.appendChild(title); titleWrap.appendChild(vendor);
+
+        var status = document.createElement('span');
+        status.style.cssText = 'font-size:0.72rem; font-weight:800; padding:0.25rem 0.6rem; border-radius:9999px; white-space:nowrap; ' +
+          (st.online ? 'background:var(--accent-green-glow); color:var(--accent-green);'
+                     : 'background:rgba(244,63,94,0.15); color:var(--accent-rose);');
+        if (st.online) {
+          var dot = document.createElement('span');
+          dot.className = 'live-dot';
+          status.appendChild(dot);
+          status.appendChild(document.createTextNode('ONLINE'));
+          status.title = 'สัญญาณ ' + st.rssi + ' dBm · ได้ยินล่าสุดเมื่อ ' + st.ageSec + ' วินาทีที่แล้ว';
+        } else {
+          status.textContent = 'OFFLINE';
+          status.title = 'ไม่ได้รับสัญญาณจากจุดบริการนี้เกิน 15 วินาที';
+        }
+
+        head.appendChild(titleWrap); head.appendChild(status);
+
+        var body = document.createElement('div');
+        body.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:0.5rem; margin-top:1.1rem; border-top:1px dashed var(--border-card); padding-top:0.75rem; flex-wrap:wrap;';
+        body.appendChild(metricBlock(currentLang === 'th' ? 'จำนวนที่จ่าย' : 'Orders', shop.count + (currentLang === 'th' ? ' จาน' : ' meals'), 'var(--accent-green)'));
+        body.appendChild(metricBlock(currentLang === 'th' ? 'ยอดรวม' : 'Amount', shop.amount + ' B.', 'var(--accent-yellow)'));
+        body.appendChild(metricBlock(currentLang === 'th' ? 'แบตเตอรี่' : 'Battery', st.online ? (st.battPct + '% / ' + st.volt.toFixed(2) + 'V') : '—', 'var(--text-main)'));
+
+        var sig = document.createElement('div');
+        sig.style.cssText = 'display:flex; align-items:center; gap:0.4rem;';
+        sig.appendChild(signalBars(st.quality, st.online));
+        var sigText = document.createElement('span');
+        sigText.style.cssText = 'font-size:0.78rem; color:var(--text-muted);';
+        sigText.textContent = st.online ? (st.rssi + ' dBm') : '—';
+        sig.appendChild(sigText);
+        body.appendChild(sig);
+
+        card.appendChild(head); card.appendChild(body);
+        grid.appendChild(card);
+      });
+    }
 
     function syncDeviceTime() {
       var now = new Date();
-      var pad = function(n) { return n < 10 ? '0' + n : n; };
+      var pad = function (n) { return n < 10 ? '0' + n : n; };
       var d = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
       var t = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+      api('/api/rtc/set', { date: d, time: t }).then(refreshDashboard).catch(function () { });
+    }
 
-      var form = document.createElement('form');
-      form.method = 'POST';
-      form.action = '/api/rtc/set';
-
-      var inputDate = document.createElement('input');
-      inputDate.type = 'hidden';
-      inputDate.name = 'date';
-      inputDate.value = d;
-      form.appendChild(inputDate);
-
-      var inputTime = document.createElement('input');
-      inputTime.type = 'hidden';
-      inputTime.name = 'time';
-      inputTime.value = t;
-      form.appendChild(inputTime);
-
-      document.body.appendChild(form);
-      form.submit();
+    function dailyReset() {
+      if (!confirm(currentLang === 'th'
+            ? 'ต้องการปิดยอดประจำวัน จัดเก็บประวัติเข้าคลัง และคืนสิทธิ์ให้นิสิตทุกคนใช่หรือไม่?'
+            : 'Archive today records and reset every claim?')) return;
+      api('/api/system/reset').then(function (d) {
+        if (d.ok) { refreshDashboard(); loadStudents(1); }
+      }).catch(function () { });
     }
 
     function drawAnalyticsChart() {
@@ -2735,10 +3360,14 @@ String getHTML() {
       if (!canvas) return;
       var ctx = canvas.getContext('2d');
       var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      var data = [)rawliteral" + String(shopCounts[0]) + "," + String(shopCounts[1]) + "," + String(shopCounts[2]) + "," + String(shopCounts[3]) + R"rawliteral(];
+      var data = [0, 0, 0, 0];
       var labels = (currentLang === 'th') ? ['ร้านที่ 1', 'ร้านที่ 2', 'ร้านที่ 3', 'ร้านที่ 4'] : ['Shop 01', 'Shop 02', 'Shop 03', 'Shop 04'];
+      if (dashboardData && dashboardData.shops) {
+        data = dashboardData.shops.map(function (sh) { return sh.count; });
+        labels = dashboardData.shops.map(function (sh) { return sh.name; });
+      }
       var colors = ['#10b981', '#06b6d4', '#f59e0b', '#f43f5e'];
-      var maxVal = Math.max(...data, 10);
+      var maxVal = Math.max.apply(null, data.concat([10]));
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       var chartH = 150, startY = 180, barW = 75, gap = 65, startX = 100;
@@ -2750,16 +3379,17 @@ String getHTML() {
         var h = (data[i] / maxVal) * chartH;
         var x = startX + (i * (barW + gap));
         var y = startY - h;
-        
-        ctx.fillStyle = colors[i];
+
+        ctx.fillStyle = colors[i % colors.length];
         ctx.beginPath();
-        ctx.roundRect(x, y, barW, h, [12, 12, 0, 0]);
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, barW, h, [12, 12, 0, 0]);
+        else ctx.rect(x, y, barW, h);
         ctx.fill();
 
         ctx.fillStyle = isDark ? '#f8fafc' : '#0f172a';
         ctx.font = 'bold 14px "Plus Jakarta Sans", Sarabun';
         ctx.textAlign = 'center';
-        ctx.fillText(data[i] + ' จาน', x + (barW / 2), y - 10);
+        ctx.fillText(data[i] + (currentLang === 'th' ? ' จาน' : ''), x + (barW / 2), y - 10);
 
         ctx.fillStyle = isDark ? '#94a3b8' : '#64748b';
         ctx.font = '500 13px "Plus Jakarta Sans", Sarabun';
@@ -2768,9 +3398,9 @@ String getHTML() {
     }
 
     function switchTab(tabId) {
-      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-      document.querySelectorAll('.nav-item, .dropdown-item').forEach(el => el.classList.remove('active'));
-      
+      document.querySelectorAll('.tab-content').forEach(function (el) { el.style.display = 'none'; });
+      document.querySelectorAll('.nav-item, .dropdown-item').forEach(function (el) { el.classList.remove('active'); });
+
       var targetTab = document.getElementById('tab-' + tabId);
       if (targetTab) targetTab.style.display = 'block';
 
@@ -2785,86 +3415,231 @@ String getHTML() {
       }
       var m = document.getElementById('navMenu');
       if (m) m.classList.remove('open');
-      if (tabId === 'dashboard') drawAnalyticsChart();
+      try { localStorage.setItem('canteen_tab', tabId); } catch (e) { }
+      if (tabId === 'dashboard') { refreshDashboard(); }
       else if (tabId === 'students') loadStudents(curPage);
+    }
+
+    /* ---------------------------------------------------------------
+       ตารางรายชื่อ: สร้างแถวด้วย DOM ทั้งหมด ชื่อที่มี < > " ' จึงปลอดภัย
+       --------------------------------------------------------------- */
+    function skeletonRows(count) {
+      var tbody = document.getElementById('studentTableBody');
+      tbody.innerHTML = '';
+      for (var r = 0; r < count; r++) {
+        var tr = document.createElement('tr');
+        for (var c = 0; c < 7; c++) {
+          var td = document.createElement('td');
+          var sk = document.createElement('span');
+          sk.className = 'skeleton';
+          sk.style.width = (c === 1 ? '80%' : '60%');
+          td.appendChild(sk);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+    }
+
+    function badge(text, color, bg) {
+      var el = document.createElement('span');
+      el.style.cssText = 'background:' + bg + '; color:' + color + '; font-size:0.78rem; padding:0.3rem 0.7rem; border-radius:0.75rem; font-weight:700; white-space:nowrap;';
+      el.textContent = text;
+      return el;
+    }
+
+    function smallButton(label, title, handler, danger) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-slate';
+      b.style.cssText = 'padding:0.3rem 0.6rem; font-size:0.75rem;' + (danger ? ' color:var(--accent-rose);' : '');
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', handler);
+      return b;
     }
 
     function loadStudents(page) {
       if (page < 1) page = 1;
       curPage = page;
-      var tbody = document.getElementById('studentTableBody');
-      tbody.innerHTML = '<tr><td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-muted);">Loading...</td></tr>';
+      skeletonRows(Math.min(pageSize, 8));
+
       fetch('/api/students?page=' + curPage + '&limit=' + pageSize + '&search=' + encodeURIComponent(searchQuery))
-        .then(res => res.json())
-        .then(data => {
+        .then(function (res) {
+          if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthorized'); }
+          return res.json();
+        })
+        .then(function (data) {
           totalPages = data.totalPages; curPage = data.currentPage;
           var pInd = document.getElementById('pageIndicator');
-          if (pInd) pInd.innerText = curPage;
+          if (pInd) pInd.textContent = curPage + ' / ' + totalPages;
 
           var pInfo = document.getElementById('paginationInfo');
           if (pInfo) {
             var start = (data.totalItems === 0) ? 0 : (curPage - 1) * pageSize + 1;
             var end = Math.min(curPage * pageSize, data.totalItems);
-            pInfo.innerText = (currentLang === 'th') 
-              ? ('แสดง ' + start + ' - ' + end + ' จาก ' + data.totalItems + ' รายการ') 
+            pInfo.textContent = (currentLang === 'th')
+              ? ('แสดง ' + start + ' - ' + end + ' จาก ' + data.totalItems + ' รายการ')
               : ('Showing ' + start + ' - ' + end + ' of ' + data.totalItems + ' records');
           }
 
+          var tbody = document.getElementById('studentTableBody');
           tbody.innerHTML = '';
+
           if (data.students.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-muted);">' + (currentLang==='th'?'ไม่พบข้อมูล':'No records found') + '</td></tr>';
+            var emptyRow = document.createElement('tr');
+            var emptyCell = document.createElement('td');
+            emptyCell.colSpan = 7;
+            emptyCell.style.cssText = 'padding:2.5rem; text-align:center; color:var(--text-muted);';
+            emptyCell.textContent = (currentLang === 'th' ? 'ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา' : 'No records match your search');
+            emptyRow.appendChild(emptyCell);
+            tbody.appendChild(emptyRow);
             return;
           }
-          data.students.forEach(s => {
+
+          data.students.forEach(function (st) {
             var tr = document.createElement('tr');
-            var refHtml = s.ref + (s.isTemp ? " <span style='background:rgba(245,158,11,0.2); color:var(--accent-yellow); font-size:0.68rem; padding:0.15rem 0.4rem; border-radius:9999px; font-weight:700;'>Temp</span>" : "");
-            var statusBadge = s.claimed 
-              ? "<span style='background:rgba(16,185,129,0.2); color:var(--accent-green); font-size:0.8rem; padding:0.35rem 0.75rem; border-radius:0.75rem; font-weight:700;'>" + s.time + "</span>"
-              : "<span style='background:rgba(244,63,94,0.15); color:var(--accent-rose); font-size:0.8rem; padding:0.35rem 0.75rem; border-radius:0.75rem; font-weight:700;'>READY</span>";
-            var actions = '';
-            if (!s.claimed) {
-              actions += "<button onclick='assignTemp(\"" + s.id + "\")' class='btn btn-slate' style='padding:0.3rem 0.6rem; font-size:0.75rem;'>Temp</button> ";
-              actions += "<button onclick='manualClaim(\"" + s.id + "\")' class='btn btn-slate' style='padding:0.3rem 0.6rem; font-size:0.75rem;'>ตัดสิทธิ์</button> ";
+
+            var tdId = document.createElement('td');
+            var bId = document.createElement('b');
+            bId.textContent = st.id;
+            tdId.appendChild(bId);
+
+            var tdName = document.createElement('td');
+            tdName.textContent = st.name;
+
+            var tdUid = document.createElement('td');
+            var codeUid = document.createElement('code');
+            codeUid.textContent = st.uid || '—';
+            tdUid.appendChild(codeUid);
+
+            var tdRef = document.createElement('td');
+            var codeRef = document.createElement('code');
+            codeRef.textContent = st.ref;
+            tdRef.appendChild(codeRef);
+            if (st.isTemp) {
+              tdRef.appendChild(document.createTextNode(' '));
+              tdRef.appendChild(badge('Temp', 'var(--accent-yellow)', 'rgba(245,158,11,0.2)'));
             }
-            actions += "<button onclick='openEditModal(\"" + s.id + "\",\"" + s.name + "\",\"" + s.uid + "\")' class='btn btn-slate' style='padding:0.3rem 0.6rem; font-size:0.75rem;'>✏️</button> ";
-            actions += "<button onclick='deleteStudent(\"" + s.id + "\")' class='btn btn-slate' style='padding:0.3rem 0.6rem; font-size:0.75rem; color:var(--accent-rose);'>🗑️</button>";
-            tr.innerHTML = "<td><b>" + s.id + "</b></td><td>" + s.name + "</td><td><code>" + s.uid + "</code></td><td><code>" + refHtml + "</code></td><td>" + statusBadge + "</td><td>" + s.shopName + "</td><td style='text-align: right;'>" + actions + "</td>";
+
+            var tdStatus = document.createElement('td');
+            tdStatus.appendChild(st.claimed
+              ? badge(st.time, 'var(--accent-green)', 'rgba(16,185,129,0.2)')
+              : badge('READY', 'var(--accent-rose)', 'rgba(244,63,94,0.15)'));
+
+            var tdShop = document.createElement('td');
+            tdShop.textContent = st.shopName;
+
+            var tdAct = document.createElement('td');
+            tdAct.style.textAlign = 'right';
+            tdAct.style.whiteSpace = 'nowrap';
+            if (!st.claimed) {
+              tdAct.appendChild(smallButton('💳 Temp', 'ผูกบัตรสำรองให้นิสิตรายนี้', (function (id) {
+                return function () { openAssignTemp(id); };
+              })(st.id), false));
+              tdAct.appendChild(document.createTextNode(' '));
+              tdAct.appendChild(smallButton('✔ ตัดสิทธิ์', 'บันทึกการรับสิทธิ์ด้วยตนเอง กรณีลืมบัตรหรือเครื่องอ่านขัดข้อง', (function (id) {
+                return function () { openManualClaim(id); };
+              })(st.id), false));
+              tdAct.appendChild(document.createTextNode(' '));
+            }
+            tdAct.appendChild(smallButton('✏️', 'แก้ไขข้อมูลนิสิต', (function (a, b, c) {
+              return function () { openEditModal(a, b, c); };
+            })(st.id, st.name, st.uid), false));
+            tdAct.appendChild(document.createTextNode(' '));
+            tdAct.appendChild(smallButton('🗑️', 'ลบรายชื่อออกจากระบบ', (function (id) {
+              return function () { deleteStudent(id); };
+            })(st.id), true));
+
+            tr.appendChild(tdId); tr.appendChild(tdName); tr.appendChild(tdUid);
+            tr.appendChild(tdRef); tr.appendChild(tdStatus); tr.appendChild(tdShop); tr.appendChild(tdAct);
             tbody.appendChild(tr);
           });
+        })
+        .catch(function () {
+          var tbody = document.getElementById('studentTableBody');
+          if (tbody) tbody.innerHTML = '';
+          toast('โหลดรายชื่อไม่สำเร็จ', false);
         });
     }
 
-    function changePageSize(val) { pageSize = parseInt(val); curPage = 1; loadStudents(1); }
+    function changePageSize(val) { pageSize = parseInt(val, 10); curPage = 1; loadStudents(1); }
     function prevPage() { if (curPage > 1) loadStudents(curPage - 1); }
     function nextPage() { if (curPage < totalPages) loadStudents(curPage + 1); }
     function goToPage(p) { loadStudents(p); }
     function goToLastPage() { loadStudents(totalPages); }
-    function handleSearch(val) { clearTimeout(searchTimer); searchTimer = setTimeout(() => { searchQuery = val.trim(); curPage = 1; loadStudents(1); }, 350); }
+    function handleSearch(val) {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { searchQuery = val.trim(); curPage = 1; loadStudents(1); }, 350);
+    }
 
+    /* --------------------------- Modals --------------------------- */
     function openAddModal() {
       document.getElementById('modalOldId').value = ''; document.getElementById('modalId').value = '';
       document.getElementById('modalName').value = ''; document.getElementById('modalUid').value = '';
+      document.getElementById('modalTitle').textContent = 'เพิ่มผู้มีสิทธิ์รายใหม่';
       document.getElementById('studentModal').classList.add('active');
     }
     function openEditModal(id, name, uid) {
       document.getElementById('modalOldId').value = id; document.getElementById('modalId').value = id;
       document.getElementById('modalName').value = name; document.getElementById('modalUid').value = uid;
+      document.getElementById('modalTitle').textContent = 'แก้ไขข้อมูล: ' + id;
       document.getElementById('studentModal').classList.add('active');
     }
     function closeModal() { document.getElementById('studentModal').classList.remove('active'); }
     function openTempModal() { document.getElementById('tempCardModal').classList.add('active'); }
     function closeTempModal() { document.getElementById('tempCardModal').classList.remove('active'); }
-    function assignTemp(id) { var uid = prompt('กรอก UID บัตรสำรองให้นิสิต ' + id + ':'); if (uid) window.location.href = '/bind-temp?id=' + id + '&uid=' + encodeURIComponent(uid); }
-    function removeTempCard(id) { if (confirm('ต้องการยกเลิกบัตรสำรองของนิสิต ' + id + '?')) window.location.href = '/api/tempcard/remove?id=' + id; }
-    function manualClaim(id) { var st = prompt('ระบุหมายเลขจุดบริการ (1-4):', '1'); if (st) window.location.href = '/manual-claim?id=' + id + '&station=' + st; }
-    function deleteStudent(id) { if (confirm('ต้องการลบรายชื่อนิสิต ' + id + '?')) window.location.href = '/api/student/delete?id=' + id; }
+
+    var manualClaimTarget = '', assignTempTarget = '';
+    function openManualClaim(id) {
+      manualClaimTarget = id;
+      document.getElementById('manualClaimId').textContent = id;
+      document.getElementById('manualClaimStation').value = '1';
+      document.getElementById('manualClaimModal').classList.add('active');
+    }
+    function closeManualClaim() { document.getElementById('manualClaimModal').classList.remove('active'); }
+    function confirmManualClaim() {
+      var station = document.getElementById('manualClaimStation').value;
+      api('/api/claim/manual', { id: manualClaimTarget, station: station }).then(function (d) {
+        if (d.ok) { closeManualClaim(); loadStudents(curPage); refreshDashboard(); }
+      }).catch(function () { });
+    }
+
+    function openAssignTemp(id) {
+      assignTempTarget = id;
+      document.getElementById('assignTempId').textContent = id;
+      document.getElementById('assignTempUid').value = '';
+      document.getElementById('assignTempModal').classList.add('active');
+      setTimeout(function () { document.getElementById('assignTempUid').focus(); }, 60);
+    }
+    function closeAssignTemp() { document.getElementById('assignTempModal').classList.remove('active'); }
+    function confirmAssignTemp() {
+      var uid = document.getElementById('assignTempUid').value.trim();
+      if (!uid) { toast('กรุณากรอกเลขบัตรสำรอง', false); return; }
+      api('/api/tempcard/save', { studentId: assignTempTarget, uid: uid }).then(function (d) {
+        if (d.ok) { closeAssignTemp(); loadStudents(curPage); refreshDashboard(); }
+      }).catch(function () { });
+    }
+
+    function removeTempCard(id) {
+      if (!confirm('ต้องการยกเลิกบัตรสำรองของนิสิต ' + id + ' ใช่หรือไม่?')) return;
+      api('/api/tempcard/remove', { id: id }).then(function (d) {
+        if (d.ok) setTimeout(function () { window.location.reload(); }, 700);
+      }).catch(function () { });
+    }
+    function deleteStudent(id) {
+      if (!confirm('ต้องการลบรายชื่อนิสิต ' + id + ' ออกจากระบบใช่หรือไม่?')) return;
+      api('/api/student/delete', { id: id }).then(function (d) {
+        if (d.ok) { loadStudents(curPage); refreshDashboard(); }
+      }).catch(function () { });
+    }
 
     function openAddAdminModal() {
       document.getElementById('adminOldUser').value = '';
       document.getElementById('adminUsername').value = '';
       document.getElementById('adminDisplayName').value = '';
       document.getElementById('adminPassword').value = '';
-      document.getElementById('adminModalTitle').innerText = 'Add New Officer (Max 3)';
+      document.getElementById('adminPassword').required = true;
+      document.getElementById('adminModalTitle').textContent = 'เพิ่มเจ้าหน้าที่ใหม่ (สูงสุด 3 ท่าน)';
       document.getElementById('adminModal').classList.add('active');
     }
     function openEditAdminModal(user, name) {
@@ -2872,13 +3647,62 @@ String getHTML() {
       document.getElementById('adminUsername').value = user;
       document.getElementById('adminDisplayName').value = name;
       document.getElementById('adminPassword').value = '';
-      document.getElementById('adminModalTitle').innerText = 'Edit Officer (' + user + ')';
+      document.getElementById('adminPassword').required = false;
+      document.getElementById('adminModalTitle').textContent = 'แก้ไขเจ้าหน้าที่ (' + user + ')';
       document.getElementById('adminModal').classList.add('active');
     }
     function closeAdminModal() { document.getElementById('adminModal').classList.remove('active'); }
 
+    /* ปุ่มที่ถูกสร้างจากฝั่งเซิร์ฟเวอร์ ใช้ data-attribute แทนการฝังค่าลงใน onclick */
+    function bindDelegatedActions() {
+      document.addEventListener('click', function (ev) {
+        var el = ev.target.closest ? ev.target.closest('button') : null;
+        if (!el) return;
+
+        if (el.classList.contains('js-archive-delete')) {
+          var file = el.getAttribute('data-file');
+          if (!confirm('ต้องการลบไฟล์ประวัติ ' + file + ' ใช่หรือไม่?')) return;
+          api('/api/archive/delete', { file: file }).then(function (d) {
+            if (d.ok) setTimeout(function () { window.location.reload(); }, 700);
+          }).catch(function () { });
+        } else if (el.classList.contains('js-temp-revoke')) {
+          removeTempCard(el.getAttribute('data-id'));
+        } else if (el.classList.contains('js-admin-edit')) {
+          openEditAdminModal(el.getAttribute('data-user'), el.getAttribute('data-name'));
+        } else if (el.classList.contains('js-admin-delete')) {
+          var user = el.getAttribute('data-user');
+          if (!confirm('ยืนยันลบเจ้าหน้าที่ ' + user + ' ใช่หรือไม่?')) return;
+          api('/api/admin/delete', { user: user }).then(function (d) {
+            if (d.ok) setTimeout(function () { window.location.reload(); }, 700);
+          }).catch(function () { });
+        }
+      });
+
+      /* ปิด modal ด้วยปุ่ม Esc และการคลิกพื้นหลัง */
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') {
+          document.querySelectorAll('.modal.active').forEach(function (m) { m.classList.remove('active'); });
+        }
+      });
+      document.querySelectorAll('.modal').forEach(function (m) {
+        m.addEventListener('mousedown', function (ev) { if (ev.target === m) m.classList.remove('active'); });
+      });
+      var uidInput = document.getElementById('assignTempUid');
+      if (uidInput) {
+        uidInput.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') confirmAssignTemp(); });
+      }
+    }
+
     initTheme();
-    drawAnalyticsChart();
+    bindAjaxForms();
+    bindDelegatedActions();
+    refreshDashboard();
+    dashboardTimer = setInterval(refreshDashboard, 3000);
+
+    try {
+      var savedTab = localStorage.getItem('canteen_tab');
+      if (savedTab && document.getElementById('tab-' + savedTab)) switchTab(savedTab);
+    } catch (e) { }
   </script>
 </body>
 </html>)rawliteral";
@@ -2950,11 +3774,21 @@ void setup() {
   server.collectHeaders(headerkeys, 1);
 
   server.on("/login", HTTP_GET, []() {
-    bool hasErr = server.hasArg("error");
-    server.send(200, "text/html; charset=utf-8", getLoginHTML(hasErr));
+    String err = "";
+    String code = server.arg("error");
+    if (code == "1") err = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง";
+    else if (code == "lock") err = "ป้อนรหัสผิดหลายครั้งเกินกำหนด กรุณารอ 1 นาทีแล้วลองใหม่";
+    server.send(200, "text/html; charset=utf-8", getLoginHTML(err));
   });
 
   server.on("/login", HTTP_POST, []() {
+    // หน่วงเวลาเมื่อพิมพ์รหัสผิดติดกันหลายครั้ง เพื่อกันการไล่เดารหัสผ่าน
+    if (loginLockUntil != 0 && (long)(millis() - loginLockUntil) < 0) {
+      server.sendHeader("Location", "/login?error=lock", true);
+      server.send(302, "text/plain", "");
+      return;
+    }
+
     String user = server.arg("username");
     String pass = server.arg("password");
     user.trim(); pass.trim();
@@ -2970,29 +3804,56 @@ void setup() {
     }
 
     if (ok) {
+      loginFailCount = 0;
+      loginLockUntil = 0;
+
       String token = generateSessionToken();
       int slot = 0;
       for (int i = 0; i < 3; i++) {
-        if (activeSessions[i].token == "" || millis() >= activeSessions[i].expiry) {
+        if (activeSessions[i].token == "" || (long)(millis() - activeSessions[i].expiry) >= 0) {
           slot = i;
           break;
         }
       }
       activeSessions[slot].token = token;
       activeSessions[slot].username = matchedUser;
-      activeSessions[slot].expiry = millis() + 7200000;
+      activeSessions[slot].expiry = millis() + 7200000UL;
 
-      server.sendHeader("Set-Cookie", "CANTEEN_SESSION=" + token + "; Path=/; HttpOnly");
+      // SameSite=Strict ปิดช่องทางที่เว็บอื่นยิงคำสั่งเข้ามาพร้อมคุกกี้ของเรา
+      server.sendHeader("Set-Cookie",
+                        "CANTEEN_SESSION=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=7200");
       server.sendHeader("Location", "/", true);
       server.send(302, "text/plain", "");
     } else {
+      loginFailCount++;
+      if (loginFailCount >= LOGIN_MAX_FAILS) {
+        loginFailCount = 0;
+        loginLockUntil = millis() + LOGIN_LOCK_MS;
+        server.sendHeader("Location", "/login?error=lock", true);
+        server.send(302, "text/plain", "");
+        return;
+      }
       server.sendHeader("Location", "/login?error=1", true);
       server.send(302, "text/plain", "");
     }
   });
 
   server.on("/logout", HTTP_GET, []() {
-    server.sendHeader("Set-Cookie", "CANTEEN_SESSION=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+    // ล้าง session ฝั่งเซิร์ฟเวอร์ด้วย ไม่ใช่แค่ลบคุกกี้ฝั่งเบราว์เซอร์
+    if (server.hasHeader("Cookie")) {
+      String cookie = server.header("Cookie");
+      int idx = cookie.indexOf("CANTEEN_SESSION=");
+      if (idx != -1) {
+        String tok = cookie.substring(idx + 16);
+        int semi = tok.indexOf(';');
+        if (semi != -1) tok = tok.substring(0, semi);
+        tok.trim();
+        for (int i = 0; i < 3; i++) {
+          if (activeSessions[i].token == tok) { activeSessions[i].token = ""; activeSessions[i].username = ""; }
+        }
+      }
+    }
+    server.sendHeader("Set-Cookie", "CANTEEN_SESSION=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
     server.sendHeader("Location", "/login", true);
     server.send(302, "text/plain", "");
   });
@@ -3002,37 +3863,47 @@ void setup() {
     server.send(200, "text/html; charset=utf-8", getHTML());
   });
 
+  // ---------------------------------------------------------------------
+  // เส้นทาง API — คำสั่งที่เปลี่ยนแปลงข้อมูลทุกตัวย้ายมาเป็น POST ทั้งหมด
+  // เดิมเป็น GET จึงถูกเบราว์เซอร์ prefetch หรือถูกเว็บอื่นยิงเข้ามาได้
+  // ---------------------------------------------------------------------
   server.on("/api/students", HTTP_GET, handleGetStudentsAPI);
   server.on("/export.csv", HTTP_GET, handleExportCSV);
-  server.on("/api/rtc/set", HTTP_POST, handleSetRTCTime);
   server.on("/api/archive/download", HTTP_GET, handleDownloadArchive);
-  server.on("/api/archive/delete", HTTP_GET, handleDeleteArchive);
+  server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);
+  server.on("/api/system/health", HTTP_GET, handleDashboardAPI);
+
+  server.on("/api/rtc/set", HTTP_POST, handleSetRTCTime);
+  server.on("/api/archive/delete", HTTP_POST, handleDeleteArchive);
   server.on("/api/student/save", HTTP_POST, handleSaveStudent);
+  server.on("/api/student/delete", HTTP_POST, handleDeleteStudent);
   server.on("/api/tempcard/save", HTTP_POST, handleSaveTempCard);
-  server.on("/api/tempcard/remove", HTTP_GET, handleRemoveTempCard);
-  server.on("/api/student/delete", HTTP_GET, handleDeleteStudent);
-
+  server.on("/api/tempcard/remove", HTTP_POST, handleRemoveTempCard);
   server.on("/api/admin/save", HTTP_POST, handleSaveAdmin);
-  server.on("/api/admin/delete", HTTP_GET, handleDeleteAdmin);
-
-  server.on("/api/system/health", HTTP_GET, []() {
-    DynamicJsonDocument doc(256);
-    doc["temp"] = String(getChipTemperature(), 1);
-    doc["cpu"]  = String(calculateCpuLoad(), 1);
-    doc["heap"] = ESP.getFreeHeap() / 1024;
-    doc["uptime"] = millis() / 1000;
-    String res;
-    serializeJson(doc, res);
-    server.send(200, "application/json; charset=utf-8", res);
-  });
+  server.on("/api/admin/delete", HTTP_POST, handleDeleteAdmin);
+  server.on("/api/shops/save", HTTP_POST, handleSaveShops);
+  server.on("/api/claim/manual", HTTP_POST, handleManualClaim);
+  server.on("/api/system/reset", HTTP_POST, handleDailyReset);
 
   server.on("/api/settings/time", HTTP_POST, []() {
-    if (!isAuthenticated()) { redirectToLogin(); return; }
-    timeWindowEnabled = (server.arg("enabled") == "1");
+    if (!requireAuth()) return;
+    int sh = 0, sm = 0, eh = 0, em = 0;
     String startStr = server.arg("start");
     String endStr = server.arg("end");
-    sscanf(startStr.c_str(), "%d:%d", &serviceStartHour, &serviceStartMin);
-    sscanf(endStr.c_str(), "%d:%d", &serviceEndHour, &serviceEndMin);
+    if (sscanf(startStr.c_str(), "%d:%d", &sh, &sm) != 2 ||
+        sscanf(endStr.c_str(), "%d:%d", &eh, &em) != 2 ||
+        sh < 0 || sh > 23 || eh < 0 || eh > 23 || sm < 0 || sm > 59 || em < 0 || em > 59) {
+      sendJson(false, "รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM)");
+      return;
+    }
+    if ((sh * 60 + sm) >= (eh * 60 + em)) {
+      sendJson(false, "เวลาเปิดต้องมาก่อนเวลาปิด");
+      return;
+    }
+
+    timeWindowEnabled = (server.arg("enabled") == "1");
+    serviceStartHour = sh; serviceStartMin = sm;
+    serviceEndHour = eh;  serviceEndMin = em;
 
     preferences.begin("sys_cfg", false);
     preferences.putBool("win_en", timeWindowEnabled);
@@ -3042,80 +3913,8 @@ void setup() {
     preferences.putInt("end_m", serviceEndMin);
     preferences.end();
 
-    sendAlert("Settings Saved Successfully!", "/");
-  });
-
-  server.on("/save-shops", HTTP_POST, []() {
-    if (!isAuthenticated()) { redirectToLogin(); return; }
-    for (int i = 0; i < 4; i++) {
-      shops[i].name = server.arg("sname" + String(i));
-      shops[i].vendor = server.arg("vname" + String(i));
-    }
-    saveShopsToFS(); renderHostPage(true); sendAlert("Vendors Saved Successfully!", "/");
-  });
-
-  server.on("/bind-temp", HTTP_GET, []() {
-    if (!isAuthenticated()) { redirectToLogin(); return; }
-    String id = server.arg("id"); String tempUid = server.arg("uid"); tempUid.trim();
-    for (auto& s : db) {
-      if (s.studentId == id) {
-        if (s.originalUid == "") s.originalUid = s.uid;
-        s.uid = tempUid;
-        s.isTempCard = true;
-        break;
-      }
-    }
-    saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Assigned Successfully!", "/");
-  });
-
-  server.on("/manual-claim", HTTP_GET, []() {
-    if (!isAuthenticated()) { redirectToLogin(); return; }
-    String id = server.arg("id"); int station = server.arg("station").toInt();
-    for (auto& s : db) {
-      if (s.studentId == id && !s.claimed) {
-        s.claimed = true; s.station = station; s.claimTime = getRealTimeStr(); s.refNo = generateRefNo(station);
-        lastScannedUID = s.uid; lastScannedStudentId = s.studentId;
-        lastScannedStation = station; lastScannedStatus = "APPROVED";
-        appendLogToFS(s.studentId, s.fullName, s.uid, s.refNo, s.claimTime, station, s.isTempCard ? "Temp Card" : "Normal");
-        
-        if (s.isTempCard) {
-          if (s.originalUid != "") { s.uid = s.originalUid; s.originalUid = ""; }
-          else { s.uid = ""; }
-          saveDatabaseToFS();
-        }
-        break;
-      }
-    }
-    renderHostPage(true); sendAlert("Manual Claim Approved Successfully!", "/");
-  });
-
-  server.on("/reset", HTTP_GET, []() {
-    if (!isAuthenticated()) { redirectToLogin(); return; }
-    if (LittleFS.exists("/daily_log.csv")) {
-      DateTime now = rtc.now();
-      char arcName[40];
-      snprintf(arcName, sizeof(arcName), "/arc_%04d%02d%02d_%02d%02d%02d.csv",
-               now.year(), now.month(), now.day(),
-               now.hour(), now.minute(), now.second());
-      File src = LittleFS.open("/daily_log.csv", "r");
-      File dst = LittleFS.open(arcName, "w");
-      if (src && dst) {
-        while (src.available()) dst.write(src.read());
-        src.close(); dst.close();
-      }
-      LittleFS.remove("/daily_log.csv");
-    }
-
-    for (auto& s : db) {
-      if (s.originalUid != "") {
-        s.uid = s.originalUid;
-        s.originalUid = "";
-      }
-      s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
-    }
-    saveDatabaseToFS();
-    lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedStation = 0; lastScannedStatus = "RESET";
-    renderHostPage(true); sendAlert("Daily Reset & Archived Successfully!", "/");
+    renderHostPage(true);
+    sendJson(true, "บันทึกกำหนดเวลาให้บริการเรียบร้อยแล้ว");
   });
 
   server.on("/upload", HTTP_POST, mergeImportedStudents, handleFileUpload);
@@ -3172,11 +3971,16 @@ void loop() {
       strncpy(ack.claimTime, getRealTimeStr().c_str(), sizeof(ack.claimTime) - 1);
       ack.servedCount = getStationServedCount(i + 1);
       sendToStation(i + 1, (uint8_t *)&ack, sizeof(HostResponsePacket));
-      sendStationTheme(i + 1);
+      // ส่งธีมครั้งเดียวตอนสถานีเพิ่งออนไลน์ ถ้าส่งทุก heartbeat จะไปทับ
+      // การสลับธีมที่ผู้ใช้กดเองที่หน้าเครื่องสถานีภายในไม่กี่วินาที
+      if (!stationThemeSent[i]) {
+        sendStationTheme(i + 1);
+        stationThemeSent[i] = true;
+      }
     }
   }
 
-  if (isLiveScanDisplaying && millis() > liveScanHoldUntil) {
+  if (isLiveScanDisplaying && (long)(millis() - liveScanHoldUntil) > 0) {
     isLiveScanDisplaying = false;
     renderHostPage(true);
   }
@@ -3197,6 +4001,7 @@ void loop() {
     for (int i = 0; i < 4; i++) {
       if (stationNodes[i].isOnline && (millis() - stationNodes[i].lastSeen > STATION_OFFLINE_TIMEOUT)) {
         stationNodes[i].isOnline = false;
+        stationThemeSent[i] = false;
       }
     }
     if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
