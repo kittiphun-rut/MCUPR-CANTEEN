@@ -1920,7 +1920,9 @@ void handleExportCSV() {
     }
   }
 
-  String csv = "\xEF\xBB\xBF";
+  String csv;
+  csv.reserve(2048 + db.size() * 160);
+  csv += "\xEF\xBB\xBF";
   csv += "MCU Phrae Canteen Daily Claim Report (Claimed Only)\n";
   csv += "Export Date," + getRealTimeStr() + "\n\n";
 
@@ -2425,7 +2427,12 @@ String getHTML() {
   int quotaPercent = (db.size() > 0) ? (usedCount * 100) / db.size() : 0;
   if (quotaPercent > 100) quotaPercent = 100;
 
-  String html = R"rawliteral(<!DOCTYPE html>
+  String html;
+  // จองหน่วยความจำล่วงหน้าครั้งเดียว แทนการปล่อยให้ += ขยายบัฟเฟอร์นับสิบครั้ง
+  // ซึ่งทำให้ heap แตกเป็นเสี่ยงบนอุปกรณ์ที่รันยาว ๆ (บอร์ดที่เปิด OPI PSRAM
+  // จะได้บล็อกนี้จาก PSRAM ถ้าจองไม่สำเร็จก็ยังทำงานได้ตามปกติ)
+  html.reserve(100 * 1024);
+  html += R"rawliteral(<!DOCTYPE html>
 <html lang="th" data-theme="dark">
 <head>
   <meta charset="utf-8">
