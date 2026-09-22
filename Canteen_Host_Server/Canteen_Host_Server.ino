@@ -32,7 +32,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.0.0"
+#define APP_VERSION         "113.1.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -1678,7 +1678,8 @@ void setup() {
   });
   server.on("/a.js", HTTP_GET, []() {
     server.sendHeader("Cache-Control", "max-age=86400");
-    server.send_P(200, "application/javascript", DASH_JS);
+    // ต้องระบุ charset เพราะในไฟล์นี้มีคำแปลภาษาไทยอยู่ด้วย
+    server.send_P(200, "application/javascript; charset=utf-8", DASH_JS);
   });
   server.on("/api/students", HTTP_GET, handleGetStudentsAPI);
   server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);

@@ -9,8 +9,13 @@
  * ตัวแปรส่วนกลางและฟังก์ชันช่วยเหลือที่ประกาศไว้ข้างบน
  * **อย่าย้าย #include ขึ้นไปไว้บนสุด**
  *
- * ข้อความบนหน้าเว็บเป็นภาษาอังกฤษทั้งหมด เพราะผู้ใช้งานจริงคือเจ้าของร้านค้า
- * และนิสิตต่างชาติ ส่วนคำอธิบายโค้ดยังเป็นภาษาไทยไว้ให้คนดูแลระบบอ่าน
+ * สองภาษา ไทย/อังกฤษ ค่าเริ่มต้นเป็นอังกฤษเพราะนิสิตส่วนใหญ่เป็นชาวต่างชาติ
+ * กดปุ่มบนแถบบนเพื่อสลับ และเบราว์เซอร์จำค่าที่เลือกไว้
+ *
+ * วิธีทำคำแปล: ข้อความอังกฤษเขียนไว้ใน HTML ตามปกติ แล้วติดป้าย data-i ไว้
+ * ส่วนคำไทยอยู่ในพจนานุกรมชุดเดียวใน DASH_JS ไม่ได้เขียนซ้ำสองชุดในทุกบรรทัด
+ * เพิ่มข้อความใหม่ทีหลังก็แค่เติมป้าย data-i กับอีกหนึ่งบรรทัดในพจนานุกรม
+ * ถ้าลืมเติมคำแปล หน้าเว็บจะแสดงภาษาอังกฤษไว้ก่อน ไม่พังและไม่เป็นช่องว่าง
  *
  * ประสิทธิภาพ: CSS และ JavaScript เก็บไว้ใน PROGMEM (แฟลช ไม่กินแรม)
  * แล้วเสิร์ฟแยกที่ /s.css และ /a.js เบราว์เซอร์จึงแคชไว้ได้
@@ -126,7 +131,80 @@ tr:last-child td{border-bottom:0}
 // สคริปต์หน้าเว็บ — ดึง /api/dashboard ทุกสองวินาทีแล้ววาดเฉพาะตัวเลขที่เปลี่ยน
 // ไม่มีไลบรารีภายนอก เพราะเครื่องนี้ไม่ได้ต่ออินเทอร์เน็ต
 // ============================================================================
-static const char DASH_JS[] PROGMEM = R"js(function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+static const char DASH_JS[] PROGMEM = R"js(/* ---- พจนานุกรมภาษาไทย คีย์ตรงกับ data-i ใน HTML ----
+   ไม่มีคีย์ไหน = ใช้ข้อความอังกฤษเดิมในหน้า ไม่พังและไม่เป็นช่องว่าง */
+var TH = {
+  sub:'สวัสดิการอาหารกลางวัน', signout:'ออกจากระบบ',
+  lang:'EN', themeL:'โหมดสว่าง', themeD:'โหมดมืด',
+  today:'วันนี้', students:'นิสิต', shops:'ร้านค้า', settings:'ตั้งค่า',
+  kServed:'จ่ายแล้ว', kBaht:'เป็นเงิน', kLeft:'คงเหลือ',
+  open:'เปิดบริการ', closed:'ปิดบริการ',
+  salesby:'ยอดขายรายร้าน', points:'จุดบริการ', point:'จุดที่',
+  online:'ออนไลน์', offline:'ออฟไลน์',
+  meals:'จาน', baht:'บาท', ofN:'จากทั้งหมด', studentsN:'คน',
+  sSearch:'ค้นหาชื่อหรือรหัสนิสิต', sAdd:'เพิ่มนิสิต', sExport:'ดาวน์โหลด CSV',
+  hId:'รหัสนิสิต', hName:'ชื่อ-สกุล', hCard:'บัตร', hStatus:'สถานะ', hShop:'ร้าน',
+  stServed:'รับแล้ว', stWait:'ยังไม่รับ', stTemp:'บัตรชั่วคราว',
+  aServe:'ตัดสิทธิ์', aTemp:'บัตรชั่วคราว', aRevoke:'คืนบัตร', aRemove:'ลบ',
+  sNone:'ไม่พบนิสิตที่ค้นหา', sLoad:'กำลังโหลด...', page:'หน้า',
+  prev:'ก่อนหน้า', next:'ถัดไป',
+  shTitle:'ชื่อร้านและผู้ประกอบการ', shName:'ชื่อร้านที่', shOwner:'ผู้ประกอบการ',
+  shSave:'บันทึกร้านค้า',
+  dTitle:'การแสดงผลของทุกจุดบริการ',
+  dNote:'เครื่องแม่ข่ายเป็นผู้กำหนดธีมและการพักหน้าจอให้ทุกจุดบริการ',
+  dTheme:'ธีม', dDark:'มืด', dLight:'สว่าง',
+  dScreens:'หน้าจอ', dAwake:'เปิดอยู่', dSleep:'พักหน้าจอ',
+  hrsTitle:'เวลาให้บริการ', hrsLimit:'การจำกัดเวลา',
+  hrsOn:'ให้บริการเฉพาะช่วงเวลานี้', hrsOff:'ให้บริการตลอดวัน',
+  hrsOpen:'เริ่ม', hrsClose:'สิ้นสุด', hrsSave:'บันทึกเวลา',
+  clkTitle:'นาฬิกาของเครื่อง', clkDate:'วันที่', clkTime:'เวลา', clkSet:'ตั้งนาฬิกา',
+  clkHint:'นาฬิกาเป็นตัวกำหนดว่าเปิดบริการเมื่อไร และข้อมูลนับเป็นของวันไหน',
+  impTitle:'นำเข้ารายชื่อนิสิต', impBtn:'อัปโหลด CSV',
+  impHint:'คอลัมน์: รหัสนิสิต, ชื่อ-สกุล, หมายเลขบัตร — รายชื่อเดิมจะถูกอัปเดต รายชื่อใหม่จะถูกเพิ่ม',
+  stfTitle:'เจ้าหน้าที่ที่เข้าระบบได้', stfUser:'ชื่อผู้ใช้', stfName:'ชื่อที่แสดง',
+  stfPass:'รหัสผ่าน', stfAdd:'เพิ่มเจ้าหน้าที่', stfRemove:'ลบ',
+  stfHint:'ได้สูงสุดสามบัญชี และควรเปลี่ยนรหัสผ่านเริ่มต้นก่อนเปิดใช้งานจริง',
+  arcTitle:'ไฟล์ประวัติย้อนหลัง', arcFile:'ไฟล์', arcSize:'ขนาด',
+  arcDl:'ดาวน์โหลด', arcDel:'ลบ', arcNone:'ยังไม่มีไฟล์ประวัติ',
+  eodTitle:'ปิดยอดประจำวัน',
+  eodNote:'เก็บข้อมูลของวันนี้เข้าแฟ้ม แล้วคืนสิทธิ์ให้นิสิตทุกคน',
+  eodBtn:'ปิดยอดวันนี้',
+  tDisp:'สั่งไปยังทุกจุดบริการแล้ว', tRec:'บันทึกแล้ว', tRm:'ลบแล้ว',
+  tTmp:'ผูกบัตรชั่วคราวแล้ว', tRev:'คืนบัตรแล้ว', tAdd:'เพิ่มนิสิตแล้ว',
+  tDay:'ปิดยอดวันนี้แล้ว', tArc:'ลบไฟล์แล้ว', tSaved:'บันทึกแล้ว',
+  tFail:'บันทึกไม่สำเร็จ',
+  pShop:'นิสิตคนนี้รับอาหารจากร้านไหน (1-4)', pId:'รหัสนิสิต', pName:'ชื่อ-สกุล',
+  pCard:'หมายเลขบัตร (ไม่มีให้เว้นว่าง)', pRmStu:'ลบนิสิตรหัส ',
+  pClose:'ปิดยอดวันนี้และคืนสิทธิ์ให้นิสิตทุกคนใช่หรือไม่',
+  pTmp:'แตะบัตรชั่วคราว แล้วพิมพ์หมายเลขบัตร', pArc:'ลบไฟล์ ',
+  pStf:'ลบเจ้าหน้าที่ '
+};
+var lang = 'en';
+/* แปลข้อความหนึ่งคำ ถ้าไม่มีคำแปลให้คืนค่าที่ส่งมา */
+function t(k, en){ return (lang === 'th' && TH[k]) ? TH[k] : en; }
+/* วาดข้อความทั้งหน้าใหม่ตามภาษาที่เลือก
+   ครั้งแรกจะจำข้อความอังกฤษเดิมไว้ที่ตัว element เอง จะได้สลับกลับได้ตรง ๆ */
+function paintLang(l){
+  lang = (l === 'th') ? 'th' : 'en';
+  document.documentElement.setAttribute('lang', lang);
+  lsSet('lang', lang);
+  document.querySelectorAll('[data-i]').forEach(function(e){
+    if (e._en === undefined) e._en = e.textContent;
+    e.textContent = t(e.getAttribute('data-i'), e._en);
+  });
+  document.querySelectorAll('[data-ip]').forEach(function(e){
+    if (e._ep === undefined) e._ep = e.placeholder;
+    e.placeholder = t(e.getAttribute('data-ip'), e._ep);
+  });
+  var b = el('langBtn'); if (b) b.textContent = (lang === 'th') ? 'EN' : 'ไทย';
+  paintTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+  var sf = el('shopForm'); if (sf) sf.dataset.filled = '';
+  refresh();
+  if (el('v-students') && el('v-students').classList.contains('show')) loadStudents();
+}
+function toggleLang(){ paintLang(lang === 'th' ? 'en' : 'th'); }
+
+function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 function el(id){return document.getElementById(id)}
 function txt(id,v){var e=el(id); if(e) e.textContent=v}
@@ -143,15 +221,16 @@ function post(url,data){
 }
 
 /* ---- theme: remembered in this browser, and pushed to every service point ---- */
-function paintTheme(t){
-  document.documentElement.setAttribute('data-theme',t);
-  var b=el('themeBtn'); if(b) b.textContent=(t==='dark')?'Light mode':'Dark mode';
+function paintTheme(th){
+  document.documentElement.setAttribute('data-theme',th);
+  var b=el('themeBtn');
+  if(b) b.textContent = (th==='dark') ? t('themeL','Light mode') : t('themeD','Dark mode');
 }
 function toggleTheme(){
-  var t=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
-  paintTheme(t); lsSet('theme',t);
-  var sel=el('dispDark'); if(sel) sel.value=(t==='dark')?'1':'0';
-  post('/api/display',{dark:(t==='dark')?'1':'0'});
+  var th=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  paintTheme(th); lsSet('theme',th);
+  var sel=el('dispDark'); if(sel) sel.value=(th==='dark')?'1':'0';
+  post('/api/display',{dark:(th==='dark')?'1':'0'});
 }
 function show(name,btn){
   ['today','students','shops','settings'].forEach(function(v){
@@ -173,7 +252,7 @@ function refresh(){
     txt('tAmount', d.amount.toLocaleString());
     txt('tLeft',   d.left);
     txt('tClock',  d.clock);
-    txt('tState',  (d.open?'Open':'Closed')+' · '+d.window);
+    txt('tState',  (d.open ? t('open','Open') : t('closed','Closed'))+' · '+d.window);
     txt('tDate',   d.date);
 
     peak=Math.max(1, d.shops.reduce(function(a,s){return Math.max(a,s.meals)},0));
@@ -183,15 +262,16 @@ function refresh(){
       h+='<div class="shop">'
        + '<div class="nm">'+esc(s.name)+'<small>'+esc(s.owner)+'</small></div>'
        + '<div class="track"><div class="fill" style="width:'+pct+'%"></div></div>'
-       + '<div class="num">'+s.meals+' <small>meals</small></div>'
-       + '<div class="num">'+s.amount.toLocaleString()+' <small>THB</small></div>'
+       + '<div class="num">'+s.meals+' <small>'+t('meals','meals')+'</small></div>'
+       + '<div class="num">'+s.amount.toLocaleString()+' <small>'+t('baht','THB')+'</small></div>'
        + '</div>';
     });
     el('shopList').innerHTML=h;
 
     el('stationList').innerHTML=d.stations.map(function(s){
-      return '<span class="chip '+(s.online?'on':'off')+'"><i class="dot"></i>Point '
-           + s.id+' · '+(s.online?'Online':'Offline')+'</span>';
+      return '<span class="chip '+(s.online?'on':'off')+'"><i class="dot"></i>'
+           + t('point','Point')+' '+s.id+' · '
+           + (s.online ? t('online','Online') : t('offline','Offline'))+'</span>';
     }).join('');
 
     var sd=el('dispDark'), ss=el('dispSaver');
@@ -203,8 +283,10 @@ function refresh(){
       sf.dataset.filled='1';
       sf.innerHTML=d.shops.map(function(s,i){
         return '<div class="row" style="margin-bottom:10px">'
-         + '<div><label>Shop '+(i+1)+' name</label><input name="sname'+i+'" value="'+esc(s.name)+'" required></div>'
-         + '<div><label>Owner</label><input name="vname'+i+'" value="'+esc(s.owner)+'"></div></div>';
+         + '<div><label>'+t('shName','Shop')+' '+(i+1)+(lang==='th'?'':' name')+'</label>'
+         + '<input name="sname'+i+'" value="'+esc(s.name)+'" required></div>'
+         + '<div><label>'+t('shOwner','Owner')+'</label>'
+         + '<input name="vname'+i+'" value="'+esc(s.owner)+'"></div></div>';
       }).join('');
     }
   }).catch(function(){});
@@ -216,7 +298,7 @@ function setDisplay(){
     .then(function(){
       paintTheme(el('dispDark').value==='1'?'dark':'light');
       lsSet('theme',el('dispDark').value==='1'?'dark':'light');
-      toast('Service points updated'); refresh();
+      toast(t('tDisp','Service points updated')); refresh();
     });
 }
 
@@ -227,21 +309,23 @@ function loadStudents(){
     .then(function(r){if(r.status===401){location.href='/login';throw 0}return r.json()})
     .then(function(d){
       pages=d.totalPages||1; page=d.currentPage||1;
-      txt('pageInfo','Page '+page+' of '+pages+' · '+(d.totalItems||0)+' students');
+      txt('pageInfo', t('page','Page')+' '+page+' '+t('ofN','of')+' '+pages
+                     +' · '+(d.totalItems||0)+' '+t('studentsN','students'));
       var b=el('stuBody');
       if(!d.students || !d.students.length){
-        b.innerHTML='<tr><td colspan="6" style="color:var(--ink3)">No students found</td></tr>'; return;
+        b.innerHTML='<tr><td colspan="6" style="color:var(--ink3)">'
+                   + t('sNone','No students found')+'</td></tr>'; return;
       }
       b.innerHTML=d.students.map(function(s){
         var id=esc(s.id);
-        var status=s.claimed?'<span class="tag y">Served</span>'
-                            :(s.isTemp?'<span class="tag t">Temp card</span>'
-                                      :'<span class="tag n">Waiting</span>');
+        var status=s.claimed?'<span class="tag y">'+t('stServed','Served')+'</span>'
+                            :(s.isTemp?'<span class="tag t">'+t('stTemp','Temp card')+'</span>'
+                                      :'<span class="tag n">'+t('stWait','Waiting')+'</span>');
         var act='';
-        if(!s.claimed) act+='<button class="btn sm" onclick="serve(\''+id+'\')">Serve</button> ';
-        act+= s.isTemp ? '<button class="btn sm" onclick="dropCard(\''+id+'\')">Revoke card</button> '
-                       : '<button class="btn sm" onclick="tempCard(\''+id+'\')">Temp card</button> ';
-        act+='<button class="btn sm danger" onclick="delStudent(\''+id+'\')">Remove</button>';
+        if(!s.claimed) act+='<button class="btn sm" onclick="serve(\''+id+'\')">'+t('aServe','Serve')+'</button> ';
+        act+= s.isTemp ? '<button class="btn sm" onclick="dropCard(\''+id+'\')">'+t('aRevoke','Revoke card')+'</button> '
+                       : '<button class="btn sm" onclick="tempCard(\''+id+'\')">'+t('aTemp','Temp card')+'</button> ';
+        act+='<button class="btn sm danger" onclick="delStudent(\''+id+'\')">'+t('aRemove','Remove')+'</button>';
         return '<tr><td><b>'+id+'</b></td><td>'+esc(s.name)+'</td>'
          + '<td class="hide-s" style="color:var(--ink3)">'+esc(s.uid||'—')+'</td>'
          + '<td>'+status+'</td>'
@@ -255,38 +339,41 @@ function findStudents(v){clearTimeout(findTimer);
   findTimer=setTimeout(function(){term=v.trim();page=1;loadStudents()},300)}
 function turnPage(d){var n=page+d; if(n<1||n>pages)return; page=n; loadStudents()}
 function serve(id){
-  var shop=prompt('Which shop served this student? (1-4)','1'); if(!shop)return;
-  post('/manual-claim',{id:id,station:shop}).then(function(){toast('Recorded');loadStudents();refresh()});
+  var shop=prompt(t('pShop','Which shop served this student? (1-4)'),'1'); if(!shop)return;
+  post('/manual-claim',{id:id,station:shop})
+    .then(function(){toast(t('tRec','Recorded'));loadStudents();refresh()});
 }
 function delStudent(id){
-  if(!confirm('Remove student '+id+'?'))return;
-  post('/api/student/delete',{id:id}).then(function(){toast('Removed');loadStudents()});
+  if(!confirm(t('pRmStu','Remove student ')+id+'?'))return;
+  post('/api/student/delete',{id:id}).then(function(){toast(t('tRm','Removed'));loadStudents()});
 }
 function tempCard(id){
-  var uid=prompt('Tap the temporary card, then type its number'); if(!uid)return;
-  post('/bind-temp',{id:id,uid:uid}).then(function(){toast('Temporary card assigned');loadStudents()});
+  var uid=prompt(t('pTmp','Tap the temporary card, then type its number')); if(!uid)return;
+  post('/bind-temp',{id:id,uid:uid})
+    .then(function(){toast(t('tTmp','Temporary card assigned'));loadStudents()});
 }
 function dropCard(id){
-  post('/api/tempcard/remove',{id:id}).then(function(){toast('Card revoked');loadStudents()});
+  post('/api/tempcard/remove',{id:id})
+    .then(function(){toast(t('tRev','Card revoked'));loadStudents()});
 }
 function openAdd(){
-  var id=prompt('Student ID'); if(!id)return;
-  var nm=prompt('Full name'); if(!nm)return;
-  var uid=prompt('Card number (leave empty if none)')||'';
+  var id=prompt(t('pId','Student ID')); if(!id)return;
+  var nm=prompt(t('pName','Full name')); if(!nm)return;
+  var uid=prompt(t('pCard','Card number (leave empty if none)'))||'';
   post('/api/student/save',{oldStudentId:'',studentId:id,fullName:nm,uid:uid})
-    .then(function(){toast('Student added');loadStudents();refresh()});
+    .then(function(){toast(t('tAdd','Student added'));loadStudents();refresh()});
 }
 function closeDay(){
-  if(!confirm('Close today and give every student their allowance back?'))return;
-  post('/reset',{}).then(function(){toast('Day closed');refresh();loadStudents()});
+  if(!confirm(t('pClose','Close today and give every student their allowance back?')))return;
+  post('/reset',{}).then(function(){toast(t('tDay','Day closed'));refresh();loadStudents()});
 }
 function delArchive(f){
-  if(!confirm('Delete '+f+'?'))return;
+  if(!confirm(t('pArc','Delete ')+f+'?'))return;
   post('/api/archive/delete',{file:f}).then(function(){
-    var r=el('arc-'+f); if(r) r.remove(); toast('Archive deleted')});
+    var r=el('arc-'+f); if(r) r.remove(); toast(t('tArc','Archive deleted'))});
 }
 function delAdmin(u){
-  if(!confirm('Remove officer '+u+'?'))return;
+  if(!confirm(t('pStf','Remove officer ')+u+'?'))return;
   post('/api/admin/delete',{username:u}).then(function(){location.reload()});
 }
 
@@ -297,8 +384,8 @@ function bindForms(){
       ev.preventDefault();
       fetch(f.getAttribute('action'),{method:'POST',body:new FormData(f)})
         .then(function(r){if(r.status===401){location.href='/login';throw 0}return r.text()})
-        .then(function(){toast('Saved'); refresh(); if(f.dataset.reload) location.reload()})
-        .catch(function(){toast('Could not save')});
+        .then(function(){toast(t('tSaved','Saved')); refresh(); if(f.dataset.reload) location.reload()})
+        .catch(function(){toast(t('tFail','Could not save'))});
     });
   });
 }
@@ -306,7 +393,7 @@ function bindForms(){
 /* ---- start ---- */
 paintTheme(lsGet('theme')||'dark');
 try{bindForms()}catch(e){}
-refresh();
+paintLang(lsGet('lang')||'en');   /* paintLang เรียก refresh() ให้แล้วในตัว */
 setInterval(refresh,2000);
 (function(){
   var saved=lsGet('tab');
@@ -345,26 +432,51 @@ button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:10px;
 .err{margin-top:16px;padding:10px 13px;border-radius:10px;
   border:1px solid #d03b3b;color:#d03b3b;font-size:.86rem}
 .foot{margin-top:20px;text-align:center;color:#78766f;font-size:.76rem}
+.lang{position:absolute;top:16px;right:16px;background:none;border:1px solid #33332f;
+  color:#c3c2b7;border-radius:8px;padding:6px 12px;width:auto;margin:0;
+  font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit}
 </style>
 </head>
 <body>
+<button class="lang" id="lang" onclick="flip()" type="button">&#3652;&#3607;&#3618;</button>
 <form class="card" method="POST" action="/login">
   <h1>MCU Canteen</h1>
-  <p class="sub">Meal subsidy &middot; staff sign in</p>
-  <label for="u">Username</label>
+  <p class="sub" data-i="sub">Meal subsidy &middot; staff sign in</p>
+  <label for="u" data-i="user">Username</label>
   <input id="u" name="username" autocomplete="username" required autofocus>
-  <label for="p">Password</label>
+  <label for="p" data-i="pass">Password</label>
   <input id="p" name="password" type="password" autocomplete="current-password" required>
-  <button type="submit">Sign in</button>
+  <button type="submit" data-i="in">Sign in</button>
 )rawliteral";
 
   if (hasError) {
-    html += R"rawliteral(  <div class="err">Wrong username or password.</div>
+    html += R"rawliteral(  <div class="err" data-i="err">Wrong username or password.</div>
 )rawliteral";
   }
 
-  html += R"rawliteral(  <div class="foot">Mahachulalongkornrajavidyalaya University &middot; Phrae Campus</div>
+  // หน้านี้แยกจากแดชบอร์ด จึงมีคำแปลชุดย่อของตัวเอง ห้าคำ ไม่ต้องโหลด /a.js
+  html += R"rawliteral(  <div class="foot" data-i="foot">Mahachulalongkornrajavidyalaya University &middot; Phrae Campus</div>
 </form>
+<script>
+var TH={sub:'\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e34\u0e01\u0e32\u0e23\u0e2d\u0e32\u0e2b\u0e32\u0e23 \u00b7 \u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e40\u0e08\u0e49\u0e32\u0e2b\u0e19\u0e49\u0e32\u0e17\u0e35\u0e48',
+  user:'\u0e0a\u0e37\u0e48\u0e2d\u0e1c\u0e39\u0e49\u0e43\u0e0a\u0e49', pass:'\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19',
+  in:'\u0e40\u0e02\u0e49\u0e32\u0e2a\u0e39\u0e48\u0e23\u0e30\u0e1a\u0e1a',
+  err:'\u0e0a\u0e37\u0e48\u0e2d\u0e1c\u0e39\u0e49\u0e43\u0e0a\u0e49\u0e2b\u0e23\u0e37\u0e2d\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19\u0e44\u0e21\u0e48\u0e16\u0e39\u0e01\u0e15\u0e49\u0e2d\u0e07',
+  foot:'\u0e21\u0e2b\u0e32\u0e27\u0e34\u0e17\u0e22\u0e32\u0e25\u0e31\u0e22\u0e21\u0e2b\u0e32\u0e08\u0e38\u0e2c\u0e32\u0e25\u0e07\u0e01\u0e23\u0e13\u0e23\u0e32\u0e0a\u0e27\u0e34\u0e17\u0e22\u0e32\u0e25\u0e31\u0e22 \u00b7 \u0e27\u0e34\u0e17\u0e22\u0e32\u0e40\u0e02\u0e15\u0e41\u0e1e\u0e23\u0e48'};
+function paint(l){
+  document.documentElement.setAttribute('lang',l);
+  document.querySelectorAll('[data-i]').forEach(function(e){
+    if(e._en===undefined) e._en=e.textContent;
+    e.textContent = (l==='th' && TH[e.getAttribute('data-i')]) ? TH[e.getAttribute('data-i')] : e._en;
+  });
+  document.getElementById('lang').textContent = (l==='th') ? 'EN' : '\u0e44\u0e17\u0e22';
+  try{localStorage.setItem('lang',l)}catch(e){}
+}
+function flip(){
+  paint(document.documentElement.getAttribute('lang')==='th' ? 'en' : 'th');
+}
+try{paint(localStorage.getItem('lang')||'en')}catch(e){paint('en')}
+</script>
 </body>
 </html>)rawliteral";
   return html;
@@ -384,14 +496,14 @@ String getHTML() {
       archives += "<tr id=\"arc-" + fn + "\"><td><b>" + fn + "</b></td>";
       archives += "<td class=\"hide-s\">" + String(f.size() / 1024.0, 1) + " KB</td>";
       archives += "<td style=\"text-align:right;white-space:nowrap\">";
-      archives += "<a class=\"btn sm\" href=\"/api/archive/download?file=" + fn + "\">Download</a> ";
-      archives += "<button class=\"btn sm danger\" onclick=\"delArchive('" + fn + "')\">Delete</button>";
+      archives += "<a class=\"btn sm\" href=\"/api/archive/download?file=" + fn + "\" data-i=\"arcDl\">Download</a> ";
+      archives += "<button class=\"btn sm danger\" data-i=\"arcDel\" onclick=\"delArchive('" + fn + "')\">Delete</button>";
       archives += "</td></tr>";
     }
     f = root.openNextFile();
   }
   if (archives.length() == 0) {
-    archives = "<tr><td colspan=\"3\" style=\"color:var(--ink3)\">No archived days yet</td></tr>";
+    archives = "<tr><td colspan=\"3\" style=\"color:var(--ink3)\" data-i=\"arcNone\">No archived days yet</td></tr>";
   }
 
   // รายชื่อเจ้าหน้าที่ที่เข้าระบบได้ (สูงสุดสามคน)
@@ -400,7 +512,7 @@ String getHTML() {
     admins += "<tr><td><b>" + u.username + "</b></td><td>" + u.displayName + "</td>";
     admins += "<td style=\"text-align:right\">";
     if (adminUsers.size() > 1) {
-      admins += "<button class=\"btn sm danger\" onclick=\"delAdmin('" + u.username + "')\">Remove</button>";
+      admins += "<button class=\"btn sm danger\" data-i=\"stfRemove\" onclick=\"delAdmin('" + u.username + "')\">Remove</button>";
     }
     admins += "</td></tr>";
   }
@@ -423,35 +535,36 @@ String getHTML() {
 <body>
 <div class="wrap">
   <div class="top">
-    <div class="brand">MCU Canteen <span>&middot; Meal Subsidy</span></div>
+    <div class="brand">MCU Canteen <span>&middot; <span data-i="sub">Meal Subsidy</span></span></div>
     <div class="sp"></div>
+    <button class="btn" id="langBtn" onclick="toggleLang()">&#3652;&#3607;&#3618;</button>
     <button class="btn" id="themeBtn" onclick="toggleTheme()">Light mode</button>
-    <a class="btn" href="/logout">Sign out</a>
+    <a class="btn" href="/logout" data-i="signout">Sign out</a>
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" aria-selected="true"  onclick="show('today',this)">Today</button>
-    <button class="tab" role="tab" aria-selected="false" onclick="show('students',this)">Students</button>
-    <button class="tab" role="tab" aria-selected="false" onclick="show('shops',this)">Shops</button>
-    <button class="tab" role="tab" aria-selected="false" onclick="show('settings',this)">Settings</button>
+    <button class="tab" role="tab" aria-selected="true"  onclick="show('today',this)" data-i="today">Today</button>
+    <button class="tab" role="tab" aria-selected="false" onclick="show('students',this)" data-i="students">Students</button>
+    <button class="tab" role="tab" aria-selected="false" onclick="show('shops',this)" data-i="shops">Shops</button>
+    <button class="tab" role="tab" aria-selected="false" onclick="show('settings',this)" data-i="settings">Settings</button>
   </div>
 
   <!-- ===================== TODAY ===================== -->
   <section id="v-today" class="view show">
     <div class="tiles">
-      <div class="tile"><div class="n" id="tServed">0</div><div class="k">Meals served</div></div>
-      <div class="tile"><div class="n" id="tAmount">0</div><div class="k">Baht paid</div></div>
-      <div class="tile"><div class="n" id="tLeft">0</div><div class="k">Students left</div></div>
+      <div class="tile"><div class="n" id="tServed">0</div><div class="k" data-i="kServed">Meals served</div></div>
+      <div class="tile"><div class="n" id="tAmount">0</div><div class="k" data-i="kBaht">Baht paid</div></div>
+      <div class="tile"><div class="n" id="tLeft">0</div><div class="k" data-i="kLeft">Students left</div></div>
       <div class="tile"><div class="n" id="tClock">--:--</div><div class="k" id="tState">Closed</div></div>
     </div>
 
     <div class="panel" style="margin-top:16px">
-      <div class="ptitle">Sales by shop &middot; <span id="tDate">today</span></div>
+      <div class="ptitle"><span data-i="salesby">Sales by shop</span> &middot; <span id="tDate">today</span></div>
       <div id="shopList"></div>
     </div>
 
     <div class="panel">
-      <div class="ptitle">Service points</div>
+      <div class="ptitle" data-i="points">Service points</div>
       <div class="chips" id="stationList"></div>
     </div>
   </section>
@@ -460,20 +573,21 @@ String getHTML() {
   <section id="v-students" class="view">
     <div class="panel">
       <div class="row" style="margin-bottom:12px">
-        <input id="q" placeholder="Search name or student ID" onkeyup="findStudents(this.value)">
-        <button class="btn fit" onclick="openAdd()">Add student</button>
-        <a class="btn fit" href="/export.csv">Export CSV</a>
+        <input id="q" data-ip="sSearch" placeholder="Search name or student ID" onkeyup="findStudents(this.value)">
+        <button class="btn fit" onclick="openAdd()" data-i="sAdd">Add student</button>
+        <a class="btn fit" href="/export.csv" data-i="sExport">Export CSV</a>
       </div>
       <table>
-        <thead><tr><th>Student ID</th><th>Name</th><th class="hide-s">Card</th>
-          <th>Status</th><th class="hide-s">Shop</th><th></th></tr></thead>
-        <tbody id="stuBody"><tr><td colspan="6" style="color:var(--ink3)">Loading&hellip;</td></tr></tbody>
+        <thead><tr><th data-i="hId">Student ID</th><th data-i="hName">Name</th>
+          <th class="hide-s" data-i="hCard">Card</th><th data-i="hStatus">Status</th>
+          <th class="hide-s" data-i="hShop">Shop</th><th></th></tr></thead>
+        <tbody id="stuBody"><tr><td colspan="6" style="color:var(--ink3)" data-i="sLoad">Loading&hellip;</td></tr></tbody>
       </table>
       <div class="row" style="margin-top:12px">
         <div class="fit" style="color:var(--ink3);font-size:.85rem" id="pageInfo"></div>
         <div class="gap"></div>
-        <button class="btn sm fit" onclick="turnPage(-1)">Previous</button>
-        <button class="btn sm fit" onclick="turnPage(1)">Next</button>
+        <button class="btn sm fit" onclick="turnPage(-1)" data-i="prev">Previous</button>
+        <button class="btn sm fit" onclick="turnPage(1)" data-i="next">Next</button>
       </div>
     </div>
   </section>
@@ -481,74 +595,76 @@ String getHTML() {
   <!-- ===================== SHOPS ===================== -->
   <section id="v-shops" class="view">
     <form class="panel" method="POST" action="/save-shops" data-ajax="1">
-      <div class="ptitle">Shop names and owners</div>
+      <div class="ptitle" data-i="shTitle">Shop names and owners</div>
       <div id="shopForm"></div>
-      <button class="btn main" type="submit" style="margin-top:14px">Save shops</button>
+      <button class="btn main" type="submit" style="margin-top:14px" data-i="shSave">Save shops</button>
     </form>
   </section>
 
   <!-- ===================== SETTINGS ===================== -->
   <section id="v-settings" class="view">
     <div class="panel">
-      <div class="ptitle">Display on all service points</div>
-      <p class="note">The host decides the theme and the sleep mode for every service point.</p>
+      <div class="ptitle" data-i="dTitle">Display on all service points</div>
+      <p class="note" data-i="dNote">The host decides the theme and the sleep mode for every service point.</p>
       <div class="row">
-        <div><label for="dispDark">Theme</label>
+        <div><label for="dispDark" data-i="dTheme">Theme</label>
           <select id="dispDark" onchange="setDisplay()">
-            <option value="1">Dark</option><option value="0">Light</option>
+            <option value="1" data-i="dDark">Dark</option>
+            <option value="0" data-i="dLight">Light</option>
           </select></div>
-        <div><label for="dispSaver">Screens</label>
+        <div><label for="dispSaver" data-i="dScreens">Screens</label>
           <select id="dispSaver" onchange="setDisplay()">
-            <option value="0">Awake</option><option value="1">Sleeping</option>
+            <option value="0" data-i="dAwake">Awake</option>
+            <option value="1" data-i="dSleep">Sleeping</option>
           </select></div>
       </div>
     </div>
 
     <form class="panel" method="POST" action="/api/settings/time" data-ajax="1">
-      <div class="ptitle">Service hours</div>
+      <div class="ptitle" data-i="hrsTitle">Service hours</div>
       <div class="row">
-        <div><label for="sWin">Limit</label>
+        <div><label for="sWin" data-i="hrsLimit">Limit</label>
           <select id="sWin" name="enabled">
 )rawliteral";
 
-  html += String("            <option value=\"1\"") + (timeWindowEnabled ? " selected" : "") + ">Serve only in these hours</option>\n";
-  html += String("            <option value=\"0\"") + (!timeWindowEnabled ? " selected" : "") + ">Serve all day</option>\n";
+  html += String("            <option value=\"1\" data-i=\"hrsOn\"") + (timeWindowEnabled ? " selected" : "") + ">Serve only in these hours</option>\n";
+  html += String("            <option value=\"0\" data-i=\"hrsOff\"") + (!timeWindowEnabled ? " selected" : "") + ">Serve all day</option>\n";
 
   html += R"rawliteral(          </select></div>
-        <div><label for="sStart">Opens</label>
+        <div><label for="sStart" data-i="hrsOpen">Opens</label>
 )rawliteral";
   html += String("          <input id=\"sStart\" name=\"start\" value=\"") + startBuf + "\"></div>\n";
-  html += R"rawliteral(        <div><label for="sEnd">Closes</label>
+  html += R"rawliteral(        <div><label for="sEnd" data-i="hrsClose">Closes</label>
 )rawliteral";
   html += String("          <input id=\"sEnd\" name=\"end\" value=\"") + endBuf + "\"></div>\n";
-  html += R"rawliteral(        <button class="btn main fit" type="submit">Save hours</button>
+  html += R"rawliteral(        <button class="btn main fit" type="submit" data-i="hrsSave">Save hours</button>
       </div>
     </form>
 
     <form class="panel" method="POST" action="/api/rtc/set" data-ajax="1">
-      <div class="ptitle">Host clock</div>
+      <div class="ptitle" data-i="clkTitle">Host clock</div>
       <div class="row">
 )rawliteral";
-  html += String("        <div><label for=\"cDate\">Date</label><input id=\"cDate\" type=\"date\" name=\"date\" value=\"") + dateBuf + "\" required></div>\n";
-  html += String("        <div><label for=\"cTime\">Time</label><input id=\"cTime\" name=\"time\" value=\"") + timeBuf + "\" placeholder=\"HH:MM:SS\" required></div>\n";
-  html += R"rawliteral(        <button class="btn main fit" type="submit">Set clock</button>
+  html += String("        <div><label for=\"cDate\" data-i=\"clkDate\">Date</label><input id=\"cDate\" type=\"date\" name=\"date\" value=\"") + dateBuf + "\" required></div>\n";
+  html += String("        <div><label for=\"cTime\" data-i=\"clkTime\">Time</label><input id=\"cTime\" name=\"time\" value=\"") + timeBuf + "\" placeholder=\"HH:MM:SS\" required></div>\n";
+  html += R"rawliteral(        <button class="btn main fit" type="submit" data-i="clkSet">Set clock</button>
       </div>
-      <p class="hint">The clock decides when service opens and which day the records belong to.</p>
+      <p class="hint" data-i="clkHint">The clock decides when service opens and which day the records belong to.</p>
     </form>
 
     <form class="panel" method="POST" action="/upload" enctype="multipart/form-data" data-ajax="1">
-      <div class="ptitle">Import student list</div>
+      <div class="ptitle" data-i="impTitle">Import student list</div>
       <div class="row">
         <div><input type="file" name="csv" accept=".csv" required></div>
-        <button class="btn fit" type="submit">Upload CSV</button>
+        <button class="btn fit" type="submit" data-i="impBtn">Upload CSV</button>
       </div>
-      <p class="hint">Columns: student ID, name, card number. Existing students are updated, new ones added.</p>
+      <p class="hint" data-i="impHint">Columns: student ID, name, card number. Existing students are updated, new ones added.</p>
     </form>
 
     <div class="panel">
-      <div class="ptitle">Staff who can sign in</div>
+      <div class="ptitle" data-i="stfTitle">Staff who can sign in</div>
       <table>
-        <thead><tr><th>Username</th><th>Name</th><th></th></tr></thead>
+        <thead><tr><th data-i="stfUser">Username</th><th data-i="stfName">Name</th><th></th></tr></thead>
         <tbody>
 )rawliteral";
   html += admins;
@@ -557,19 +673,19 @@ String getHTML() {
       <form method="POST" action="/api/admin/save" data-ajax="1" data-reload="1" style="margin-top:8px">
         <input type="hidden" name="oldUsername" value="">
         <div class="row">
-          <div><label for="aU">Username</label><input id="aU" name="username" required></div>
-          <div><label for="aP">Password</label><input id="aP" name="password" type="password" required></div>
-          <div><label for="aN">Name</label><input id="aN" name="displayName"></div>
-          <button class="btn fit" type="submit">Add staff</button>
+          <div><label for="aU" data-i="stfUser">Username</label><input id="aU" name="username" required></div>
+          <div><label for="aP" data-i="stfPass">Password</label><input id="aP" name="password" type="password" required></div>
+          <div><label for="aN" data-i="stfName">Name</label><input id="aN" name="displayName"></div>
+          <button class="btn fit" type="submit" data-i="stfAdd">Add staff</button>
         </div>
       </form>
-      <p class="hint">Up to three accounts. Change the factory password before the canteen opens.</p>
+      <p class="hint" data-i="stfHint">Up to three accounts. Change the factory password before the canteen opens.</p>
     </div>
 
     <div class="panel">
-      <div class="ptitle">Archived days</div>
+      <div class="ptitle" data-i="arcTitle">Archived days</div>
       <table>
-        <thead><tr><th>File</th><th class="hide-s">Size</th><th></th></tr></thead>
+        <thead><tr><th data-i="arcFile">File</th><th class="hide-s" data-i="arcSize">Size</th><th></th></tr></thead>
         <tbody>
 )rawliteral";
   html += archives;
@@ -578,9 +694,9 @@ String getHTML() {
     </div>
 
     <div class="panel">
-      <div class="ptitle">End of day</div>
-      <p class="note">Files today&rsquo;s records away and gives every student their allowance back.</p>
-      <button class="btn danger" onclick="closeDay()">Close today</button>
+      <div class="ptitle" data-i="eodTitle">End of day</div>
+      <p class="note" data-i="eodNote">Files today&rsquo;s records away and gives every student their allowance back.</p>
+      <button class="btn danger" onclick="closeDay()" data-i="eodBtn">Close today</button>
     </div>
   </section>
 </div>
