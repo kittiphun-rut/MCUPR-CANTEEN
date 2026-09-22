@@ -67,13 +67,21 @@ void drawMiniBattery(int x, int y, int pct) {
   tft.fillRect(x + 2, y + 2, fillW, 8, fColor);
 }
 
-void drawHostTopBar(String title) {
+void drawHostTopBar(String title, int pageNo) {
   tft.fillRect(0, 0, 320, 26, getTftBg());
   tft.drawFastHLine(0, 26, 320, getTftCardBorder());
-  tft.setTextColor(getTftAccentCyan(), getTftBg());
-  tft.setTextSize(1);
-  tft.setCursor(8, 9);
-  tft.println(title);
+  tft.setTextColor(getTftTextMain(), getTftBg());
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print(title);
+  if (pageNo > 0) {
+    char tag[8];
+    snprintf(tag, sizeof(tag), "%d/%d", pageNo, TOTAL_PAGES);
+    tft.setTextSize(1);
+    tft.setTextColor(getTftTextMuted(), getTftBg());
+    tft.setCursor(222, 9);
+    tft.print(tag);
+  }
   drawHostBatteryHUD(252, 4);
 }
 
@@ -103,12 +111,12 @@ void playBootAnimation() {
   tft.setTextColor(ST77XX_YELLOW, ST77XX_BLACK);
   tft.setTextSize(2);
   tft.setCursor(22, 30);
-  tft.println("MCU PHRAE SMART CANTEEN");
+  tft.println("MCU CANTEEN");
   
   tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
   tft.setTextSize(1);
   tft.setCursor(44, 60);
-  tft.println("CENTRAL ENTERPRISE GATEWAY SYSTEM");
+  tft.println("Meal subsidy system");
 
   tft.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
   tft.setCursor(68, 76);
@@ -116,12 +124,12 @@ void playBootAnimation() {
 
   int barX = 40; int barY = 120; int barW = 240; int barH = 16;
   tft.drawRoundRect(barX - 2, barY - 2, barW + 4, barH + 4, 4, ST77XX_WHITE);
-  const char* loadSteps[] = { 
-    "Mounting Storage...", 
-    "Loading Student DB...", 
-    "Initializing RTC DS3231...", 
-    "Configuring OPI PSRAM...", 
-    "Host System Ready!" 
+  const char* loadSteps[] = {
+    "Opening storage...",
+    "Loading student list...",
+    "Checking the clock...",
+    "Starting Wi-Fi...",
+    "Ready"
   };
   for (int step = 0; step < 5; step++) {
     tft.fillRect(barX, barY + 28, barW, 14, ST77XX_BLACK);
@@ -138,7 +146,41 @@ void playBootAnimation() {
   delay(200);
 }
 
+// --- ชิ้นส่วนเพิ่มเติมสำหรับหน้าจอแบบใหม่ ---
+
+// ตัดข้อความให้พอดีความกว้างที่ให้มา (ฟอนต์ในตัวกว้างตัวละ 6 พิกเซลต่อขนาด 1)
+String fitLabel(const String &raw, int maxChars) {
+  if ((int)raw.length() <= maxChars) return raw;
+  if (maxChars <= 1) return raw.substring(0, maxChars);
+  return raw.substring(0, maxChars - 1) + ".";
+}
+
+// หัวข้อเล็ก ๆ มุมบนซ้ายของการ์ด บอกว่าการ์ดนี้คืออะไร
+void drawCardLabel(int x, int y, const char* label) {
+  tft.setTextColor(getTftTextMuted(), getTftCardBg());
+  tft.setTextSize(1);
+  tft.setCursor(x, y);
+  tft.print(label);
+}
+
+// จุดกลมบอกสถานะ ใช้แทนคำว่า ONLINE/OFFLINE ที่ยาวเกินไป
+void drawStatusDot(int cx, int cy, bool good) {
+  tft.fillCircle(cx, cy, 4, good ? getTftAccentGreen() : getTftAccentRose());
+}
+
+// แถบความคืบหน้า ใช้บอกว่าวันนี้จ่ายไปแล้วกี่ส่วนของทั้งหมด
+void drawProgressBar(int x, int y, int w, int h, int pct) {
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  tft.fillRoundRect(x, y, w, h, h / 2, getTftBg());
+  int fillW = (w * pct) / 100;
+  if (fillW < 2 && pct > 0) fillW = 2;
+  if (fillW > 0) tft.fillRoundRect(x, y, fillW, h, h / 2, getTftAccentGreen());
+}
+
 // --- หน้าจอเต็ม: สามหน้าหลัก โหมดพักจอ ผลการสแกน และหน้าเครดิต ---
+// ออกแบบใหม่ให้คนที่ไม่ใช่ช่างอ่านออกในสายตาเดียว
+// หน้า 1 ยอดวันนี้ | หน้า 2 ร้านค้าและจุดบริการ | หน้า 3 ข้อมูลเครื่อง
 void renderHostPage(bool fullRedraw) {
   if (isLiveScanDisplaying) return;
   if (isCreditActive) { renderDeveloperCredit(); return; }
@@ -158,245 +200,206 @@ void renderHostPage(bool fullRedraw) {
 
   if (fullRedraw) tft.fillScreen(getTftBg());
 
+  // ==========================================================================
+  // หน้า 1 — ยอดวันนี้ สามช่องใหญ่ ตัวเลขโต ๆ อ่านจากไกลได้
+  // ==========================================================================
   if (currentHostPage == 0) {
     if (fullRedraw) {
-      drawHostTopBar("[1/3] BENTO EXECUTIVE OVERVIEW");
-
-      drawBentoCard(6, 32, 150, 96, getTftAccentGreen(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(14, 40);
-      tft.println("TODAY MEAL QUOTA");
-      drawBentoPillBadge(112, 38, 38, 14, "35B", getTftAccentGreen(), isTftDarkMode ? 0x01E4 : 0xE7F8);
-
-      drawBentoCard(164, 32, 150, 96, getTftCardBorder(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(172, 40);
-      tft.println("CORE TELEMETRY");
-
-      drawBentoCard(6, 134, 150, 74, getTftAccentYellow(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(14, 142);
-      tft.println("TOTAL DISBURSED");
-
-      drawBentoCard(164, 134, 150, 74, getTftCardBorder(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(172, 142);
-      tft.println(getDateFormattedStr());
-
-      drawBentoBottomBar("[Click] Stations Matrix | [2x] Screensaver");
+      drawHostTopBar("TODAY", 1);
+      drawBentoCard(6, 32, 150, 88, getTftCardBorder(), getTftCardBg());
+      drawCardLabel(14, 40, "MEALS SERVED");
+      drawBentoCard(164, 32, 150, 88, getTftCardBorder(), getTftCardBg());
+      drawCardLabel(172, 40, "BAHT PAID");
+      drawBentoCard(6, 126, 308, 82, getTftCardBorder(), getTftCardBg());
+      drawCardLabel(14, 134, "SERVICE");
+      drawBentoBottomBar("Click: next page    Double click: sleep");
     }
 
-    // ล้างเฉพาะพื้นที่ตัวเลขนิสิตก่อนพิมพ์ซ้ำ
-    tft.fillRect(14, 58, 134, 26, getTftCardBg());
-    tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-    tft.setTextSize(3);
-    tft.setCursor(14, 58);
+    // ช่องซ้าย: จำนวนจานที่จ่ายไปแล้ว พร้อมแถบความคืบหน้า
+    tft.fillRect(12, 54, 140, 60, getTftCardBg());
+    tft.setTextColor(getTftTextMain(), getTftCardBg());
+    tft.setTextSize(4);
+    tft.setCursor(14, 56);
     tft.printf("%d", usedCount);
     tft.setTextSize(1);
-    tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.printf(" / %d pax", db.size());
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
+    tft.setCursor(14, 92);
+    tft.printf("of %d students", (int)db.size());
+    int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
+    drawProgressBar(14, 106, 134, 6, pct);
 
-    int barW = 134;
-    int progressW = (db.size() > 0) ? (usedCount * barW) / db.size() : 0;
-    if (progressW > barW) progressW = barW;
-    tft.drawRoundRect(14, 98, barW + 2, 8, 3, getTftCardBorder());
-    tft.fillRoundRect(15, 99, barW, 6, 2, getTftCardBg());
-    if (progressW > 0) tft.fillRoundRect(15, 99, progressW, 6, 2, getTftAccentGreen());
-
-    // ล้างเฉพาะพื้นที่ Telemetry ก่อนพิมพ์ซ้ำ
-    tft.fillRect(206, 56, 102, 64, getTftCardBg());
-    float cTemp = getChipTemperature();
-    float cCpu = calculateCpuLoad();
+    // ช่องขวา: เป็นเงินเท่าไร
+    tft.fillRect(170, 54, 140, 60, getTftCardBg());
+    tft.setTextColor(getTftAccentGreen(), getTftCardBg());
+    tft.setTextSize(4);
+    tft.setCursor(172, 56);
+    tft.printf("%d", usedCount * 35);
     tft.setTextSize(1);
-    tft.setCursor(172, 58);
     tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.print("TEMP: ");
-    tft.setTextColor((cTemp < 65.0) ? getTftAccentGreen() : getTftAccentYellow(), getTftCardBg());
-    tft.printf("%.1f C\n", cTemp);
+    tft.setCursor(172, 92);
+    tft.print("35 baht per student");
 
-    tft.setCursor(172, 74);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.print("CPU : ");
-    tft.setTextColor(getTftAccentCyan(), getTftCardBg());
-    tft.printf("%.0f %%\n", cCpu);
-
-    tft.setCursor(172, 90);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.print("MEM : ");
+    // ช่องล่าง: นาฬิกา วันที่ และเปิด/ปิดบริการ
+    tft.fillRect(12, 148, 296, 56, getTftCardBg());
     tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.printf("%dMB OPI\n", ESP.getPsramSize() / 1024 / 1024);
-
-    tft.setCursor(172, 106);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.printf("HEAP: %d KB\n", ESP.getFreeHeap() / 1024);
-
-    tft.fillRect(14, 160, 134, 24, getTftCardBg());
-    tft.setTextColor(getTftAccentYellow(), getTftCardBg());
-    tft.setTextSize(2);
-    tft.setCursor(14, 160);
-    tft.printf("%d B.", usedCount * 35);
+    tft.setTextSize(4);
+    tft.setCursor(14, 150);
+    tft.print(getTimeOnlyStr());
     tft.setTextSize(1);
     tft.setTextColor(getTftTextMuted(), getTftCardBg());
     tft.setCursor(14, 186);
-    tft.println("35 THB Allowance");
+    tft.print(getDateFormattedStr());
 
-    // ล้างเฉพาะพื้นที่เวลาและสถานะเปิดบริการ
-    tft.fillRect(172, 156, 138, 44, getTftCardBg());
-    tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.setTextSize(2);
-    tft.setCursor(172, 158);
-    tft.print(getTimeOnlyStr());
-
+    char hours[16];
+    snprintf(hours, sizeof(hours), "%02d:%02d-%02d:%02d",
+             serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
     bool isOpen = isWithinServiceTime();
-    tft.setCursor(172, 184);
+    drawBentoPillBadge(214, 152, 94, 22, isOpen ? "OPEN" : "CLOSED",
+                       isTftDarkMode ? 0x0000 : BENTO_WHITE,
+                       isOpen ? getTftAccentGreen() : getTftAccentRose());
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
     tft.setTextSize(1);
-    if (isOpen) {
-      tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-      tft.printf("OPEN (%02d:%02d-%02d:%02d)", serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
-    } else {
-      tft.setTextColor(getTftAccentRose(), getTftCardBg());
-      tft.print("CLOSED (Out of Hours)");
-    }
+    tft.setCursor(214 + (94 - (int)strlen(hours) * 6) / 2, 182);
+    tft.print(hours);
   }
+  // ==========================================================================
+  // หน้า 2 — ร้านค้าและจุดบริการ สี่ช่อง เจ้าของร้านดูยอดของตัวเองได้ทันที
+  // ==========================================================================
   else if (currentHostPage == 1) {
     if (fullRedraw) {
-      drawHostTopBar("[2/3] BENTO STATIONS 2x2 MATRIX");
-      drawBentoBottomBar("[Click] Activity Log | [2x] Screensaver");
+      drawHostTopBar("SHOPS", 2);
+      drawBentoBottomBar("Click: next page    Double click: sleep");
     }
 
     int coords[4][2] = { {6, 32}, {164, 32}, {6, 122}, {164, 122} };
-    static int preloadStep = 0;
-    if (!fullRedraw) preloadStep = (preloadStep + 1) % 4;
+    static int waitDots = 0;
+    if (!fullRedraw) waitDots = (waitDots + 1) % 4;
 
     for (int i = 0; i < 4; i++) {
-      int x = coords[i][0];
-      int y = coords[i][1];
-      int w = 150;
-      int h = 86;
+      int x = coords[i][0], y = coords[i][1], w = 150, h = 86;
 
       if (fullRedraw) {
-        uint16_t cardBorderCol = stationNodes[i].isOnline ? getTftAccentGreen() : getTftAccentRose();
-        drawBentoCard(x, y, w, h, cardBorderCol, getTftCardBg());
+        drawBentoCard(x, y, w, h, getTftCardBorder(), getTftCardBg());
 
-        tft.setTextColor(getTftAccentCyan(), getTftCardBg());
-        tft.setTextSize(1);
-        tft.setCursor(x + 8, y + 8);
-        tft.printf("STATION 0%d", i + 1);
-
-        if (stationNodes[i].isOnline) {
-          drawBentoPillBadge(x + 90, y + 6, 52, 14, "ONLINE", 0x0000, getTftAccentGreen());
-        } else {
-          drawBentoPillBadge(x + 90, y + 6, 52, 14, "OFFLINE", 0xFFFF, getTftAccentRose());
-        }
-
+        // ชื่อร้านมาก่อน เพราะเจ้าของร้านมองหาชื่อตัวเอง ไม่ได้มองหาเลขจุดบริการ
+        // เต็มความกว้างการ์ด ไม่มีอะไรมาวาดทับภายหลัง
         tft.setTextColor(getTftTextMain(), getTftCardBg());
-        tft.setTextSize(2);
-        tft.setCursor(x + 8, y + 26);
+        tft.setTextSize(1);
+        tft.setCursor(x + 8, y + 7);
+        tft.print(fitLabel(shops[i].name, 22));
+
+        // ยอดของร้าน ตัวเลขจานใหญ่สุดในการ์ด อ่านได้จากอีกฝั่งของโรงอาหาร
+        tft.setTextColor(getTftTextMain(), getTftCardBg());
+        tft.setTextSize(3);
+        tft.setCursor(x + 8, y + 36);
         tft.printf("%d", shopCounts[i]);
+
+        int numW = String(shopCounts[i]).length() * 18;
         tft.setTextSize(1);
         tft.setTextColor(getTftTextMuted(), getTftCardBg());
-        tft.print(" meals");
-
-        tft.setTextColor(getTftAccentYellow(), getTftCardBg());
-        tft.setTextSize(2);
-        tft.setCursor(x + 8, y + 46);
-        tft.printf("%d B.", shopCounts[i] * 35);
-
-        tft.drawFastHLine(x + 8, y + 66, w - 16, getTftCardBorder());
+        tft.setCursor(x + 14 + numW, y + 38);
+        tft.print("meals");
+        tft.setTextColor(getTftAccentGreen(), getTftCardBg());
+        tft.setCursor(x + 14 + numW, y + 52);
+        tft.printf("%d baht", shopCounts[i] * 35);
       }
 
-      tft.fillRect(x + 8, y + 70, w - 16, 14, getTftCardBg());
+      // สองแถวนี้วาดซ้ำทุกรอบ จึงล้างพื้นที่ของตัวเองก่อน และต้องไม่ทับชื่อร้าน
+      tft.fillRect(x + 8, y + 20, 74, 12, getTftCardBg());
+      drawStatusDot(x + 12, y + 25, stationNodes[i].isOnline);
       tft.setTextSize(1);
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(x + 22, y + 22);
+      tft.printf("Point %d", i + 1);
 
+      tft.fillRect(x + 8, y + 66, w - 16, 14, getTftCardBg());
       if (stationNodes[i].isOnline) {
         int sPct = getHostBatteryPercentage(stationNodes[i].systemVoltage);
-        tft.setCursor(x + 8, y + 72);
+        drawSignalBars(x + 8, y + 68, stationNodes[i].rssi, true, getTftCardBg());
         tft.setTextColor(getTftTextMuted(), getTftCardBg());
-        tft.printf("%ddB", stationNodes[i].rssi);
-        drawSignalBars(x + 46, y + 70, stationNodes[i].rssi, true, getTftCardBg());
-
-        tft.setCursor(x + 76, y + 72);
-        tft.setTextColor(getTftTextMuted(), getTftCardBg());
+        tft.setCursor(x + 40, y + 70);
+        tft.print("signal");
+        tft.setCursor(x + 92, y + 70);
         tft.printf("%d%%", sPct);
-        drawMiniBattery(x + 104, y + 71, sPct);
+        drawMiniBattery(x + 120, y + 68, sPct);
       } else {
-        String waitStr = "WAITING";
-        for (int d = 0; d <= preloadStep; d++) waitStr += ".";
-
-        tft.setCursor(x + 8, y + 72);
+        String wait = "Waiting";
+        for (int d = 0; d <= waitDots; d++) wait += ".";
         tft.setTextColor(getTftAccentRose(), getTftCardBg());
-        tft.print(waitStr);
+        tft.setCursor(x + 8, y + 70);
+        tft.print(wait);
       }
     }
   }
-  else if (currentHostPage == 2) {
+  // ==========================================================================
+  // หน้า 3 — ข้อมูลเครื่อง สำหรับคนดูแลระบบ ไม่ใช่สำหรับเจ้าของร้าน
+  // ==========================================================================
+  else {
     if (fullRedraw) {
-      drawHostTopBar("[3/3] REAL-TIME ACTIVITY & NETWORK");
-
-      drawBentoCard(6, 32, 308, 92, getTftCardBorder(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(14, 40);
-      tft.println("LAST SCANNED BENEFICIARY ACTIVITY");
-
-      drawBentoCard(6, 130, 150, 78, getTftCardBorder(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(14, 138);
-      tft.println("NETWORK GATEWAY");
+      drawHostTopBar("SYSTEM", 3);
+      drawBentoCard(6, 32, 308, 84, getTftCardBorder(), getTftCardBg());
+      drawCardLabel(14, 40, "LAST CARD TAP");
+      drawBentoCard(6, 122, 150, 86, getTftCardBorder(), getTftCardBg());
+      drawCardLabel(14, 130, "NETWORK");
+      drawBentoCard(164, 122, 150, 86, getTftCardBorder(), getTftCardBg());
+      drawCardLabel(172, 130, "DEVICE");
 
       tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setCursor(14, 154); tft.println("SSID : MCU_CANTEEN");
-      tft.setCursor(14, 168); tft.println("IP   : 192.168.4.1");
-      tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-      tft.setCursor(14, 182); tft.println("ESP-NOW: LOCKED CH 1");
-
-      drawBentoCard(164, 130, 150, 78, getTftCardBorder(), getTftCardBg());
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
       tft.setTextSize(1);
-      tft.setCursor(172, 138);
-      tft.println("SYSTEM STATUS");
+      tft.setCursor(14, 148); tft.print("Wi-Fi  MCU_CANTEEN");
+      tft.setCursor(14, 164); tft.print("Page   192.168.4.1");
+      tft.setCursor(14, 180); tft.print("Radio  channel 1");
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(14, 192); tft.print("4 service points linked");
 
-      tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setCursor(172, 154); tft.printf("STUDENTS: %d pax\n", db.size());
-      tft.setCursor(172, 168); tft.printf("OFFICERS: %d / 3\n", adminUsers.size());
-      tft.setTextColor(getTftAccentCyan(), getTftCardBg());
-      tft.setCursor(172, 182); tft.println("STORAGE : LITTLEFS OK");
-
-      drawBentoBottomBar("[Click] Overview Bento | [2x] Screensaver");
+      drawBentoBottomBar("Click: next page    Double click: sleep");
     }
 
-    tft.fillRect(14, 56, 290, 62, getTftCardBg());
-    if (lastScannedUID != "-") {
-      tft.setTextSize(2);
+    // ผลการแตะบัตรครั้งล่าสุด
+    tft.fillRect(12, 54, 296, 58, getTftCardBg());
+    if (lastScannedUID != "-" && lastScannedUID.length() > 0) {
+      tft.setTextColor(getTftTextMain(), getTftCardBg());
+      tft.setTextSize(3);
       tft.setCursor(14, 56);
-      tft.setTextColor(getTftAccentCyan(), getTftCardBg());
-      tft.printf("UID: %s (ST.0%d)", maskUID(lastScannedUID).c_str(), lastScannedStation);
+      tft.print(lastScannedStudentId != "-" ? lastScannedStudentId : String("Unknown card"));
 
       tft.setTextSize(1);
-      tft.setCursor(14, 80);
-      tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.printf("ID: %s | REF: %s\n", lastScannedStudentId.c_str(), generateRefNo(lastScannedStation).c_str());
-
-      if (lastScannedStatus == "APPROVED") {
-        drawBentoPillBadge(14, 98, 120, 16, "[APPROVED 35B]", getTftAccentGreen(), 0x01E4);
-      } else if (lastScannedStatus == "DUPLICATE") {
-        drawBentoPillBadge(14, 98, 130, 16, "[ALREADY CLAIMED]", getTftAccentYellow(), 0x3A00);
-      } else if (lastScannedStatus == "TIME_CLOSED") {
-        drawBentoPillBadge(14, 98, 130, 16, "[OUT OF SERVICE]", getTftAccentRose(), 0x3000);
-      } else {
-        drawBentoPillBadge(14, 98, 120, 16, "[UNREGISTERED]", getTftAccentRose(), 0x3000);
-      }
-    } else {
-      tft.setTextSize(2);
-      tft.setCursor(14, 68);
       tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.println("WAITING FOR CARD TAP...");
+      tft.setCursor(14, 86);
+      tft.printf("Point %d   card %s", lastScannedStation, maskUID(lastScannedUID).c_str());
+
+      const char* word; uint16_t tone;
+      if (lastScannedStatus == "APPROVED")         { word = "SERVED";         tone = getTftAccentGreen(); }
+      else if (lastScannedStatus == "DUPLICATE")   { word = "ALREADY SERVED"; tone = getTftAccentYellow(); }
+      else if (lastScannedStatus == "TIME_CLOSED") { word = "CLOSED NOW";     tone = getTftAccentYellow(); }
+      else                                         { word = "NOT ON LIST";    tone = getTftAccentRose(); }
+      drawBentoPillBadge(14, 98, 130, 14, word,
+                         isTftDarkMode ? 0x0000 : BENTO_WHITE, tone);
+
+      // เลขอ้างอิงยาวกว่าที่การ์ดรับไหว จึงโชว์ท้ายเลข ซึ่งเป็นส่วนที่ไม่ซ้ำกัน
+      String ref = lastScannedRef;
+      if (ref.length() > 24) ref = "." + ref.substring(ref.length() - 23);
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(152, 101);
+      tft.print(ref);
+    } else {
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setTextSize(2);
+      tft.setCursor(14, 72);
+      tft.print("No card tapped yet");
     }
+
+    // ตัวเลขของเครื่อง อัปเดตทุกรอบ
+    tft.fillRect(170, 142, 138, 62, getTftCardBg());
+    float cTemp = getChipTemperature();
+    tft.setTextSize(1);
+    tft.setTextColor(getTftTextMain(), getTftCardBg());
+    tft.setCursor(172, 148); tft.printf("Students %d", (int)db.size());
+    tft.setCursor(172, 164); tft.printf("Staff    %d of 3", (int)adminUsers.size());
+    tft.setTextColor((cTemp < 65.0f) ? getTftTextMain() : getTftAccentYellow(), getTftCardBg());
+    tft.setCursor(172, 180); tft.printf("Chip     %.0f C", cTemp);
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
+    tft.setCursor(172, 192); tft.printf("Free memory %d KB", ESP.getFreeHeap() / 1024);
   }
 }
 
@@ -413,45 +416,40 @@ void renderScreensaver(bool fullRedraw) {
     ledOff();
     tft.fillScreen(getTftBg());
     lastHostClock = "";
-    drawHostTopBar("[SCREENSAVER] MCU PHRAE SMART CANTEEN");
+    drawHostTopBar("MCU CANTEEN");
 
     drawBentoCard(20, 40, 280, 156, getTftCardBorder(), getTftCardBg());
 
+    // วันที่ อยู่ใต้นาฬิกา จัดกึ่งกลางการ์ด
     String dateStr = getDateFormattedStr();
-    int xDate = max(24, (320 - (int)dateStr.length() * 12) / 2);
-    tft.setTextColor(getTftAccentCyan(), getTftCardBg());
-    tft.setTextSize(2);
-    tft.setCursor(xDate, 108);
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
+    tft.setTextSize(1);
+    tft.setCursor(160 - (int)dateStr.length() * 3, 124);
     tft.print(dateStr);
 
-    char statBuf[48];
-    snprintf(statBuf, sizeof(statBuf), "CLAIMED: %3d / %3d STUDENTS (%5d B.)", usedCount, db.size(), usedCount * 35);
-    int statLen = strlen(statBuf) * 6;
-    int posX = max(24, (320 - statLen) / 2);
+    // สรุปยอดวันนี้บรรทัดเดียว พอให้รู้ว่าถึงไหนแล้ว
+    char line[48];
+    snprintf(line, sizeof(line), "%d of %d served   %d baht",
+             usedCount, (int)db.size(), usedCount * 35);
     tft.setTextColor(getTftAccentGreen(), getTftCardBg());
     tft.setTextSize(1);
-    tft.setCursor(posX, 140);
-    tft.print(statBuf);
+    tft.setCursor(160 - (int)strlen(line) * 3, 152);
+    tft.print(line);
 
-    float hVolt = readHostBatteryVoltage();
-    char statBuf2[48];
-    snprintf(statBuf2, sizeof(statBuf2), "BATT: %d%% | CORE: %.1fC | PSRAM: 8MB", getHostBatteryPercentage(hVolt), getChipTemperature());
-    int statLen2 = strlen(statBuf2) * 6;
-    int posX2 = max(24, (320 - statLen2) / 2);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setCursor(posX2, 160);
-    tft.print(statBuf2);
+    int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
+    drawProgressBar(60, 170, 200, 6, pct);
 
-    drawBentoBottomBar("[ TAP CARD OR PRESS BUTTON TO WAKE UP ]");
+    drawBentoBottomBar("Tap a card or press the button to wake");
   }
 
+  // นาฬิกาตัวโต วาดซ้ำเฉพาะตอนเวลาเปลี่ยน จอจะได้ไม่กระพริบ
   String curTime = getTimeOnlyStr();
   if (fullRedraw || curTime != lastHostClock) {
     lastHostClock = curTime;
-    tft.fillRect(60, 52, 200, 36, getTftCardBg());
+    tft.fillRect(30, 60, 260, 52, getTftCardBg());
     tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.setTextSize(4);
-    tft.setCursor(64, 56);
+    tft.setTextSize(5);
+    tft.setCursor(160 - (int)curTime.length() * 15, 68);
     tft.print(curTime);
   }
 }
@@ -481,8 +479,8 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
     bannerFg    = 0x0000;             // ตัวอักษรสีดำ
     accentColor = BENTO_NEON_GREEN;
     textMuted   = 0x87F0;             // ข้อความกำกับสีเขียวมิ้นต์
-    headerTitle = ">>> APPROVED: 35B QUOTA <<<";
-    footerDesc  = "TRANSACTION VERIFIED | DAILY QUOTA APPLIED";
+    headerTitle = "APPROVED";
+    footerDesc  = "Meal paid, 35 baht";
   } 
   else if (status == "DUPLICATE") {
     ledDuplicate();
@@ -492,8 +490,8 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
     bannerFg    = 0x0000;             // ตัวอักษรสีดำ
     accentColor = ST77XX_ORANGE;
     textMuted   = 0xFDC0;             // ข้อความกำกับสีส้มอ่อน
-    headerTitle = "! DUPLICATE: ALREADY CLAIMED !";
-    footerDesc  = "QUOTA ALREADY CONSUMED FOR TODAY";
+    headerTitle = "ALREADY SERVED";
+    footerDesc  = "This student already ate today";
   } 
   else if (status == "TIME_CLOSED") {
     ledDuplicate();
@@ -503,8 +501,8 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
     bannerFg    = 0x0000;
     accentColor = BENTO_NEON_YELLOW;
     textMuted   = 0xFEE0;
-    headerTitle = "! SERVICE HOURS ARE CLOSED !";
-    footerDesc  = "CARD SCANNED OUTSIDE SERVICE WINDOW";
+    headerTitle = "CLOSED NOW";
+    footerDesc  = "Outside the service hours";
   } 
   else {
     ledRejected();
@@ -514,18 +512,18 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
     bannerFg    = BENTO_WHITE;        // ตัวอักษรสีขาว
     accentColor = BENTO_NEON_ROSE;
     textMuted   = 0xFCAE;             // ข้อความกำกับสีชมพูอ่อน
-    headerTitle = "X REJECTED: UNREGISTERED X";
-    footerDesc  = "CARD NOT FOUND IN STUDENT DIRECTORY";
+    headerTitle = "NOT ON THE LIST";
+    footerDesc  = "This card is not registered";
   }
 
   tft.fillScreen(screenBg);
 
   tft.fillRect(0, 0, 320, 36, bannerBg);
-  tft.setTextSize(2);
+  tft.setTextSize(3);
   tft.setTextColor(bannerFg, bannerBg);
-  int titleLen = strlen(headerTitle) * 12;
+  int titleLen = strlen(headerTitle) * 18;
   int titleX = max(4, (320 - titleLen) / 2);
-  tft.setCursor(titleX, 10);
+  tft.setCursor(titleX, 7);
   tft.print(headerTitle);
 
   tft.fillRoundRect(8, 44, 304, 188, 8, cardBg);
@@ -535,21 +533,21 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
   tft.setCursor(20, 54);
-  tft.print("SERVICE STATION:");
+  tft.print("SERVICE POINT");
   
   tft.setTextSize(2);
   tft.setTextColor(textColor, cardBg);
   tft.setCursor(20, 66);
-  tft.printf("STATION 0%d", stId);
+  tft.printf("Point %d", stId);
 
   tft.drawFastHLine(20, 88, 280, accentColor);
 
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
   tft.setCursor(20, 96);
-  tft.print("BENEFICIARY STUDENT ID:");
+  tft.print("STUDENT ID");
 
-  String cleanId = (studentId != "-" && studentId.length() > 0) ? studentId : "UNKNOWN";
+  String cleanId = (studentId != "-" && studentId.length() > 0) ? studentId : "Unknown";
   tft.setTextSize(3);
   tft.setTextColor(textColor, cardBg);
   tft.setCursor(20, 110);
@@ -558,7 +556,7 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
   tft.setCursor(20, 142);
-  tft.print("CARD UID (PROTECTED):");
+  tft.print("CARD");
 
   tft.setTextSize(2);
   tft.setTextColor(textColor, cardBg);
@@ -576,33 +574,29 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
 
 void renderDeveloperCredit() {
   tft.fillScreen(getTftBg());
-  drawHostTopBar("SYSTEM ARCHITECTURE & CREDITS");
+  drawHostTopBar("ABOUT");
 
-  drawBentoCard(10, 36, 300, 166, getTftAccentCyan(), getTftCardBg());
+  drawBentoCard(10, 36, 300, 166, getTftCardBorder(), getTftCardBg());
 
-  tft.setTextColor(getTftAccentCyan(), getTftCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(22, 48);
-  tft.println("SYSTEM DEVELOPER:");
-
+  drawCardLabel(22, 48, "BUILT BY");
   tft.setTextColor(getTftTextMain(), getTftCardBg());
   tft.setTextSize(2);
   tft.setCursor(22, 64);
   tft.println(DEV_NAME);
 
-  tft.setTextColor(getTftAccentYellow(), getTftCardBg());
+  tft.setTextColor(getTftTextMuted(), getTftCardBg());
   tft.setTextSize(1);
   tft.setCursor(22, 92);
   tft.println(DEV_ROLE);
-
-  tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-  tft.setCursor(22, 110);
+  tft.setCursor(22, 108);
   tft.println("Mahachulalongkornrajavidyalaya Phrae");
 
-  tft.setTextColor(getTftTextMuted(), getTftCardBg());
-  tft.setCursor(22, 134); tft.printf("Firmware: v%s (Bento Edition)\n", APP_VERSION);
-  tft.setCursor(22, 150); tft.printf("Hardware: ESP32-S3 DevKitC (N16R8, PSRAM %dMB)\n", ESP.getPsramSize()/1024/1024);
-  tft.setCursor(22, 166); tft.println("Display : 2.8\" ST7789V 320x240 Modular Bento");
+  tft.drawFastHLine(22, 126, 276, getTftCardBorder());
 
-  drawBentoBottomBar("[ PRESS BUTTON TO RETURN TO DASHBOARD ]");
+  tft.setTextColor(getTftTextMuted(), getTftCardBg());
+  tft.setCursor(22, 140); tft.printf("Firmware  v%s\n", APP_VERSION);
+  tft.setCursor(22, 156); tft.printf("Board     ESP32-S3 N16R8, %d MB PSRAM\n", ESP.getPsramSize() / 1024 / 1024);
+  tft.setCursor(22, 172); tft.println("Screen    2.8 inch 320x240");
+
+  drawBentoBottomBar("Press the button to go back");
 }

@@ -463,32 +463,34 @@ void displayOfflineAlert() {
   tft.fillScreen(0x8000);
 
   drawStationCard(10, 16, 300, 208, 0xF800, 0x4800);
-  drawStationPillBadge(24, 28, 272, 24, "GATEWAY OFFLINE LINK", 0xFFFF, 0xF800);
+  drawStationPillBadge(24, 28, 272, 24, "NO CONNECTION", 0xFFFF, 0xF800);
 
   tft.setTextColor(0xFCAE, 0x4800);
   tft.setTextSize(1);
   tft.setCursor(24, 68);
-  tft.println("COMMUNICATION ERROR:");
+  tft.println("WHAT HAPPENED");
   tft.setTextColor(0xF800, 0x4800);
   tft.setTextSize(2);
   tft.setCursor(24, 84);
-  tft.println("NO HOST RESPONSE");
+  tft.println("Main computer");
+  tft.setCursor(24, 104);
+  tft.println("is not answering");
 
   tft.setTextColor(0xFCAE, 0x4800);
   tft.setTextSize(1);
   tft.setCursor(24, 124);
-  tft.println("ACTION REQUIRED:");
+  tft.println("WHAT TO DO");
   tft.setTextColor(0xFFFF, 0x4800);
   tft.setTextSize(1);
   tft.setCursor(24, 142);
-  tft.println("Please check Central Host Server (Ch 1)");
+  tft.println("Tell the staff, then press the button");
 
-  drawStationBottomBar("PRESS BUTTON TO RETRY CONNECTION");
+  drawStationBottomBar("Press the button to try again");
   soundError();
 }
 
 void updateShopLabel() {
-  snprintf(dynamicShopLabel, sizeof(dynamicShopLabel), "STATION 0%d", currentStationId);
+  snprintf(dynamicShopLabel, sizeof(dynamicShopLabel), "POINT %d", currentStationId);
 }
 
 String maskUID(String uid) {
@@ -724,9 +726,9 @@ void applyHostConfig() {
 // แจ้งว่าเรื่องหน้าจอเป็นของแม่ข่าย ไม่ใช่ความผิดพลาดของเครื่อง
 void showDisplayLockedNotice() {
   tft.fillRect(0, 100, 320, 44, getStCyan());
-  drawFitCenteredText(0, 100, 320, 20, "DISPLAY IS CONTROLLED BY THE HOST", 1,
+  drawFitCenteredText(0, 100, 320, 20, "Display is set by the main computer", 1,
                       isStationDarkMode ? 0x0000 : 0xFFFF, getStCyan());
-  drawFitCenteredText(0, 120, 320, 20, "CHANGE IT ON THE HOST WEB PAGE", 1,
+  drawFitCenteredText(0, 120, 320, 20, "Change it on the web page", 1,
                       isStationDarkMode ? 0x0000 : 0xFFFF, getStCyan());
   soundClick();
   delay(1400);
@@ -758,18 +760,18 @@ void playBootAnimation() {
   tft.setTextColor(getStYellow(), getStBg());
   tft.setTextSize(2);
   tft.setCursor(22, 30);
-  tft.println("MCU PHRAE SMART CANTEEN");
+  tft.println("MCU CANTEEN");
   
   tft.setTextColor(getStTextMain(), getStBg());
   tft.setTextSize(1);
   tft.setCursor(44, 60);
-  tft.println("STATION TERMINAL CLIENT SYSTEM");
+  tft.println("Service point");
 
   drawStationCard(50, 95, 220, 48, getStGreen(), getStCardBg());
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(2);
   tft.setCursor(85, 110);
-  tft.printf("STATION 0%d", currentStationId);
+  tft.printf("Point %d", currentStationId);
 
   tft.setTextColor(getStGreen(), getStBg());
   tft.setTextSize(1);
@@ -783,14 +785,14 @@ void playBootAnimation() {
 
 void renderDeveloperCredit() {
   tft.fillScreen(getStBg());
-  drawStationTopBar("SYSTEM ARCHITECTURE & CREDITS");
+  drawStationTopBar("ABOUT");
 
   drawStationCard(10, 36, 300, 166, getStCyan(), getStCardBg());
 
   tft.setTextColor(getStCyan(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(22, 48);
-  tft.println("SYSTEM DEVELOPER:");
+  tft.println("BUILT BY");
 
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(2);
@@ -811,82 +813,95 @@ void renderDeveloperCredit() {
   tft.setCursor(22, 150); tft.printf("Hardware: ESP32-S3 + ST7789V + RC522\n");
   tft.setCursor(22, 166); tft.println("Display : 2.8\" ST7789V 320x240 Modular Bento");
 
-  drawStationBottomBar("PRESS BUTTON TO RETURN TO DASHBOARD");
+  drawStationBottomBar("Press the button to go back");
 }
 
 void displayTapCardStandby() {
   ledStandby();
   tft.fillScreen(getStBg());
 
-  drawStationTopBar(String(dynamicShopLabel) + " TERMINAL");
+  drawStationTopBar(String(dynamicShopLabel));
 
-  drawStationCard(16, 36, 288, 128, getStGreen(), getStCardBg());
-  drawStationPillBadge(32, 48, 256, 20, "READY FOR RFID CARD TAP", isStationDarkMode ? 0x0000 : 0xFFFF, getStGreen());
+  // ช่องใหญ่ช่องเดียว มีประโยคเดียวที่นิสิตต้องอ่าน
+  drawStationCard(16, 34, 288, 130, getStCardBorder(), getStCardBg());
+  drawFitCenteredText(24, 62, 272, 40, "TAP YOUR CARD", 4, getStTextMain(), getStCardBg());
+  drawFitCenteredText(24, 112, 272, 16, "Free meal  35 baht  once a day", 1,
+                      getStTextMuted(), getStCardBg());
 
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(3);
-  tft.setCursor(48, 86);
-  tft.println("TAP CARD HERE");
-
-  tft.setTextColor(getStYellow(), getStCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(68, 126);
-  tft.println("Subsidy Quota: 35 THB / Day");
-
-  drawStationCard(16, 172, 288, 38, getStCardBorder(), getStCardBg());
+  // ช่องล่าง: ยอดของจุดบริการนี้วันนี้ และเวลา
+  drawStationCard(16, 172, 288, 40, getStCardBorder(), getStCardBg());
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
-  tft.setCursor(28, 184);
-  tft.println("Protocol: ESP-NOW Channel 1 Secured");
+  tft.setCursor(28, 178);
+  tft.print("SERVED TODAY");
+  tft.setTextColor(getStTextMain(), getStCardBg());
+  tft.setTextSize(2);
+  tft.setCursor(28, 191);
+  tft.printf("%d", totalSuccessToday);
 
-  drawStationBottomBar("PAGE 1/3 | PRESS BUTTON TO CYCLE");
+  String clock = getTimeOnlyStr();
+  tft.setTextColor(getStTextMain(), getStCardBg());
+  tft.setTextSize(2);
+  tft.setCursor(292 - (int)clock.length() * 12, 186);
+  tft.print(clock);
+
+  drawStationBottomBar("Page 1/3    Press the button for the next page");
 }
 
 void displayStatsDashboard() {
   ledStandby();
   tft.fillScreen(getStBg());
 
-  drawStationTopBar(String(dynamicShopLabel) + " STATS");
+  drawStationTopBar(String(dynamicShopLabel));
 
-  drawStationCard(6, 30, 150, 130, getStGreen(), getStCardBg());
+  // ซ้าย: จ่ายไปแล้วกี่จาน เป็นเงินเท่าไร
+  drawStationCard(6, 30, 150, 172, getStCardBorder(), getStCardBg());
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
-  tft.setCursor(14, 38);
-  tft.println("TODAY SERVED");
-  drawStationPillBadge(88, 36, 62, 14, isHostOnline ? "ONLINE" : "OFFLINE", isHostOnline ? (isStationDarkMode ? 0x0000 : 0xFFFF) : 0xFFFF, isHostOnline ? getStGreen() : getStRose());
+  tft.setCursor(14, 40);
+  tft.print("SERVED TODAY");
+
+  tft.setTextColor(getStTextMain(), getStCardBg());
+  tft.setTextSize(4);
+  tft.setCursor(14, 62);
+  tft.printf("%d", totalSuccessToday);
 
   tft.setTextColor(getStGreen(), getStCardBg());
   tft.setTextSize(3);
-  tft.setCursor(14, 62);
-  tft.printf("%d", totalSuccessToday);
+  tft.setCursor(14, 118);
+  tft.printf("%d", totalSuccessToday * 35);
   tft.setTextSize(1);
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.print(" pax");
+  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.setCursor(14 + (int)String(totalSuccessToday * 35).length() * 18 + 6, 134);
+  tft.print("baht");
 
-  tft.setTextColor(getStYellow(), getStCardBg());
+  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.setTextSize(1);
+  tft.setCursor(14, 174);
+  tft.print("35 baht per student");
+
+  // ขวา: จุดบริการนี้คือจุดไหน ต่อกับแม่ข่ายอยู่ไหม และเวลาเท่าไร
+  drawStationCard(164, 30, 150, 172, getStCardBorder(), getStCardBg());
+  tft.setTextColor(getStTextMuted(), getStCardBg());
+  tft.setTextSize(1);
+  tft.setCursor(172, 40);
+  tft.print("THIS POINT");
+
+  tft.setTextColor(getStTextMain(), getStCardBg());
+  tft.setTextSize(4);
+  tft.setCursor(172, 62);
+  tft.printf("%d", currentStationId);
+
+  drawStationPillBadge(172, 118, 96, 20, isHostOnline ? "ONLINE" : "OFFLINE",
+                       isHostOnline ? (isStationDarkMode ? 0x0000 : 0xFFFF) : 0xFFFF,
+                       isHostOnline ? getStGreen() : getStRose());
+
+  tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(2);
-  tft.setCursor(14, 110);
-  tft.printf("%d B.", totalSuccessToday * 35);
-  tft.setTextSize(1);
-  tft.setTextColor(getStTextMuted(), getStCardBg());
-  tft.setCursor(14, 136);
-  tft.println("Total Payout");
+  tft.setCursor(172, 166);
+  tft.print(getTimeOnlyStr());
 
-  drawStationCard(164, 30, 150, 130, getStCardBorder(), getStCardBg());
-  tft.setTextColor(getStTextMuted(), getStCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(172, 38);
-  tft.println("SYSTEM STATUS");
-
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(1);
-  tft.setCursor(172, 60); tft.println("QUOTA : 35 THB");
-  tft.setCursor(172, 78); tft.println("LIMIT : 1 TIME");
-  tft.setCursor(172, 96); tft.println("RADIO : ESP-NOW");
-  tft.setTextColor(getStCyan(), getStCardBg());
-  tft.setCursor(172, 118); tft.println("CH 1 LOCKED");
-
-  drawStationBottomBar("PAGE 2/3 | PRESS BUTTON TO CYCLE");
+  drawStationBottomBar("Page 2/3    Press the button for the next page");
 }
 
 void displayScanningUID(String uid) {
@@ -895,15 +910,15 @@ void displayScanningUID(String uid) {
   setLedColor(30, 30, 30);
   tft.fillScreen(getStBg());
 
-  drawStationTopBar("PROCESSING CARD TAP");
+  drawStationTopBar("CHECKING");
 
   drawStationCard(10, 36, 300, 168, getStCyan(), getStCardBg());
-  drawStationPillBadge(24, 48, 272, 22, "RFID CARD DETECTED", isStationDarkMode ? 0x0000 : 0xFFFF, getStCyan());
+  drawStationPillBadge(24, 48, 272, 22, "CARD READ", isStationDarkMode ? 0x0000 : 0xFFFF, getStCyan());
 
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(24, 84);
-  tft.println("ENCRYPTED CARD UID:");
+  tft.println("CARD");
 
   tft.setTextColor(getStCyan(), getStCardBg());
   tft.setTextSize(2);
@@ -913,9 +928,9 @@ void displayScanningUID(String uid) {
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(24, 148);
-  tft.println("Transmitting payload to Central Host...");
+  tft.println("Asking the main computer...");
 
-  drawStationBottomBar("PLEASE WAIT FOR VERIFICATION");
+  drawStationBottomBar("Please wait a moment");
 }
 
 void renderScreensaver(bool fullRedraw) {
@@ -926,45 +941,40 @@ void renderScreensaver(bool fullRedraw) {
     ledOff();
     tft.fillScreen(getStBg());
     lastStationClock = "";
-    drawStationTopBar("SYSTEM STANDBY");
+    drawStationTopBar(String(dynamicShopLabel));
 
     drawStationCard(20, 36, 280, 162, getStCardBorder(), getStCardBg());
 
     String dateStr = getDateFormattedStr();
-    int xDate = max(24, (320 - (int)dateStr.length() * 12) / 2);
-    tft.setTextColor(getStCyan(), getStCardBg());
-    tft.setTextSize(2);
-    tft.setCursor(xDate, 108);
+    tft.setTextColor(getStTextMuted(), getStCardBg());
+    tft.setTextSize(1);
+    tft.setCursor(160 - (int)dateStr.length() * 3, 118);
     tft.print(dateStr);
 
-    char statBuf[48];
-    snprintf(statBuf, sizeof(statBuf), "SERVED: %3d STUDENTS (%5d THB)", usedCount, usedCount * 35);
-    int statLen = strlen(statBuf) * 6;
-    int posX = max(24, (320 - statLen) / 2);
+    char line[48];
+    snprintf(line, sizeof(line), "%d served today   %d baht", usedCount, usedCount * 35);
     tft.setTextColor(getStGreen(), getStCardBg());
     tft.setTextSize(1);
-    tft.setCursor(posX, 142);
-    tft.print(statBuf);
+    tft.setCursor(160 - (int)strlen(line) * 3, 146);
+    tft.print(line);
 
-    float hVolt = readBatteryVoltage();
-    char statBuf2[48];
-    snprintf(statBuf2, sizeof(statBuf2), "BATT: %d%% | CORE: %.1fC | PSRAM: 8MB", getBatteryPercentage(hVolt), getChipTemperature());
-    int statLen2 = strlen(statBuf2) * 6;
-    int posX2 = max(24, (320 - statLen2) / 2);
+    float volt = readBatteryVoltage();
+    char line2[48];
+    snprintf(line2, sizeof(line2), "battery %d%%", getBatteryPercentage(volt));
     tft.setTextColor(getStTextMuted(), getStCardBg());
-    tft.setCursor(posX2, 162);
-    tft.print(statBuf2);
+    tft.setCursor(160 - (int)strlen(line2) * 3, 168);
+    tft.print(line2);
 
-    drawStationBottomBar("TAP RFID CARD OR PRESS BUTTON TO WAKE");
+    drawStationBottomBar("Tap your card or press the button to wake");
   }
 
   String curTime = getTimeOnlyStr();
   if (fullRedraw || curTime != lastStationClock) {
     lastStationClock = curTime;
-    tft.fillRect(60, 50, 200, 38, getStCardBg());
+    tft.fillRect(30, 54, 260, 52, getStCardBg());
     tft.setTextColor(getStTextMain(), getStCardBg());
-    tft.setTextSize(4);
-    tft.setCursor(64, 54);
+    tft.setTextSize(5);
+    tft.setCursor(160 - (int)curTime.length() * 15, 62);
     tft.print(curTime);
   }
 }
@@ -973,26 +983,24 @@ void displayStatusScreen(bool fullRedraw) {
   if (fullRedraw) {
     ledStandby();
     tft.fillScreen(getStBg());
-    drawStationTopBar("DIAGNOSTICS & HARDWARE");
+    drawStationTopBar("SYSTEM");
 
     drawStationCard(6, 30, 308, 172, getStCardBorder(), getStCardBg());
 
     tft.setTextColor(getStTextMuted(), getStCardBg());
     tft.setTextSize(1);
-    tft.setCursor(16, 42);  tft.println("HOST LINK STATUS :");
-    tft.setCursor(16, 64);  tft.println("STATION IDENTIFIER:");
-    tft.setCursor(16, 86);  tft.println("CORE TEMPERATURE :");
-    tft.setCursor(16, 108); tft.println("BATTERY VOLTAGE  :");
-    tft.setCursor(16, 130); tft.println("TODAY SERVED     :");
-    tft.setCursor(16, 152); tft.println("STATION MAC      :");
-
-    tft.setTextColor(getStCyan(), getStCardBg());
-    tft.setCursor(140, 64);  tft.printf("STATION 0%d (Active)", currentStationId);
+    tft.setCursor(16, 42);  tft.print("Host link");
+    tft.setCursor(16, 64);  tft.print("Service point");
+    tft.setCursor(16, 86);  tft.print("Chip");
+    tft.setCursor(16, 108); tft.print("Battery");
+    tft.setCursor(16, 130); tft.print("Served today");
+    tft.setCursor(16, 152); tft.print("Address");
 
     tft.setTextColor(getStTextMain(), getStCardBg());
-    tft.setCursor(140, 152); tft.println(WiFi.macAddress());
+    tft.setCursor(140, 64);  tft.printf("Point %d", currentStationId);
+    tft.setCursor(140, 152); tft.print(WiFi.macAddress());
 
-    drawStationBottomBar("PAGE 3/3 | PRESS BUTTON TO CYCLE");
+    drawStationBottomBar("Page 3/3    Press the button for the next page");
   }
 
   float chipT = getChipTemperature();
@@ -1011,16 +1019,27 @@ void displayStatusScreen(bool fullRedraw) {
     tft.setCursor(140, 42);
     if (isHostOnline) {
       tft.setTextColor(getStGreen(), getStCardBg());
-      tft.printf("ONLINE (CH 1 | %ddB)", lastHostRssi);
+      tft.printf("Connected  %d dB", lastHostRssi);
     } else {
       tft.setTextColor(getStRose(), getStCardBg());
-      tft.print("OFFLINE (No Gateway)");
+      tft.print("Not connected");
     }
 
     tft.fillRect(140, 84, 166, 14, getStCardBg());
     tft.setCursor(140, 86);
-    tft.setTextColor((chipT < 65.0) ? getStGreen() : getStYellow(), getStCardBg());
-    tft.printf("%.1f C (CPU: %.0f%%)", chipT, cpuL);
+    tft.setTextColor((chipT < 65.0f) ? getStTextMain() : getStYellow(), getStCardBg());
+    tft.printf("%.0f C   cpu %.0f%%", chipT, cpuL);
+
+    // สองแถวนี้เดิมมีแต่หัวข้อ ไม่เคยมีค่าโผล่มาเลย เติมให้ครบ
+    float volt = readBatteryVoltage();
+    tft.fillRect(140, 106, 166, 14, getStCardBg());
+    tft.setCursor(140, 108);
+    tft.setTextColor(getStTextMain(), getStCardBg());
+    tft.printf("%d%%   %.2f V", getBatteryPercentage(volt), volt);
+
+    tft.fillRect(140, 128, 166, 14, getStCardBg());
+    tft.setCursor(140, 130);
+    tft.printf("%d meals   %d baht", totalSuccessToday, totalSuccessToday * 35);
   }
 }
 
@@ -1050,8 +1069,8 @@ void displayResult(String status, String name, String id, String refNo, String c
     bannerFg    = 0x0000;             // ตัวอักษรสีดำ
     accentColor = DARK_ACCENT_GREEN;  
     textMuted   = 0x87F0;             // ข้อความกำกับสีเขียวมิ้นต์
-    headerTitle = ">>> APPROVED: 35B QUOTA <<<";
-    footerDesc  = "TRANSACTION VERIFIED | DAILY QUOTA APPLIED";
+    headerTitle = "APPROVED";
+    footerDesc  = "Meal paid, 35 baht. Enjoy your meal.";
   } 
   else if (status == "ALREADY_USED") {
     ledDuplicate();
@@ -1062,8 +1081,8 @@ void displayResult(String status, String name, String id, String refNo, String c
     bannerFg    = 0x0000;             // ตัวอักษรสีดำ
     accentColor = ST77XX_ORANGE;
     textMuted   = 0xFDC0;             // ข้อความกำกับสีส้มอ่อน
-    headerTitle = "! DUPLICATE: ALREADY CLAIMED !";
-    footerDesc  = "QUOTA ALREADY CONSUMED FOR TODAY";
+    headerTitle = "ALREADY SERVED";
+    footerDesc  = "You already had your meal today.";
   } 
   else if (status == "TIME_CLOSED") {
     ledDuplicate();
@@ -1074,8 +1093,8 @@ void displayResult(String status, String name, String id, String refNo, String c
     bannerFg    = 0x0000;             
     accentColor = DARK_ACCENT_YELLOW; // ขอบการ์ดและเส้นคั่นสีเหลืองเตือนภัย (0xFFE0)
     textMuted   = 0xFEE0;             // ข้อความกำกับสีเหลืองอ่อน
-    headerTitle = "! SERVICE HOURS ARE CLOSED !";
-    footerDesc  = "CARD SCANNED OUTSIDE SERVICE WINDOW";
+    headerTitle = "CLOSED NOW";
+    footerDesc  = "Please come back during service hours.";
   } 
   else {
     ledRejected();
@@ -1086,70 +1105,63 @@ void displayResult(String status, String name, String id, String refNo, String c
     bannerFg    = 0xFFFF;             // ตัวอักษรสีขาว
     accentColor = DARK_ACCENT_ROSE;   
     textMuted   = 0xFCAE;             // ข้อความกำกับสีชมพูอ่อน
-    headerTitle = "X REJECTED: UNREGISTERED X";
-    footerDesc  = "CARD NOT FOUND IN STUDENT DIRECTORY";
+    headerTitle = "NOT ON THE LIST";
+    footerDesc  = "Ask the staff to register this card.";
   }
 
   tft.fillScreen(screenBg);
 
-  tft.fillRect(0, 0, 320, 34, bannerBg);
-  tft.setTextSize(2);
-  tft.setTextColor(bannerFg, bannerBg);
-  int titleLen = strlen(headerTitle) * 12;
-  int titleX = max(4, (320 - titleLen) / 2);
-  tft.setCursor(titleX, 9);
-  tft.print(headerTitle);
+  // แบนเนอร์คำเดียว ตัวโต นิสิตอ่านออกตั้งแต่ยังไม่เก็บบัตร
+  tft.fillRect(0, 0, 320, 40, bannerBg);
+  drawFitCenteredText(4, 0, 312, 40, headerTitle, 3, bannerFg, bannerBg);
 
-  tft.fillRoundRect(8, 40, 304, 192, 8, cardBg);
-  tft.drawRoundRect(8, 40, 304, 192, 8, accentColor);
-  tft.drawRoundRect(9, 41, 302, 190, 7, accentColor);
+  tft.fillRoundRect(8, 46, 304, 140, 8, cardBg);
+  tft.drawRoundRect(8, 46, 304, 140, 8, accentColor);
 
+  // ชื่อมาก่อน เพราะนิสิตจำชื่อตัวเองได้เร็วกว่ารหัส
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
-  tft.setCursor(20, 50);
-  tft.print("SERVICE STATION:");
-  tft.setCursor(156, 50);
-  tft.print("CARD UID (ENCRYPTED):");
+  tft.setCursor(20, 56);
+  tft.print("NAME");
 
+  String displayName = (name != "-" && name.length() > 0) ? name : "Unknown card";
+  if (displayName.length() > 22) displayName = displayName.substring(0, 22);
   tft.setTextSize(2);
   tft.setTextColor(textColor, cardBg);
-  tft.setCursor(20, 62);
-  tft.printf("STATION 0%d", currentStationId);
-  tft.setCursor(156, 62);
-  tft.println(maskUID(lastProcessedUID));
+  tft.setCursor(20, 68);
+  tft.print(displayName);
 
-  tft.drawFastHLine(20, 84, 280, accentColor);
+  tft.drawFastHLine(20, 94, 280, accentColor);
 
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
-  tft.setCursor(20, 90);
-  tft.print("BENEFICIARY STUDENT ID:");
+  tft.setCursor(20, 102);
+  tft.print("STUDENT ID");
 
-  String cleanId = (id != "-" && id.length() > 0) ? id : "UNKNOWN";
+  String cleanId = (id != "-" && id.length() > 0) ? id : "Unknown";
   tft.setTextSize(3);
   tft.setTextColor(textColor, cardBg);
-  tft.setCursor(20, 102);
+  tft.setCursor(20, 114);
   tft.print(cleanId);
 
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
-  tft.setCursor(20, 132);
-  tft.print("BENEFICIARY NAME:");
+  tft.setCursor(20, 150);
+  tft.printf("Point %d", currentStationId);
+  tft.setCursor(20, 164);
+  tft.printf("Card %s", maskUID(lastProcessedUID).c_str());
 
-  tft.setTextSize(2);
-  tft.setTextColor(textColor, cardBg);
-  tft.setCursor(20, 144);
-  String displayName = (name != "-" && name.length() > 0) ? name : "UNREGISTERED STUDENT";
-  if (displayName.length() > 22) displayName = displayName.substring(0, 22);
-  tft.print(displayName);
+  // เวลาที่ได้รับสิทธิ์ อยู่มุมขวาของการ์ด เผื่อเจ้าหน้าที่ต้องตรวจย้อนหลัง
+  if (claimTime.length() > 0 && claimTime != "-") {
+    String stamp = claimTime;
+    if (stamp.length() > 16) stamp = stamp.substring(stamp.length() - 8);
+    tft.setTextColor(textMuted, cardBg);
+    tft.setCursor(296 - (int)stamp.length() * 6, 164);
+    tft.print(stamp);
+  }
 
-  tft.fillRoundRect(16, 186, 288, 36, 6, bannerBg);
-  tft.setTextSize(1);
-  tft.setTextColor(bannerFg, bannerBg);
-  int descLen = strlen(footerDesc) * 6;
-  int descX = max(20, (320 - descLen) / 2);
-  tft.setCursor(descX, 200);
-  tft.print(footerDesc);
+  tft.fillRoundRect(8, 192, 304, 40, 8, bannerBg);
+  drawFitCenteredText(14, 192, 292, 40, footerDesc, 1, bannerFg, bannerBg);
 }
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -1289,7 +1301,7 @@ void drawStationIdConfigProgress(unsigned long elapsedMs, bool holdToEnter) {
   tft.setCursor(46, 190);
   if (holdToEnter) {
     if (remain > 0) tft.printf("KEEP HOLDING... %lu SEC", sec);
-    else tft.print("RELEASE TO ENTER ID SETUP");
+    else tft.print("Release to change the point number");
   } else {
     if (remain > 0) tft.printf("AUTO SAVE IN %lu SEC", sec);
     else tft.print("SAVING...");
@@ -1326,13 +1338,13 @@ void runStationIdConfigMode() {
   int lastShownSec = -1;
 
   tft.fillScreen(getStBg());
-  drawStationTopBar("STATION ID SETUP");
+  drawStationTopBar("POINT NUMBER");
   drawStationCard(16, 36, 288, 166, getStYellow(), getStCardBg());
 
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(32, 48);
-  tft.println("SELECT STATION ID");
+  tft.println("CHOOSE THIS POINT");
 
   auto drawSelectedId = [&]() {
     tft.fillRect(130, 70, 64, 40, getStCardBg());
@@ -1349,8 +1361,8 @@ void runStationIdConfigMode() {
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(44, 151);
-  tft.print("RELEASE / WAIT 3 SEC TO SAVE");
-  drawStationBottomBar("ID SETUP | AUTO SAVE");
+  tft.print("Let go and wait 3 seconds to save");
+  drawStationBottomBar("Saves by itself");
 
   auto drawCountdown = [&](int sec) {
     tft.fillRect(70, 178, 180, 16, getStCardBg());
@@ -1390,7 +1402,7 @@ void runStationIdConfigMode() {
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(2);
   tft.setCursor(48, 98);
-  tft.println("STATION ID SAVED");
+  tft.println("SAVED");
   tft.setTextColor(getStCyan(), getStCardBg());
   tft.setTextSize(3);
   tft.setCursor(130, 126);
@@ -1422,18 +1434,18 @@ void handlePhysicalButton() {
     if (held >= 200 && !holdUiShown) {
       wakeScreenIfNeeded();
       tft.fillScreen(getStBg());
-      drawStationTopBar("STATION ID SETUP");
+      drawStationTopBar("POINT NUMBER");
       drawStationCard(16, 36, 288, 166, getStYellow(), getStCardBg());
       tft.setTextColor(getStTextMain(), getStCardBg());
       tft.setTextSize(2);
       tft.setCursor(44, 64);
-      tft.println("HOLD TO CONFIGURE");
+      tft.println("KEEP HOLDING");
       tft.setTextColor(getStTextMuted(), getStCardBg());
       tft.setTextSize(1);
       tft.setCursor(60, 96);
-      tft.println("KEEP BUTTON PRESSED FOR 3 SEC");
+      tft.println("Hold the button for 3 seconds");
       drawStationIdConfigProgress(held, true);
-      drawStationBottomBar("RELEASE AFTER 3 SEC TO SET ID");
+      drawStationBottomBar("Let go after 3 seconds");
       holdUiShown = true;
     } else if (holdUiShown) {
       drawStationIdConfigProgress(held, true);

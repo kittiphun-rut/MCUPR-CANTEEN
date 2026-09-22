@@ -259,7 +259,7 @@ void drawBentoCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bg
 void drawBentoPillBadge(int x, int y, int w, int h, const char* text, uint16_t fgColor, uint16_t bgColor);
 void drawHostBatteryHUD(int x, int y);
 void drawMiniBattery(int x, int y, int pct);
-void drawHostTopBar(String title);
+void drawHostTopBar(String title, int pageNo = 0);
 void drawBentoBottomBar(String instruction);
 String maskUID(String uid);
 uint16_t getStationServedCount(uint8_t stationId);
@@ -318,6 +318,9 @@ String lastScannedUID       = "-";
 String lastScannedStudentId = "-";
 int lastScannedStation      = 0;
 String lastScannedStatus    = "READY";
+String lastScannedRef       = "-";   // เลขอ้างอิงของการสแกนครั้งล่าสุด
+                                     // เก็บไว้ ไม่สร้างใหม่ตอนวาดจอ ไม่งั้นเลขจะเดินทุกครั้งที่รีเฟรช
+
 uint32_t transactionCounter = 0;
 
 int currentHostPage         = 0;
@@ -866,6 +869,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     strncpy(resp.claimTime, getRealTimeStr().c_str(), sizeof(resp.claimTime) - 1);
     strncpy(resp.message, "OUT OF TIME", sizeof(resp.message) - 1);
     lastScannedStatus = "TIME_CLOSED";
+    lastScannedRef = "-";
     resp.servedCount = getStationServedCount(pkt.stationId);
     if (pkt.stationId >= 1 && pkt.stationId <= 4 && pkt.seq != 0) {
       lastScanSeq[pkt.stationId - 1] = pkt.seq;
@@ -905,6 +909,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         String msg = "SHOP 0" + String(s.station);
         strncpy(resp.message, msg.c_str(), sizeof(resp.message) - 1);
         lastScannedStatus = "DUPLICATE";
+        lastScannedRef = s.refNo;
       } else {
         String currentTimestamp = getRealTimeStr();
         String currentRefNo = generateRefNo(pkt.stationId);
@@ -914,6 +919,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         s.claimTime = currentTimestamp;
         s.refNo = currentRefNo;
         lastScannedStatus = "APPROVED";
+        lastScannedRef = currentRefNo;
 
         strncpy(resp.status, "SUCCESS", sizeof(resp.status) - 1);
         strncpy(resp.refNo, currentRefNo.c_str(), sizeof(resp.refNo) - 1);
@@ -933,6 +939,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     strncpy(resp.claimTime, "-", sizeof(resp.claimTime) - 1);
     strncpy(resp.message, "CARD NOT FOUND", sizeof(resp.message) - 1);
     lastScannedStatus = "NOT FOUND";
+    lastScannedRef = "-";
   }
 
   resp.servedCount = getStationServedCount(pkt.stationId);
@@ -1713,6 +1720,7 @@ void setup() {
         s.claimed = true; s.station = station; s.claimTime = getRealTimeStr(); s.refNo = generateRefNo(station);
         lastScannedUID = s.uid; lastScannedStudentId = s.studentId;
         lastScannedStation = station; lastScannedStatus = "APPROVED";
+        lastScannedRef = s.refNo;
         appendLogToFS(s.studentId, s.fullName, s.uid, s.refNo, s.claimTime, station, s.isTempCard ? "Temp Card" : "Normal");
         
         if (s.isTempCard) {
@@ -1751,7 +1759,7 @@ void setup() {
       s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
     }
     saveDatabaseToFS();
-    lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedStation = 0; lastScannedStatus = "RESET";
+    lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedStation = 0; lastScannedStatus = "RESET"; lastScannedRef = "-";
     renderHostPage(true); sendAlert("Daily Reset & Archived Successfully!", "/");
   });
 
