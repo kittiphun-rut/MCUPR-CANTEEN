@@ -42,27 +42,31 @@ def strip_line(line, in_block, in_raw, report=None):
     return ''.join(out), in_block, in_raw
 
 import glob, os
-targets = []
-for f in sorted(glob.glob('Canteen_Host_Server/*.ino') + glob.glob('Canteen_Host_Server/*.h')
-                + glob.glob('Canteen_Station_Client/*.ino') + glob.glob('Canteen_Station_Client/*.h')):
-    # ตัวตรวจนี้นับปีกกาของ "ทุกสาขา" ของ #if/#else ทั้งที่ตอนคอมไพล์จริง
-    # จะถูกเลือกมาแค่สาขาเดียว ส่วนเกินจึงเท่ากับผลรวมของ delta ในสาขา #else
-    # คำนวณจากไฟล์จริงแทนการตั้งค่าตายตัว จะได้ไม่ต้องแก้ทุกครั้งที่โค้ดเปลี่ยน
-    txt = io.open(f, encoding='utf-8').read().split('\n')
-    exp = 0
-    ib, ir, depth, in_else = False, None, 0, []
-    for ln in txt:
-        st = ln.strip()
-        code, ib, ir = strip_line(ln, ib, ir)
-        if st.startswith('#if'):
-            in_else.append(False)
-        elif st == '#else' and in_else:
-            in_else[-1] = True
-        elif st.startswith('#endif') and in_else:
-            in_else.pop()
-        elif in_else and in_else[-1]:
-            exp += code.count('{') - code.count('}')
-    targets.append((f, exp, 0))
+
+def _scan_targets():
+    targets = []
+    for f in sorted(glob.glob('Canteen_Host_Server/*.ino') + glob.glob('Canteen_Host_Server/*.h')
+                        + glob.glob('Canteen_Station_Client/*.ino') + glob.glob('Canteen_Station_Client/*.h')):
+        # ตัวตรวจนี้นับปีกกาของ "ทุกสาขา" ของ #if/#else ทั้งที่ตอนคอมไพล์จริง
+        # จะถูกเลือกมาแค่สาขาเดียว ส่วนเกินจึงเท่ากับผลรวมของ delta ในสาขา #else
+        # คำนวณจากไฟล์จริงแทนการตั้งค่าตายตัว จะได้ไม่ต้องแก้ทุกครั้งที่โค้ดเปลี่ยน
+        txt = io.open(f, encoding='utf-8').read().split('\n')
+        exp = 0
+        ib, ir, depth, in_else = False, None, 0, []
+        for ln in txt:
+            st = ln.strip()
+            code, ib, ir = strip_line(ln, ib, ir)
+            if st.startswith('#if'):
+                in_else.append(False)
+            elif st == '#else' and in_else:
+                in_else[-1] = True
+            elif st.startswith('#endif') and in_else:
+                in_else.pop()
+            elif in_else and in_else[-1]:
+                exp += code.count('{') - code.count('}')
+        targets.append((f, exp, 0))
+    return targets
+
 def unbalanced_quotes(path):
     """หาบรรทัดที่เปิดสตริงแล้วไม่ปิดภายในบรรทัดเดียวกัน"""
     bad = []
@@ -74,18 +78,19 @@ def unbalanced_quotes(path):
             bad.append((ln, line.strip()[:70]))
     return bad
 
-for path, exp_b, exp_p in targets:
-    in_block = False; in_raw = None
-    b = p = k = 0
-    for ln, line in enumerate(io.open(path, encoding='utf-8'), 1):
-        code, in_block, in_raw = strip_line(line.rstrip('\n'), in_block, in_raw)
-        b += code.count('{') - code.count('}')
-        p += code.count('(') - code.count(')')
-        k += code.count('[') - code.count(']')
-    q = unbalanced_quotes(path)
-    ok = (b == exp_b and p == exp_p and k == 0 and not in_block
-          and in_raw is None and not q)
-    print('%-46s braces=%+d(exp %+d) parens=%+d brackets=%+d quotes=%d raw=%s %s'
-          % (path, b, exp_b, p, k, len(q), in_raw, 'OK' if ok else '*** MISMATCH ***'))
-    for ln, txt in q[:5]:
-        print('      คำพูดไม่ครบคู่ บรรทัด %d: %s' % (ln, txt))
+if __name__ == '__main__':
+  for path, exp_b, exp_p in _scan_targets():
+      in_block = False; in_raw = None
+      b = p = k = 0
+      for ln, line in enumerate(io.open(path, encoding='utf-8'), 1):
+          code, in_block, in_raw = strip_line(line.rstrip('\n'), in_block, in_raw)
+          b += code.count('{') - code.count('}')
+          p += code.count('(') - code.count(')')
+          k += code.count('[') - code.count(']')
+      q = unbalanced_quotes(path)
+      ok = (b == exp_b and p == exp_p and k == 0 and not in_block
+            and in_raw is None and not q)
+      print('%-46s braces=%+d(exp %+d) parens=%+d brackets=%+d quotes=%d raw=%s %s'
+            % (path, b, exp_b, p, k, len(q), in_raw, 'OK' if ok else '*** MISMATCH ***'))
+      for ln, txt in q[:5]:
+          print('      คำพูดไม่ครบคู่ บรรทัด %d: %s' % (ln, txt))
