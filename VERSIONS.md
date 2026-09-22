@@ -28,6 +28,7 @@ release/09-h111.0.0-s120.0.1
 release/10-h111.1.0-s120.0.1
 release/11-h112.0.0-s121.0.0
 release/12-h113.0.0-s122.0.0
+release/13-h113.1.0-s122.0.0
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -55,7 +56,9 @@ release/12-h113.0.0-s122.0.0
 | `release/11-h112.0.0-s121.0.0` | 112.0.0 | 121.0.0 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/11-h112.0.0-s121.0.0.zip) | [`427e5d4`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/427e5d499f3dde2921b1fac6c9f8b9882c37a870) | **แก้ปัญหาชื่อ Wi-Fi ไม่โผล่มา** ปิด `WIFI_PROTOCOL_LR` เป็นค่าเริ่มต้น ย้าย `printerBegin()` ไปหลังเว็บเซิร์ฟเวอร์ และเพิ่มจอแจ้งสถานะเครือข่ายตอนบูต<br><sub>22 ก.ย. 2026</sub> |
 | `release/12-h113.0.0-s122.0.0` | 113.0.0 | 122.0.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/12-h113.0.0-s122.0.0.zip) | [`7f4fed9`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/7f4fed947d667942dbf3e8ceccf1079165cfda96) | **เริ่มใหม่จากต้นฉบับ 107.0.1/117.0.7** แล้วรื้ออินเตอร์เฟสทั้งหมดเป็นภาษาอังกฤษสองโหมด แยกไฟล์แดชบอร์ดและไฟล์วาดจอออกมา แม่ข่ายคุมการแสดงผลของทุกจุดบริการ **ยังไม่มีเครื่องพิมพ์สลิป คิวออฟไลน์ และจอสาธารณะ**<br><sub>22 ก.ย. 2026</sub> |
 
-> ❔ **`release/12` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
+| `release/13-h113.1.0-s122.0.0` | 113.1.0 | 122.0.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/13-h113.1.0-s122.0.0.zip) | [`b18a20c`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/b18a20cb0929869e58c711e713fab3f6268c5a3f) | **หน้าเว็บกลับมาเป็นสองภาษา ไทย/อังกฤษ** คำไทยอยู่ในพจนานุกรมชุดเดียว ไม่ได้เขียนซ้ำสองชุดทุกบรรทัดแบบรุ่นเก่า · ฝั่งจอ TFT ยังเป็นอังกฤษ · เพิ่มตัวตรวจคำพูดไม่ครบคู่ใน bracecheck<br><sub>22 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` และ `release/13` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
 > `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
 > การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
 > และทุกหน้าจอถูกเรนเดอร์ดูแล้วว่าตัวอักษรไม่ล้นกรอบ
