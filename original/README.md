@@ -31,10 +31,10 @@ diff -u original/Canteen_Station_Client/Canteen_Station_Client.ino \
 ```
 
 หรือดูผ่าน git ซึ่งเก็บต้นฉบับไว้เป็นคอมมิตแรกของโครงการด้วย
-(แท็ก `release-00-h107.0.1-s117.0.7`)
+(คอมมิต `b351769`)
 
 ```sh
-git diff release-00-h107.0.1-s117.0.7 HEAD -- Canteen_Host_Server/
+git diff b351769 HEAD -- Canteen_Host_Server/
 ```
 
 ## สิ่งที่พบในต้นฉบับ
