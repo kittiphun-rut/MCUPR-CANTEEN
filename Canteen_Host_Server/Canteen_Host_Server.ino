@@ -50,7 +50,7 @@
 #define PRINTER_TRANSPORT_UART 0
 #include "ThermalPrinter.h"
 
-#define APP_VERSION         "111.1.0"
+#define APP_VERSION         "112.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -132,6 +132,7 @@ bool timeWindowEnabled = true;
 // หน้าจอสาธารณะ /display สำหรับต่อออกมอนิเตอร์จอใหญ่ให้นิสิตและร้านค้าดู
 bool publicDisplayEnabled = true;
 bool printerAutoSlip     = true;   // พิมพ์สลิปอัตโนมัติทุกครั้งที่ตัดสิทธิ์สำเร็จ
+bool apStarted           = false;  // SoftAP ขึ้นสำเร็จหรือไม่ ใช้แจ้งเตือนตอนบูต
 int serviceStartHour   = 10;
 int serviceStartMin    = 0;
 int serviceEndHour     = 13;
@@ -164,6 +165,22 @@ enum MsgType : uint8_t { MSG_HEARTBEAT = 1, MSG_SCAN_REQ = 2, MSG_SCAN_RESP = 3,
 // ถ้าคอมไพล์ไม่ผ่านกับ core ที่ใช้อยู่ ให้ตั้งกลับเป็น 0
 // ---------------------------------------------------------------------------
 #define ESPNOW_FORCE_LONG_RANGE_RATE 0
+
+// ---------------------------------------------------------------------------
+// โหมดระยะไกล (Long Range) ของ Espressif บนอินเทอร์เฟซ Wi-Fi
+//
+// **ค่าเริ่มต้นคือปิด และห้ามเปิดโดยไม่ทดสอบ**
+// การใส่ WIFI_PROTOCOL_LR ลงใน bitmap ของ SoftAP ทำให้โทรศัพท์และคอมพิวเตอร์
+// **มองไม่เห็นชื่อ Wi-Fi ของเครื่องแม่ข่าย** ในอุปกรณ์หลายรุ่น เพราะ LR เป็น
+// โหมดเฉพาะของ Espressif ที่อุปกรณ์ทั่วไปไม่รู้จัก ต่อให้ใส่ 11b/g/n ไว้ด้วยก็ตาม
+//
+// ประโยชน์จริงของ LR มาจากการบังคับอัตราส่ง (ESPNOW_FORCE_LONG_RANGE_RATE)
+// ซึ่งปิดอยู่แล้ว การใส่ LR ลง bitmap เฉย ๆ จึงแทบไม่ช่วยอะไร แต่เสี่ยงมาก
+//
+// ถ้าจะเปิด ต้องตั้งเป็น 1 **ทั้งสองฝั่ง** แล้วแฟลชใหม่ทั้งคู่ และต้องยอมรับว่า
+// อาจเข้าหน้าเว็บของแม่ข่ายด้วยโทรศัพท์ไม่ได้อีกต่อไป
+// ---------------------------------------------------------------------------
+#define ENABLE_WIFI_LONG_RANGE 0
 
 #define ESPNOW_PROTO_MAGIC 0xCA
 #define ESPNOW_PROTO_VER   2
@@ -329,6 +346,7 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len);
 void renderHostPage(bool fullRedraw);
 void renderScreensaver(bool fullRedraw);
 void renderDeveloperCredit();
+void drawBootNetworkStatus(bool apOk);
 void displayHostLiveScan(String uid, String studentId, String status, int stId);
 void playBootAnimation();
 String getLoginHTML(const String &errorMsg = "");
@@ -2355,18 +2373,24 @@ void setup() {
   printerAutoSlip      = preferences.getBool("prn_auto", true);
   preferences.end();
 
-  // เริ่มสแต็กเครื่องพิมพ์ก่อนเปิด Wi-Fi เผื่อฝั่ง USB host ต้องใช้เวลาจับอุปกรณ์
-  printerBegin();
-
+  // Wi-Fi ต้องขึ้นให้ได้ก่อนสิ่งอื่นใด เพราะถ้าไม่มีชื่อ Wi-Fi โผล่มา เจ้าหน้าที่
+  // จะเข้าหน้าเว็บไม่ได้เลยและแก้อะไรไม่ได้ทั้งนั้น อะไรที่อาจค้างได้ให้ไปอยู่ท้ายสุด
   WiFi.mode(WIFI_AP);
   // เดิมรับได้ 4 เครื่อง ซึ่งจอสาธารณะจะกินไปหนึ่งช่อง เหลือให้เจ้าหน้าที่แค่สาม
-  WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 8);
+  for (int attempt = 0; attempt < 3 && !apStarted; attempt++) {
+    apStarted = WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 8);
+    if (!apStarted) delay(300);
+  }
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
-  // เพิ่ม WIFI_PROTOCOL_LR เพื่อให้คุยกับสถานีในโหมดระยะไกลได้ การใส่เพิ่มเฉย ๆ
-  // ปลอดภัยเพราะยังคง 11b/g/n ไว้ โทรศัพท์และคอมพิวเตอร์จึงต่อ Wi-Fi ได้ตามปกติ
+  // ดูคำอธิบายที่ ENABLE_WIFI_LONG_RANGE ข้างบน โดยค่าเริ่มต้นจะไม่ใส่ LR ลงไป
+  // เพราะทำให้โทรศัพท์มองไม่เห็นชื่อ Wi-Fi ของเครื่องนี้
   esp_wifi_set_protocol(WIFI_IF_AP,
-                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
+                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N
+#if ENABLE_WIFI_LONG_RANGE
+                        | WIFI_PROTOCOL_LR
+#endif
+                        );
   // 80 = 20 dBm ซึ่งเป็นค่าสูงสุดของ ESP32-S3 เดิมตั้งไว้ 68 = 17 dBm
   esp_wifi_set_max_tx_power(80);
 
@@ -2575,7 +2599,14 @@ void setup() {
   server.onNotFound(handleCaptivePortal);
 
   server.begin();
+
+  // เริ่มสแต็กเครื่องพิมพ์ **หลัง** เว็บเซิร์ฟเวอร์ขึ้นแล้วเท่านั้น
+  // ของเดิมเรียกก่อนเปิด Wi-Fi ซึ่งถ้า usb_host_install() ค้างหรือแพนิก
+  // จะไม่มีชื่อ Wi-Fi โผล่มาเลยและเข้าไปแก้อะไรไม่ได้ทั้งสิ้น
+  printerBegin();
+
   playBootAnimation();
+  drawBootNetworkStatus(apStarted);
 
   for (int i = 1; i <= 4; i++) {
     HostResponsePacket beacon = {};

@@ -606,3 +606,44 @@ void renderDeveloperCredit() {
 
   drawBentoBottomBar("[ PRESS BUTTON TO RETURN TO DASHBOARD ]");
 }
+
+// ---------------------------------------------------------------------------
+// จอแจ้งสถานะเครือข่ายตอนบูต แสดงชื่อ Wi-Fi รหัสผ่าน และหมายเลขเครื่องให้เห็นคาตา
+// มีไว้เพราะเวลาชื่อ Wi-Fi ไม่โผล่มา เจ้าหน้าที่จะไม่มีทางรู้เลยว่าเกิดอะไรขึ้น
+// (เครื่องนี้ไม่ได้เปิด Serial ไว้ จอคือช่องทางเดียวที่บอกได้)
+// ---------------------------------------------------------------------------
+void drawBootNetworkStatus(bool apOk) {
+  const uint16_t bg     = getTftBg();
+  const uint16_t card   = getTftCardBg();
+  const uint16_t accent = apOk ? getTftAccentGreen() : getTftAccentRose();
+
+  tft.fillScreen(bg);
+  tft.fillRect(0, 0, 320, 30, accent);
+  drawFitCenteredText(0, 0, 320, 30,
+                      apOk ? "WI-FI ACCESS POINT READY" : "WI-FI FAILED TO START",
+                      2, 0x0000, accent);
+
+  drawBentoCard(8, 38, 304, 150, accent, card);
+  tft.setTextSize(1);
+  tft.setTextColor(getTftTextMuted(), card);
+  tft.setCursor(20, 48);  tft.print("WI-FI NAME");
+  tft.setCursor(20, 90);  tft.print("PASSWORD");
+  tft.setCursor(168, 90); tft.print("ADDRESS");
+  tft.setCursor(20, 132); tft.print("CHANNEL");
+  tft.setCursor(168, 132);tft.print("FIRMWARE");
+
+  tft.setTextSize(2);
+  tft.setTextColor(apOk ? getTftTextMain() : getTftAccentRose(), card);
+  tft.setCursor(20, 60);  tft.print(apOk ? default_ap_ssid : "-- NOT BROADCASTING --");
+
+  tft.setTextColor(getTftTextMain(), card);
+  tft.setCursor(20, 102); tft.print(apOk ? default_ap_pass : "-");
+  tft.setCursor(168, 102);tft.print(apOk ? WiFi.softAPIP().toString() : String("-"));
+  tft.setCursor(20, 144); tft.printf("%d", ESPNOW_CHANNEL);
+  tft.setCursor(168, 144);tft.printf("v%s", APP_VERSION);
+
+  drawBentoBottomBar(apOk ? "CONNECT TO THIS WI-FI THEN OPEN THE LOGIN PAGE"
+                          : "POWER CYCLE THE DEVICE - IF IT PERSISTS RE-FLASH");
+  if (!apOk) { tone(BUZZER_PIN, 400, 250); delay(300); tone(BUZZER_PIN, 300, 400); delay(450); }
+  delay(apOk ? 2600 : 4000);
+}

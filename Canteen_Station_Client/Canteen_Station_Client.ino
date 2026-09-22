@@ -30,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "120.0.1"
+#define APP_VERSION         "121.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -128,6 +128,13 @@ enum MsgType : uint8_t {
 // ถ้าเปิดข้างเดียวทั้งสองเครื่องจะคุยกันไม่รู้เรื่อง รายละเอียดอยู่ใน README
 // ---------------------------------------------------------------------------
 #define ESPNOW_FORCE_LONG_RANGE_RATE 0
+
+// ---------------------------------------------------------------------------
+// โหมดระยะไกล (Long Range) — ต้องตั้งให้ตรงกับฝั่งแม่ข่ายเสมอ
+// ค่าเริ่มต้นคือปิด เพราะการใส่ LR ลง bitmap ของ SoftAP ฝั่งแม่ข่ายทำให้
+// โทรศัพท์มองไม่เห็นชื่อ Wi-Fi ของเครื่องแม่ข่าย รายละเอียดอยู่ในไฟล์ฝั่งแม่ข่าย
+// ---------------------------------------------------------------------------
+#define ENABLE_WIFI_LONG_RANGE 0
 
 #define ESPNOW_PROTO_MAGIC 0xCA
 #define ESPNOW_PROTO_VER   2
@@ -2531,8 +2538,13 @@ void setup() {
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
   // เพิ่ม WIFI_PROTOCOL_LR เพื่อให้คุยกับแม่ข่ายในโหมดระยะไกลได้
+  // ต้องตั้ง ENABLE_WIFI_LONG_RANGE ให้ตรงกับฝั่งแม่ข่ายเสมอ ดูคำอธิบายที่หัวไฟล์
   esp_wifi_set_protocol(WIFI_IF_STA,
-                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
+                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N
+#if ENABLE_WIFI_LONG_RANGE
+                        | WIFI_PROTOCOL_LR
+#endif
+                        );
   // 80 = 20 dBm ซึ่งเป็นค่าสูงสุดของ ESP32-S3 เดิมตั้งไว้ 68 = 17 dBm
   esp_wifi_set_max_tx_power(80);
 
