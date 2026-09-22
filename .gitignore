@@ -1,2 +1,2 @@
-tools/roster-test/gen.inc
-tools/roster-test/rtest
+__pycache__/
+*.pyc
