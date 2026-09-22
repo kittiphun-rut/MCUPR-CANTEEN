@@ -3,7 +3,7 @@
  * @brief     หน้าเว็บทั้งหมดของเครื่องแม่ข่าย: หน้าเข้าสู่ระบบและแดชบอร์ดเจ้าหน้าที่
  * @version   113.1.0
  * @date      2026-09-22
- * @author    Kittiphan Rattanakorn <varitwuttikul@gmail.com>
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
  * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่

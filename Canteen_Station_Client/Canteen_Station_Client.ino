@@ -3,7 +3,7 @@
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
  * @version   122.1.0
  * @date      2026-09-22
- * @author    Kittiphan Rattanakorn <varitwuttikul@gmail.com>
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
  * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่

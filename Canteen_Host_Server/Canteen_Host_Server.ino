@@ -3,7 +3,7 @@
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
  * @version   113.1.0
  * @date      2026-09-22
- * @author    Kittiphan Rattanakorn <varitwuttikul@gmail.com>
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
  * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่

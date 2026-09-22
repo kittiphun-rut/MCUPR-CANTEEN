@@ -3,7 +3,7 @@
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
  * @version   113.0.0
  * @date      2026-09-22
- * @author    Kittiphan Rattanakorn <varitwuttikul@gmail.com>
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
  * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
