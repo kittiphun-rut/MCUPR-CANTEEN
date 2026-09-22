@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.1.0
+ * @version   122.2.0
  * @date      2026-09-22
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.2.0 | 2026-09-22 | เพิ่ม refreshStationLiveValues() วาดซ้ำเฉพาะตัวเลขที่เปลี่ยน นาฬิกาเดินแล้ว |
  * | 122.1.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก ย้ายแบบยกก้อน ไม่แก้เนื้อใน |
  * | 122.0.0 | 2026-09-22 | ออกแบบหน้าจอใหม่ให้เรียบง่าย ตัวอักษรน้อย แบ่งช่องชัดเจน และเติมค่าที่หายไปในหน้าตรวจสอบระบบ |
  * | 117.0.7 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
@@ -223,6 +224,102 @@ void wakeScreenIfNeeded() {
   if (!isScreenOn) setScreenPower(true);
 }
 
+
+// ============================================================================
+// การวาดซ้ำเฉพาะตัวเลขที่เปลี่ยน
+// ============================================================================
+
+// [122.2.0] เพิ่ม: อัปเดตตัวเลขบนหน้าจอโดยไม่ต้องวาดใหม่ทั้งหน้า
+//           ของเดิมโค้ดอัปเดตยอดอยู่ใน loop() ของไฟล์หลัก ซึ่งมีพิกัดของตัวเอง
+//           พอหน้าจอถูกออกแบบใหม่ พิกัดสองชุดจึงไม่ตรงกันและวาดผิดที่
+//           ย้ายมาอยู่ข้างเดียวกับโค้ดที่วาดหน้านั้นจริง จะได้แก้พร้อมกันเสมอ
+void refreshStationLiveValues(bool force) {
+  if (!isScreenOn) return;
+  // หน้าแจ้งผล หน้าขาดการเชื่อมต่อ และหน้าเครดิต ยึดพื้นที่ทั้งจอไว้
+  // ห้ามไปวาดทับ ไม่งั้นแถบสัญญาณจะไปโผล่กลางหน้าแจ้งผลการแตะบัตร
+  if (currentState != STATE_STANDBY &&
+      currentState != STATE_STATUS &&
+      currentState != STATE_SCREENSAVER) return;
+
+  static int  lastServed = -1;
+  static String lastClock = "";
+  static int  lastOnline = -1;
+
+  int served = (int)totalSuccessToday;
+  String clock = getTimeOnlyStr();
+
+  // ---- หน้าแรก: ยอดวันนี้มุมซ้ายล่าง และนาฬิกามุมขวาล่าง ----
+  if (currentState == STATE_STANDBY && currentStationPage == 1) {
+    if (force || served != lastServed) {
+      tft.fillRect(26, 188, 120, 18, getStCardBg());
+      tft.setTextColor(getStTextMain(), getStCardBg());
+      tft.setTextSize(2);
+      tft.setCursor(28, 191);
+      tft.printf("%d", served);
+    }
+    if (force || clock != lastClock) {
+      tft.fillRect(180, 184, 124, 18, getStCardBg());
+      tft.setTextColor(getStTextMain(), getStCardBg());
+      tft.setTextSize(2);
+      tft.setCursor(292 - (int)clock.length() * 12, 186);
+      tft.print(clock);
+    }
+  }
+  // ---- หน้าสอง: ยอดจาน ยอดเงิน สถานะการเชื่อมต่อ และนาฬิกา ----
+  else if (currentState == STATE_STANDBY && currentStationPage == 2) {
+    if (force || served != lastServed) {
+      tft.fillRect(12, 60, 140, 36, getStCardBg());
+      tft.setTextColor(getStTextMain(), getStCardBg());
+      tft.setTextSize(4);
+      tft.setCursor(14, 62);
+      tft.printf("%d", served);
+
+      tft.fillRect(12, 116, 140, 26, getStCardBg());
+      tft.setTextColor(getStGreen(), getStCardBg());
+      tft.setTextSize(3);
+      tft.setCursor(14, 118);
+      tft.printf("%d", served * 35);
+      tft.setTextSize(1);
+      tft.setTextColor(getStTextMuted(), getStCardBg());
+      tft.setCursor(14 + (int)String(served * 35).length() * 18 + 6, 134);
+      tft.print("baht");
+    }
+    if (force || (int)isHostOnline != lastOnline) {
+      // ป้ายเป็นสี่เหลี่ยมมุมโค้ง การวาดทับป้ายเดิมจึงไม่ลบสีที่มุมทั้งสี่
+      // ต้องล้างกรอบสี่เหลี่ยมเต็ม ๆ ก่อน ไม่งั้นเปลี่ยนจากเขียวเป็นแดงแล้วมุมยังเขียวค้าง
+      tft.fillRect(172, 118, 96, 20, getStCardBg());
+      drawStationPillBadge(172, 118, 96, 20, isHostOnline ? "ONLINE" : "OFFLINE",
+                           isHostOnline ? (isStationDarkMode ? 0x0000 : 0xFFFF) : 0xFFFF,
+                           isHostOnline ? getStGreen() : getStRose());
+    }
+    if (force || clock != lastClock) {
+      tft.fillRect(170, 164, 138, 18, getStCardBg());
+      tft.setTextColor(getStTextMain(), getStCardBg());
+      tft.setTextSize(2);
+      tft.setCursor(172, 166);
+      tft.print(clock);
+    }
+  }
+  // ---- หน้าพักจอ: ยอดวันนี้บรรทัดเดียว นาฬิกามีคนดูแลอยู่แล้วในฟังก์ชันของมันเอง ----
+  else if (currentState == STATE_SCREENSAVER) {
+    if (force || served != lastServed) {
+      char line[48];
+      snprintf(line, sizeof(line), "%d served today   %d baht", served, served * 35);
+      tft.fillRect(24, 144, 272, 12, getStCardBg());
+      tft.setTextColor(getStGreen(), getStCardBg());
+      tft.setTextSize(1);
+      tft.setCursor(160 - (int)strlen(line) * 3, 146);
+      tft.print(line);
+    }
+  }
+
+  lastServed = served;
+  lastClock  = clock;
+  lastOnline = (int)isHostOnline;
+
+  // แถบสัญญาณและแบตเตอรี่มุมขวาบน วาดเองเมื่อค่าเปลี่ยนพอสมควร
+  updateTopRightHeaderSmooth(lastHostRssi, isHostOnline, force);
+}
 
 // ============================================================================
 // หน้าจอเต็มทั้งหมด

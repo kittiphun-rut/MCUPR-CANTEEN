@@ -1,0 +1,98 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#111;}canvas{display:block;}
+</style></head><body>
+<canvas id="c"></canvas>
+<script>
+const S = 3;                       // upscale factor
+const W = 320, H = 240;
+const cv = document.getElementById('c');
+cv.width = W * S; cv.height = H * S;
+const g = cv.getContext('2d');
+
+function rgb(c565){
+  const r=(c565>>11&0x1f)*255/31, gg=(c565>>5&0x3f)*255/63, b=(c565&0x1f)*255/31;
+  return `rgb(${Math.round(r)},${Math.round(gg)},${Math.round(b)})`;
+}
+
+/* ---- minimal Adafruit_GFX emulation (coordinates 1:1 with firmware) ---- */
+let cur={x:0,y:0}, tsize=1, fg=0xFFFF, bg=0x0000, bgSet=false;
+const P = v => v*S;
+function fillScreen(c){ g.fillStyle=rgb(c); g.fillRect(0,0,cv.width,cv.height); }
+function fillRect(x,y,w,h,c){ g.fillStyle=rgb(c); g.fillRect(P(x),P(y),P(w),P(h)); }
+function drawRect(x,y,w,h,c){ g.strokeStyle=rgb(c); g.lineWidth=S; g.strokeRect(P(x)+S/2,P(y)+S/2,P(w)-S,P(h)-S); }
+function rr(x,y,w,h,r){ g.beginPath(); g.moveTo(P(x+r),P(y)); g.arcTo(P(x+w),P(y),P(x+w),P(y+h),P(r));
+  g.arcTo(P(x+w),P(y+h),P(x),P(y+h),P(r)); g.arcTo(P(x),P(y+h),P(x),P(y),P(r)); g.arcTo(P(x),P(y),P(x+w),P(y),P(r)); g.closePath(); }
+function fillRoundRect(x,y,w,h,r,c){ g.fillStyle=rgb(c); rr(x,y,w,h,r); g.fill(); }
+function drawRoundRect(x,y,w,h,r,c){ g.strokeStyle=rgb(c); g.lineWidth=S; rr(x+0.5,y+0.5,w-1,h-1,r); g.stroke(); }
+function drawFastHLine(x,y,w,c){ fillRect(x,y,w,1,c); }
+function drawFastVLine(x,y,h,c){ fillRect(x,y,1,h,c); }
+function drawCircleHelper(x,y,r,mask,c){ // ใช้เฉพาะครึ่งขวา (0x6) ตามที่เฟิร์มแวร์เรียก
+  g.strokeStyle=rgb(c); g.lineWidth=S; g.beginPath();
+  g.arc(P(x),P(y),P(r),-Math.PI/2,Math.PI/2); g.stroke(); }
+function fillCircle(x,y,r,c){ g.fillStyle=rgb(c); g.beginPath(); g.arc(P(x),P(y),P(r),0,7); g.fill(); }
+function drawCircle(x,y,r,c){ g.strokeStyle=rgb(c); g.lineWidth=S; g.beginPath(); g.arc(P(x),P(y),P(r),0,7); g.stroke(); }
+function setTextSize(n){ tsize=n; }
+function setTextColor(f,b){ fg=f; bgSet=(b!==undefined); bg=b; }
+function setCursor(x,y){ cur.x=x; cur.y=y; }
+function print(str){
+  str=String(str);
+  const cw=6*tsize, ch=8*tsize;
+  for(const chr of str){
+    if(bgSet){ g.fillStyle=rgb(bg); g.fillRect(P(cur.x),P(cur.y),P(cw),P(ch)); }
+    if(chr!==' '){
+      g.fillStyle=rgb(fg);
+      g.textBaseline='alphabetic'; g.textAlign='center';
+      g.font=`bold ${Math.round(7.6*tsize*S)}px "DejaVu Sans Mono","Liberation Mono",monospace`;
+      g.fillText(chr, P(cur.x+cw/2)-S*0.15, P(cur.y+7*tsize)+S*0.2);
+    }
+    cur.x+=cw;
+  }
+}
+function printf(){ print(fmt.apply(null,arguments)); }
+function fmt(f,...a){ let i=0; return f.replace(/%[-0-9.]*[difsuc%]/g,m=>{
+  if(m==='%%')return '%'; let v=a[i++];
+  const mm=m.match(/%(-?)(0?)(\d*)(?:\.(\d+))?([difsuc])/);
+  if(mm[5]==='f') v=Number(v).toFixed(mm[4]===undefined?6:+mm[4]);
+  else if(mm[5]!=='s') v=String(v);
+  v=String(v); const wdt=mm[3]?+mm[3]:0;
+  if(v.length<wdt) v = mm[2]==='0' ? v.padStart(wdt,'0') : (mm[1]==='-'? v.padEnd(wdt) : v.padStart(wdt));
+  return v; }).replace(/\n/g,''); }
+
+/* ---- theme accessors ---- */
+let dark=true;
+const D={bg:0x0000,card:0x10A4,border:0x2965,text:0xFFFF,muted:0x8410,green:0x07E0,cyan:0x07FF,yellow:0xFFE0,rose:0xF800};
+const L={bg:0xF7BF,card:0xFFFF,border:0xCE79,text:0x0841,muted:0x632C,green:0x04A6,cyan:0x0318,yellow:0xCBA0,rose:0xD800};
+const T=()=>dark?D:L;
+const BG=()=>T().bg, CARD=()=>T().card, BORDER=()=>T().border, TEXT=()=>T().text,
+      MUTED=()=>T().muted, GREEN=()=>T().green, CYAN=()=>T().cyan, YELLOW=()=>T().yellow, ROSE=()=>T().rose;
+
+/* ---- shared helpers from firmware ---- */
+function fitTextSize(t,maxW,maxS){ const n=t.length; if(n<=0)return 1;
+  for(let s=maxS;s>1;s--) if(n*6*s<=maxW) return s; return 1; }
+function drawFitCenteredText(x,y,w,h,t,maxS,f,b){
+  const s=fitTextSize(t,w-6,maxS), tw=t.length*6*s;
+  let tx=x+Math.floor((w-tw)/2); if(tx<x+2)tx=x+2;
+  let ty=y+Math.floor((h-8*s)/2); if(ty<y)ty=y;
+  setTextSize(s); setTextColor(f,b); setCursor(tx,ty); print(t);
+}
+function calcQuality(r){ if(r<=-100)return 0; if(r>=-50)return 100; return 2*(r+100); }
+function drawSignalBars(x,y,rssi,online,b){
+  const q=calcQuality(rssi); let n=0;
+  if(online) n = q>=85?4 : q>=60?3 : q>=35?2 : 1;
+  const col = !online?ROSE() : (q>=60?GREEN() : q>=35?YELLOW() : ROSE());
+  const hs=[3,6,9,12];
+  for(let i=0;i<4;i++){ const bx=x+i*5, bh=hs[i], by=y+(12-bh);
+    fillRect(bx,y,4,12,b);
+    if(i<n) fillRect(bx,by,3,bh,col); else drawRect(bx,by,3,bh,BORDER()); }
+}
+function drawMiniBattery(x,y,pct){
+  fillRect(x,y,26,12,CARD()); drawRect(x,y,22,12,TEXT()); fillRect(x+22,y+4,2,4,TEXT());
+  let w=Math.floor(pct*18/100); if(w<1&&pct>0)w=1;
+  fillRect(x+2,y+2,w,8, pct>20?GREEN():ROSE());
+}
+function battPct(v){ if(v>=4.15)return 100; if(v<=3.30)return 0;
+  return Math.max(0,Math.min(100,Math.round((v-3.30)/(4.15-3.30)*100))); }
+</script>
+<script src="tft_screens.js"></script>
+<script src="partial_test.js"></script>
+</body></html>

@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.1.0
+ * @version   113.2.0
  * @date      2026-09-22
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.2.0 | 2026-09-22 | รีเฟรชหน้าจอทุกหน้า ไม่ใช่แค่สองหน้าแรก หน้า SYSTEM จึงไม่ค้างอีกต่อไป |
  * | 113.1.0 | 2026-09-22 | หน้าเว็บเป็นสองภาษา ไทย/อังกฤษ และเสิร์ฟสคริปต์พร้อม charset |
  * | 113.0.0 | 2026-09-22 | เริ่มใหม่จากต้นฉบับ แยกไฟล์จอและเว็บออกมา คุมการแสดงผลของทุกจุดบริการ เพิ่ม /api/dashboard เปลี่ยนเส้นทางที่แก้ข้อมูลเป็น POST ซ่อม CSV โทเคนเซสชัน และเลขอ้างอิงบนจอ |
  * | 107.0.1 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
@@ -58,7 +59,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.1.0"
+#define APP_VERSION         "113.2.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -1909,7 +1910,10 @@ void loop() {
     renderScreensaver(true);
   }
 
-  if (!isLiveScanDisplaying && (isScreensaverActive || currentHostPage == 0 || currentHostPage == 1) && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
+  // [113.2.0] แก้: เดิมรีเฟรชเฉพาะหน้า 1 กับหน้า 2 หน้า SYSTEM จึงค้างอยู่กับที่
+  //           ทั้งที่มีอุณหภูมิชิปกับหน่วยความจำว่างที่ควรขยับ ตอนนี้รีเฟรชทุกหน้า
+  //           ฟังก์ชันวาดจะเทียบค่าเก่าเองแล้ววาดซ้ำเฉพาะช่องที่เปลี่ยน จอจึงไม่กะพริบ
+  if (!isLiveScanDisplaying && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
     lastClockRefresh = millis();
     if (isScreensaverActive) renderScreensaver(false);
     else renderHostPage(false);
@@ -1922,9 +1926,8 @@ void loop() {
         stationNodes[i].isOnline = false;
       }
     }
-    if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
-      renderHostPage(false);
-    }
+    // [113.2.0] ย้าย: การวาดซ้ำย้ายไปอยู่กับรอบหนึ่งวินาทีข้างบนแล้ว
+    //           ตรงนี้เหลือหน้าที่เดียวคือตัดสถานีที่เงียบหายไปออกจากสถานะออนไลน์
   }
 
   delay(2);

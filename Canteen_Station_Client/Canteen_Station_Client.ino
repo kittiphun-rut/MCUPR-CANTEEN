@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.1.0
+ * @version   122.2.0
  * @date      2026-09-22
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.2.0 | 2026-09-22 | เรียกการวาดซ้ำทุกหนึ่งวินาที และเลิกวาดยอดด้วยพิกัดของตัวเองใน loop() |
  * | 122.1.0 | 2026-09-22 | แยกส่วนวาดจอออกไปเป็น StationScreen.h ตรรกะไม่เปลี่ยน |
  * | 122.0.0 | 2026-09-22 | เริ่มใหม่จากต้นฉบับ ย้ายจอไปบัส HSPI แก้ปัญหาจอเพี้ยนหลัง PCD_Init() รับคำสั่งโหมดการแสดงผลจากแม่ข่าย และตัดการตั้งค่าธีมที่ตัวเครื่องออก |
  * | 117.0.7 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
@@ -48,7 +49,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.1.0"
+#define APP_VERSION         "122.2.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -283,6 +284,7 @@ void drawFitCenteredText(int x, int y, int w, int h, const char* text,
 void showStationPage(int page, bool fullRedraw);
 void applyHostConfig();
 void showDisplayLockedNotice();
+void refreshStationLiveValues(bool force);
 void displayScanningUID(String uid);
 void displayResult(String status, String name, String id, String refNo, String claimTime, String msg);
 void displayOfflineAlert();
@@ -1075,18 +1077,10 @@ void loop() {
     stationPrefs.putUInt("served", totalSuccessToday);
     stationPrefs.end();
 
-    if (currentState == STATE_STANDBY && currentStationPage == 2 && isScreenOn) {
-      tft.fillRect(12, 60, 90, 28, getStCardBg());
-      tft.setTextColor(getStGreen(), getStCardBg());
-      tft.setTextSize(3);
-      tft.setCursor(14, 62);
-      tft.printf("%d", totalSuccessToday);
-      tft.fillRect(12, 108, 130, 22, getStCardBg());
-      tft.setTextColor(getStYellow(), getStCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(14, 110);
-      tft.printf("%d B.", totalSuccessToday * 35);
-    }
+    // [122.2.0] แก้: ของเดิมวาดทับด้วยพิกัดและขนาดตัวอักษรของหน้าจอชุดเก่า
+    //           พอออกแบบหน้าจอใหม่ ตัวเลขจึงไปโผล่ผิดที่และทับของเดิมไม่มิด
+    //           ตอนนี้เรียกตัวที่อยู่ข้างเดียวกับโค้ดวาดหน้านั้นแทน
+    refreshStationLiveValues(false);
   }
 
   if (currentState == STATE_SCANNING_SENT &&
@@ -1157,9 +1151,13 @@ void loop() {
   // เครื่องแม่ข่ายเป็นผู้สั่งเข้า/ออกโหมดพักหน้าจอฝ่ายเดียว ผ่าน MSG_CONFIG
   if (pendingConfigUpdate) applyHostConfig();
 
-  if (currentState == STATE_SCREENSAVER && isScreenOn && (millis() - lastClockRefresh >= 1000)) {
+  // [122.2.0] เพิ่ม: เดิมหน้าแรกกับหน้าสองวาดครั้งเดียวตอนเข้าหน้านั้น
+  //           นาฬิกาจึงค้าง และสถานะออนไลน์/ออฟไลน์ไม่ขยับจนกว่าจะกดเปลี่ยนหน้า
+  //           ตอนนี้ตรวจทุกหนึ่งวินาที แล้ววาดซ้ำเฉพาะค่าที่เปลี่ยนจริง
+  if (isScreenOn && (millis() - lastClockRefresh >= 1000)) {
     lastClockRefresh = millis();
-    renderScreensaver(false);
+    if (currentState == STATE_SCREENSAVER) renderScreensaver(false);
+    refreshStationLiveValues(false);
   }
 
   checkRC522();
