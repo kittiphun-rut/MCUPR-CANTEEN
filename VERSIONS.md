@@ -7,21 +7,27 @@
 ที่ทดสอบและจัดทำเอกสารมาด้วยกัน — ไม่ควรจับคู่ข้ามรุ่น เพราะโปรโตคอล
 ESP-NOW ระหว่างสองฝั่งเปลี่ยนไปในบางรุ่น
 
-> ⚠️ **แท็กยังไม่ได้ขึ้น GitHub** — บัญชีที่เซสชันนี้ใช้ push ได้เฉพาะ `refs/heads/claude/*`
-> เซิร์ฟเวอร์ตอบ 403 ทุกครั้งที่พยายาม push `refs/tags/*` ระหว่างนี้ใช้ **เลขคอมมิต**
-> ในตารางข้างล่างแทนได้ทันที ทำงานได้เหมือนกันทุกอย่าง
-> ถ้าอยากได้แท็กจริง รันคำสั่งในหัวข้อ **สร้างแท็กเอง** ครั้งเดียวจบ
+ทุกรุ่นถูก push ขึ้น GitHub ไว้เป็น **branch** ชื่อ `claude/release-NN-hX-sY`
+กดโหลดเป็นไฟล์ zip จากตารางข้างล่างได้เลย ไม่ต้องใช้คำสั่ง git
 
-| ชื่อรุ่น | คอมมิต | Host | Station | วันที่ | สาระสำคัญ |
+> หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
+> push ได้เฉพาะ `refs/heads/claude/*` เซิร์ฟเวอร์ตอบ 403 ทุกครั้งที่พยายาม push
+> `refs/tags/*` จึงใช้ branch แทน ได้ผลเหมือนกันทุกอย่างสำหรับการย้อนกลับ
+> ถ้าอยากได้ tag จริงด้วย รันคำสั่งในหัวข้อ **สร้างแท็กเอง** ครั้งเดียวจบ
+>
+> **branch เหล่านี้ห้ามแก้และห้าม push ทับ** ให้ถือเป็นหมุดเวลาอย่างเดียว
+> งานที่พัฒนาต่ออยู่ที่ `claude/fervent-wozniak-66knt2`
+
+| ชื่อรุ่น | Host | Station | โหลด zip | คอมมิต | สาระสำคัญ |
 |---|---|---|---|---|---|
-| `release-00-h107.0.1-s117.0.7` | [`b351769`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/b3517697c239e72ce180c0759843973b8903d7bf) | 107.0.1 | 117.0.7 | 21 ก.ย. 2026 | **ต้นฉบับตามที่ส่งมา** ยังไม่แก้อะไรเลย เก็บสำเนาไว้ที่ [`original/`](original/) ด้วย |
-| `release-01-h107.0.1-s118.0.0` | [`8a20d11`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/8a20d11c8268e7102bd789f66c212bea5e83f9fc) | 107.0.1 | 118.0.0 | 21 ก.ย. 2026 | ฝั่งสถานี: แยกบัส SPI ของจอกับเครื่องอ่านบัตร (จอเพี้ยนหลัง `PCD_Init()`), ซ่อมสถานะลิงก์สด, รับคำสั่งสลับธีมจากแม่ข่าย |
-| `release-02-h108.0.0-s118.0.0` | [`eec7139`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/eec713955d9c3fd56498f801d28f0bdd6d0f4662) | 108.0.0 | 118.0.0 | 21 ก.ย. 2026 | ฝั่งแม่ข่าย: ปิดช่องโหว่ความปลอดภัย, ซ่อม CSV และเลขอ้างอิง, ยกเครื่องเว็บพอร์ทัลให้อัปเดตสด, แยกหน้าเว็บออกเป็น `WebPortal.h`, เพิ่มจอสาธารณะ `/display` |
-| `release-03-h108.0.0-s118.1.0` | [`a883805`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/a883805c9283a80f4240d1d90b7a971217f1a5b5) | 108.0.0 | 118.1.0 | 21 ก.ย. 2026 | ซิงค์โหมดการแสดงผลจากแม่ข่ายไปทุกสถานี, แก้พอร์ทัลใช้งานไม่ได้ในหน้าต่าง captive portal, เพิ่มสัญลักษณ์ RFID บนหน้าแรกของสถานี |
-| `release-04-h108.0.0-s118.2.0` | [`1ca1c8a`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/1ca1c8ac3f8d21df85a88f87a076334e787bf659) | 108.0.0 | 118.2.0 | 21 ก.ย. 2026 | เติมข้อมูลหน้า 2 ของสถานีให้เต็มจอและเป็นข้อมูลสด (ยอดทั้งโรงอาหาร + รายการที่จ่ายล่าสุด) |
-| `release-05-h108.0.0-s119.0.0` | [`6620ab5`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/6620ab5382a80fa3a9519bbb75f90561896788f5) | 108.0.0 | 119.0.0 | 21 ก.ย. 2026 | เสริมความทนทานของลิงก์สำหรับระยะ 20 เมตร และเพิ่ม **คิวออฟไลน์** ฝั่งสถานี |
-| `release-06-h109.0.0-s119.0.0` | [`c3584ff`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/c3584ffe8522ec5314dd960944e6ae16a2df569a) | 109.0.0 | 119.0.0 | 21 ก.ย. 2026 | เพิ่ม **เครื่องพิมพ์สลิปความร้อน 58 มม.** (`ThermalPrinter.h`) ผ่าน USB OTG หรือ UART |
-| `release-07-h110.0.1-s120.0.0` | [`2968d52`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/2968d5215f29fa0c7225b35b3833f59af03480d8) | 110.0.1 | 120.0.0 | 22 ก.ย. 2026 | **ตรวจสิทธิ์ได้เองตอนลิงก์ขาด** ด้วยบัญชีสิทธิ์ย่อที่แม่ข่ายผลักไปเก็บที่สถานี |
+| `release-00-h107.0.1-s117.0.7` | 107.0.1 | 117.0.7 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-00-h107.0.1-s117.0.7.zip) | [`b351769`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/b3517697c239e72ce180c0759843973b8903d7bf) | **ต้นฉบับตามที่ส่งมา** ยังไม่แก้อะไรเลย เก็บสำเนาไว้ที่ [`original/`](original/) ด้วย<br><sub>21 ก.ย. 2026</sub> |
+| `release-01-h107.0.1-s118.0.0` | 107.0.1 | 118.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-01-h107.0.1-s118.0.0.zip) | [`8a20d11`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/8a20d11c8268e7102bd789f66c212bea5e83f9fc) | ฝั่งสถานี: แยกบัส SPI ของจอกับเครื่องอ่านบัตร (จอเพี้ยนหลัง `PCD_Init()`), ซ่อมสถานะลิงก์สด, รับคำสั่งสลับธีมจากแม่ข่าย<br><sub>21 ก.ย. 2026</sub> |
+| `release-02-h108.0.0-s118.0.0` | 108.0.0 | 118.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-02-h108.0.0-s118.0.0.zip) | [`eec7139`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/eec713955d9c3fd56498f801d28f0bdd6d0f4662) | ฝั่งแม่ข่าย: ปิดช่องโหว่ความปลอดภัย, ซ่อม CSV และเลขอ้างอิง, ยกเครื่องเว็บพอร์ทัลให้อัปเดตสด, แยกหน้าเว็บออกเป็น `WebPortal.h`, เพิ่มจอสาธารณะ `/display`<br><sub>21 ก.ย. 2026</sub> |
+| `release-03-h108.0.0-s118.1.0` | 108.0.0 | 118.1.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-03-h108.0.0-s118.1.0.zip) | [`a883805`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/a883805c9283a80f4240d1d90b7a971217f1a5b5) | ซิงค์โหมดการแสดงผลจากแม่ข่ายไปทุกสถานี, แก้พอร์ทัลใช้งานไม่ได้ในหน้าต่าง captive portal, เพิ่มสัญลักษณ์ RFID บนหน้าแรกของสถานี<br><sub>21 ก.ย. 2026</sub> |
+| `release-04-h108.0.0-s118.2.0` | 108.0.0 | 118.2.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-04-h108.0.0-s118.2.0.zip) | [`1ca1c8a`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/1ca1c8ac3f8d21df85a88f87a076334e787bf659) | เติมข้อมูลหน้า 2 ของสถานีให้เต็มจอและเป็นข้อมูลสด (ยอดทั้งโรงอาหาร + รายการที่จ่ายล่าสุด)<br><sub>21 ก.ย. 2026</sub> |
+| `release-05-h108.0.0-s119.0.0` | 108.0.0 | 119.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-05-h108.0.0-s119.0.0.zip) | [`6620ab5`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/6620ab5382a80fa3a9519bbb75f90561896788f5) | เสริมความทนทานของลิงก์สำหรับระยะ 20 เมตร และเพิ่ม **คิวออฟไลน์** ฝั่งสถานี<br><sub>21 ก.ย. 2026</sub> |
+| `release-06-h109.0.0-s119.0.0` | 109.0.0 | 119.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-06-h109.0.0-s119.0.0.zip) | [`c3584ff`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/c3584ffe8522ec5314dd960944e6ae16a2df569a) | เพิ่ม **เครื่องพิมพ์สลิปความร้อน 58 มม.** (`ThermalPrinter.h`) ผ่าน USB OTG หรือ UART<br><sub>21 ก.ย. 2026</sub> |
+| `release-07-h110.0.1-s120.0.0` | 110.0.1 | 120.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-07-h110.0.1-s120.0.0.zip) | [`2968d52`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/2968d5215f29fa0c7225b35b3833f59af03480d8) | **ตรวจสิทธิ์ได้เองตอนลิงก์ขาด** ด้วยบัญชีสิทธิ์ย่อที่แม่ข่ายผลักไปเก็บที่สถานี<br><sub>22 ก.ย. 2026</sub> |
 
 รายละเอียดของแต่ละรุ่นอยู่ใน [`CHANGELOG.md`](CHANGELOG.md)
 
@@ -37,33 +43,29 @@ ESP-NOW ระหว่างสองฝั่งเปลี่ยนไปใ
 
 ## วิธีย้อนกลับไปใช้เวอร์ชันเก่า
 
-ใช้ **เลขคอมมิต** จากตารางข้างบนได้เลย ไม่ต้องรอแท็ก
-(ตัวอย่างข้างล่างใช้ `6620ab5` ซึ่งคือ `release-05-h108.0.0-s119.0.0`)
+### ไม่ใช้ git เลย
+
+กด **zip** ในตารางข้างบน ได้ไฟล์ที่มีทั้งสองสเก็ตช์ครบชุดพร้อมอัปโหลดทันที
 
 ### ดูว่ารุ่นนั้นมีอะไรบ้าง
 
 ```sh
 git fetch origin
-git show 6620ab5 --stat
+git show origin/claude/release-05-h108.0.0-s119.0.0 --stat
 ```
 
 ### ดึงโค้ดของรุ่นนั้นมาดูโดยไม่ยุ่งกับงานปัจจุบัน
 
 ```sh
-git switch --detach 6620ab5
+git switch --detach origin/claude/release-05-h108.0.0-s119.0.0
 ```
 
 กลับมางานล่าสุดด้วย `git switch claude/fervent-wozniak-66knt2`
 
-### ดาวน์โหลดเป็นไฟล์ zip โดยไม่ต้องใช้ git
-
-กดลิงก์เลขคอมมิตในตารางข้างบน แล้วกดปุ่มเขียว **Code → Download ZIP**
-ในไฟล์จะมีทั้งสองสเก็ตช์ครบชุดพร้อมอัปโหลด
-
 ### ดึงเฉพาะไฟล์เดียวจากรุ่นเก่ามาทับของปัจจุบัน
 
 ```sh
-git checkout 6620ab5 -- Canteen_Station_Client/
+git checkout origin/claude/release-05-h108.0.0-s119.0.0 -- Canteen_Station_Client/
 ```
 
 ### สร้างแท็กเอง
