@@ -2,7 +2,7 @@
  * ============================================================================
  * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
  * System: Central Host Server & Gateway Monitor
- * Version: 108.0.0 (Hardened: Safe CSV, Session Security, Live Bento Portal)
+ * Version: 107.0.1 (Production Master: Stabilized Screensaver & Color Takeover)
  * Release Date: กันยายน 2569 (September 2026)
  * 
  * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
@@ -31,26 +31,8 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <RTClib.h>
-#include <esp_random.h>
 
-// ---------------------------------------------------------------------------
-// เครื่องพิมพ์ความร้อน 58 มม. (ESC/POS)
-//
-//   ENABLE_THERMAL_PRINTER 1 = เปิดใช้งาน  ·  0 = ปิดทั้งระบบ
-//   PRINTER_TRANSPORT_UART 0 = ต่อผ่าน USB OTG  ·  1 = ต่อผ่าน UART TTL GPIO17/18
-//
-// **ค่าเริ่มต้นคือปิด** เพราะสแต็ก USB host กินแฟลชราว 20-30 KB และไดรเวอร์
-// คลาสปริ้นเตอร์ยังไม่เคยทดสอบกับเครื่องจริง เมื่อใดที่ต่อเครื่องพิมพ์แล้ว
-// ให้เปลี่ยนบรรทัดล่างเป็น 1 แล้วอัปโหลดใหม่ ฟีเจอร์กลับมาครบทันที
-// ตอนปิดอยู่ ปุ่มบนหน้าเว็บจะแจ้งว่าปิดใช้งานไว้ในเฟิร์มแวร์ ไม่ได้พังแต่อย่างใด
-//
-// อ่านข้อกำหนดการต่อไฟและการตั้งค่า USB Mode ได้ที่หัวไฟล์ ThermalPrinter.h
-// ---------------------------------------------------------------------------
-#define ENABLE_THERMAL_PRINTER 0
-#define PRINTER_TRANSPORT_UART 0
-#include "ThermalPrinter.h"
-
-#define APP_VERSION         "112.0.0"
+#define APP_VERSION         "113.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -129,10 +111,6 @@ uint8_t broadcastAddress[]   = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 const uint8_t ESPNOW_CHANNEL = 1;
 
 bool timeWindowEnabled = true;
-// หน้าจอสาธารณะ /display สำหรับต่อออกมอนิเตอร์จอใหญ่ให้นิสิตและร้านค้าดู
-bool publicDisplayEnabled = true;
-bool printerAutoSlip     = true;   // พิมพ์สลิปอัตโนมัติทุกครั้งที่ตัดสิทธิ์สำเร็จ
-bool apStarted           = false;  // SoftAP ขึ้นสำเร็จหรือไม่ ใช้แจ้งเตือนตอนบูต
 int serviceStartHour   = 10;
 int serviceStartMin    = 0;
 int serviceEndHour     = 13;
@@ -152,35 +130,7 @@ struct ActiveSession {
 };
 ActiveSession activeSessions[3];
 
-enum MsgType : uint8_t { MSG_HEARTBEAT = 1, MSG_SCAN_REQ = 2, MSG_SCAN_RESP = 3, MSG_CONFIG = 4,
-                        MSG_ROSTER = 5 };
-
-// ---------------------------------------------------------------------------
-// บังคับให้ ESP-NOW ใช้อัตราส่งแบบ Long Range (250 kbps) ซึ่งรับสัญญาณอ่อนได้ดีขึ้นมาก
-// แลกกับความเร็วที่ระบบนี้ไม่ต้องการอยู่แล้ว เพราะแพ็กเก็ตใหญ่สุดแค่ 200 ไบต์
-//
-// ค่าเริ่มต้นคือปิดไว้ เพราะถ้าเปิดข้างเดียวทั้งสองเครื่องจะคุยกันไม่รู้เรื่อง
-// วิธีเปิด: แฟลชทั้งสองฝั่งด้วยค่า 0 ให้ระบบทำงานปกติก่อน แล้วค่อยเปลี่ยนเป็น 1
-// ทั้งสองไฟล์แล้วแฟลชใหม่ทั้งคู่ในเวลาที่ไม่มีนิสิตใช้บริการ
-// ถ้าคอมไพล์ไม่ผ่านกับ core ที่ใช้อยู่ ให้ตั้งกลับเป็น 0
-// ---------------------------------------------------------------------------
-#define ESPNOW_FORCE_LONG_RANGE_RATE 0
-
-// ---------------------------------------------------------------------------
-// โหมดระยะไกล (Long Range) ของ Espressif บนอินเทอร์เฟซ Wi-Fi
-//
-// **ค่าเริ่มต้นคือปิด และห้ามเปิดโดยไม่ทดสอบ**
-// การใส่ WIFI_PROTOCOL_LR ลงใน bitmap ของ SoftAP ทำให้โทรศัพท์และคอมพิวเตอร์
-// **มองไม่เห็นชื่อ Wi-Fi ของเครื่องแม่ข่าย** ในอุปกรณ์หลายรุ่น เพราะ LR เป็น
-// โหมดเฉพาะของ Espressif ที่อุปกรณ์ทั่วไปไม่รู้จัก ต่อให้ใส่ 11b/g/n ไว้ด้วยก็ตาม
-//
-// ประโยชน์จริงของ LR มาจากการบังคับอัตราส่ง (ESPNOW_FORCE_LONG_RANGE_RATE)
-// ซึ่งปิดอยู่แล้ว การใส่ LR ลง bitmap เฉย ๆ จึงแทบไม่ช่วยอะไร แต่เสี่ยงมาก
-//
-// ถ้าจะเปิด ต้องตั้งเป็น 1 **ทั้งสองฝั่ง** แล้วแฟลชใหม่ทั้งคู่ และต้องยอมรับว่า
-// อาจเข้าหน้าเว็บของแม่ข่ายด้วยโทรศัพท์ไม่ได้อีกต่อไป
-// ---------------------------------------------------------------------------
-#define ENABLE_WIFI_LONG_RANGE 0
+enum MsgType : uint8_t { MSG_HEARTBEAT = 1, MSG_SCAN_REQ = 2, MSG_SCAN_RESP = 3, MSG_CONFIG = 4 };
 
 #define ESPNOW_PROTO_MAGIC 0xCA
 #define ESPNOW_PROTO_VER   2
@@ -212,65 +162,21 @@ typedef struct __attribute__((packed)) {
   uint16_t servedCount;
 } HostResponsePacket;
 
-// คำสั่งโหมดการแสดงผลที่แม่ข่ายส่งให้สถานี
-//   darkMode    บังคับเสมอ สถานีจะเปลี่ยนตามทุกครั้งที่ค่าไม่ตรงกัน
-//   screenOn    สั่งเฉพาะตอน modeSeq เปลี่ยน สถานียังปิด/เปิดจอเองได้ภายหลัง
-//   screensaver เช่นเดียวกับ screenOn
-//   modeSeq     เพิ่มขึ้นทุกครั้งที่เจ้าหน้าที่เปลี่ยนโหมดที่เครื่องแม่ข่าย
+// คำสั่งการแสดงผลที่แม่ข่ายสั่งลงไปยังสถานี — แม่ข่ายเป็นผู้กำหนดฝ่ายเดียว
+//   darkMode    โหมดมืด/สว่าง บังคับเสมอ
+//   screenOn    เปิด/ปิดไฟหน้าจอของสถานี
+//   screensaver สั่งเข้า/ออกโหมดพักหน้าจอ
+//   modeSeq     เพิ่มขึ้นทุกครั้งที่ค่าเปลี่ยน สถานีใช้กันการทำคำสั่งเดิมซ้ำ
 typedef struct __attribute__((packed)) {
   uint8_t magic;
   uint8_t version;
   uint8_t msgType;
-  uint8_t stationId;
+  uint8_t stationId;   // 0 = ทุกสถานี
   uint8_t darkMode;
   uint8_t screenOn;
   uint8_t screensaver;
   uint8_t modeSeq;
 } HostConfigPacket;
-
-// ---------------------------------------------------------------------------
-// บัญชีสิทธิ์ย่อ (roster) ที่แม่ข่ายผลักไปเก็บไว้ที่สถานี
-//
-// เดิมตอนลิงก์ขาด สถานีรับบัตร "ทุกใบ" เข้าคิวออฟไลน์โดยไม่ตรวจอะไรเลย
-// บัตรที่ไม่ได้ลงทะเบียนหรือบัตรที่ใช้สิทธิ์ไปแล้วก็ได้รับอาหารไปก่อน
-// แล้วค่อยไปตกตอนซิงค์ ซึ่งสายเกินกว่าจะเรียกคืนได้
-//
-// แก้ด้วยการส่งบัญชีย่อไปเก็บไว้ที่สถานีล่วงหน้า เก็บเป็นค่าแฮช 32 บิตของเลขบัตร
-// คู่กับสถานะว่าใช้สิทธิ์ไปแล้วหรือยัง จึงใช้แค่ 5 ไบต์ต่อคน (นิสิต 600 คน = 3 KB)
-// สถานีไม่เคยได้รับเลขบัตรจริงหรือชื่อนิสิตเลย ถึงเครื่องหายก็ไม่มีข้อมูลส่วนบุคคลติดไป
-//
-// ค่าแฮชชนกันได้ตามทฤษฎี (FNV-1a 32 บิต นิสิต 600 คน โอกาสราว 0.004%)
-// ผลของการชนคือบัตรแปลกปลอมใบหนึ่งผ่านด่านออฟไลน์ไปได้ ซึ่งแม่ข่ายจะปัดตกตอนซิงค์
-// เท่ากับกลับไปเท่าพฤติกรรมเดิมเฉพาะบัตรใบนั้น ไม่ได้แย่ลงกว่าเดิม
-// ---------------------------------------------------------------------------
-#define ROSTER_ENTRIES_PER_PKT 38
-#define ROSTER_FLAG_FULL_BEGIN 0x01   // ชุดเต็ม เริ่มนับใหม่ทั้งบัญชี
-#define ROSTER_FLAG_FULL_END   0x02   // ชุดเต็ม ก้อนสุดท้ายแล้ว
-#define ROSTER_FLAG_DELTA      0x04   // อัปเดตทีละรายการ
-
-typedef struct __attribute__((packed)) {
-  uint32_t hash;    // FNV-1a 32 บิตของเลขบัตร
-  uint8_t  state;   // 0 = ยังไม่ใช้สิทธิ์, 1 = ใช้สิทธิ์แล้ววันนี้
-} RosterEntry;
-
-typedef struct __attribute__((packed)) {
-  uint8_t  magic;
-  uint8_t  version;
-  uint8_t  msgType;      // MSG_ROSTER
-  uint8_t  stationId;    // 0 = ทุกสถานี
-  uint16_t rosterVer;    // เลขรุ่นของบัญชี ใช้เทียบว่าสถานีตามทันหรือยัง
-  uint16_t totalEntries;
-  uint32_t rosterDate;   // วันที่ของบัญชีแบบ YYYYMMDD ใช้กันข้อมูลข้ามวันค้างเครื่อง
-  uint8_t  chunkIndex;
-  uint8_t  chunkCount;
-  uint8_t  entryCount;
-  uint8_t  flags;
-  RosterEntry entries[ROSTER_ENTRIES_PER_PKT];
-} HostRosterPacket;
-
-static_assert(sizeof(RosterEntry) == 5, "RosterEntry size mismatch");
-static_assert(sizeof(HostRosterPacket) == 206, "HostRosterPacket size mismatch");
-
 static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
 static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
 static_assert(sizeof(HostConfigPacket) == 8, "HostConfigPacket size mismatch");
@@ -286,27 +192,8 @@ StationNode stationNodes[4];
 bool stationPeerReady[4] = {false, false, false, false};
 volatile bool hbAckPending[4] = {false, false, false, false};
 
-// ส่งคำตอบการสแกนซ้ำเมื่อชิปรายงานว่าส่งไม่ถึง
-volatile bool respSendFailed = false;
-HostResponsePacket lastRespPacket = {};
-uint8_t lastRespStation = 0;
-uint8_t lastRespRetryLeft = 0;
-unsigned long lastRespRetryAt = 0;
-
 uint16_t lastScanSeq[4] = {0, 0, 0, 0};
 bool hasLastScanSeq[4] = {false, false, false, false};
-
-// สถานะการผลักบัญชีสิทธิ์ไปยังแต่ละสถานี
-uint16_t rosterVer = 1;                       // 0 สงวนไว้แปลว่า "ยังไม่มีบัญชี"
-std::vector<RosterEntry> rosterSnapshot;      // ภาพนิ่งที่กำลังทยอยส่ง
-uint16_t rosterSnapshotVer = 0;
-uint16_t stationRosterVer[4] = {0, 0, 0, 0};  // เลขรุ่นที่แต่ละสถานีรายงานกลับมา
-bool stationRosterTooBig[4] = {false, false, false, false};  // สถานีบอกว่าบัญชีใหญ่เกินเก็บไหว
-bool stationRosterCapable[4] = {false, false, false, false}; // สถานีรุ่นนี้รองรับบัญชีสิทธิ์หรือไม่
-bool     rosterPushActive[4] = {false, false, false, false};
-uint8_t  rosterPushChunk[4]  = {0, 0, 0, 0};
-unsigned long rosterPushNextAt = 0;
-const unsigned long ROSTER_CHUNK_GAP_MS = 30;
 HostResponsePacket lastScanResponse[4] = {};
 
 struct Student {
@@ -346,27 +233,11 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len);
 void renderHostPage(bool fullRedraw);
 void renderScreensaver(bool fullRedraw);
 void renderDeveloperCredit();
-void drawBootNetworkStatus(bool apOk);
 void displayHostLiveScan(String uid, String studentId, String status, int stId);
 void playBootAnimation();
-String getLoginHTML(const String &errorMsg = "");
+String getLoginHTML(bool hasError = false);
 String getHTML();
-void sendJson(bool ok, const String &message);
-bool requireAuth(bool isApi = true);
-String htmlEscape(const String &raw);
-String jsonEscape(const String &raw);
-String csvQuote(const String &field);
-int parseCsvLine(const String &line, String *out, int maxFields);
-uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize);
-void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg);
-void handleDashboardAPI();
-void handleDisplayAPI();
-String getDisplayHTML();
-String maskStudentId(const String &id);
-void pushDisplayEvent(const String &studentId, uint8_t station, const String &timeStr);
-void handleManualClaim();
-void handleDailyReset();
-void handleSaveShops();
+void sendAlert(String message, String redirectUrl = "/");
 void saveDatabaseToFS();
 void loadDatabaseFromFS();
 void saveAdminsToFS();
@@ -377,19 +248,18 @@ void restoreDailyLogs();
 void appendLogToFS(String studentId, String fullName, String uid, String refNo, String timestamp, int station, String type);
 bool isAuthenticated();
 void redirectToLogin();
-void handleCaptivePortal();
 String generateSessionToken();
 String generateRefNo(int stationId);
 void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi);
 float calculateCpuLoad();
 float getChipTemperature();
-float readHostBatteryVoltage(bool forceFresh = false);
+float readHostBatteryVoltage();
 int getHostBatteryPercentage(float voltage);
 void drawBentoCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor);
 void drawBentoPillBadge(int x, int y, int w, int h, const char* text, uint16_t fgColor, uint16_t bgColor);
 void drawHostBatteryHUD(int x, int y);
 void drawMiniBattery(int x, int y, int pct);
-void drawHostTopBar(String title);
+void drawHostTopBar(String title, int pageNo = 0);
 void drawBentoBottomBar(String instruction);
 String maskUID(String uid);
 uint16_t getStationServedCount(uint8_t stationId);
@@ -399,30 +269,15 @@ String getTimeOnlyStr();
 bool isWithinServiceTime();
 bool ensureStationPeer(uint8_t stationId);
 bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len);
-// ต้องประกาศไว้ตรงนี้ (หลังนิยาม HostConfigPacket) มิฉะนั้น Arduino IDE จะสร้าง
-// ต้นแบบฟังก์ชันให้เองแล้ววางไว้เหนือจุดที่นิยามโครงสร้าง ทำให้คอมไพล์ไม่ผ่านด้วย
-// ข้อความ "variable or field 'fillStationConfig' declared void"
-static void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId);
-void sendStationConfig(uint8_t stationId);
-void broadcastStationConfig();
-void setHostScreenPower(bool on);
-void announceHostMode();
-void fillSystemSummary(HostResponsePacket &pkt);
-uint32_t uidHash32(const String &uid);
-void bumpRosterVer();
-void rebuildRosterSnapshot();
-void startRosterPush(uint8_t stationId);
-void serviceRosterPush();
-void sendRosterDelta(const String &uid, uint8_t state);
-void noteStationRosterVer(uint8_t stationId, const char *stamp);
-uint16_t countRosterEligible();
-uint32_t todayYmd();
-void applyEspNowRate(const uint8_t *peerAddr);
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status);
-#else
-void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
-#endif
+void sendStationTheme(uint8_t stationId);
+// ต้องประกาศตรงนี้ (หลังนิยาม HostConfigPacket) ไม่งั้น Arduino IDE จะสร้าง
+// ต้นแบบฟังก์ชันให้เองแล้ววางไว้เหนือจุดที่นิยามโครงสร้าง คอมไพล์ไม่ผ่านทันที
+void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId);
+void broadcastStationTheme();
+void announceDisplayMode();
+String jsonEscape(const String &raw);
+void handleDashboardAPI();
+void handleSetDisplayMode();
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void ledStandby();
 void ledApproved();
@@ -439,6 +294,7 @@ void soundThemeSwitch();
 void mergeImportedStudents();
 void handleFileUpload();
 void handleGetStudentsAPI();
+String csvField(const String &raw);
 void handleExportCSV();
 void handleSetRTCTime();
 void handleDownloadArchive();
@@ -449,17 +305,8 @@ void handleRemoveTempCard();
 void handleDeleteStudent();
 void handleSaveAdmin();
 void handleDeleteAdmin();
+void showBootNetworkStatus();
 void handleHostButton();
-String asciiSafe(const String &raw, const String &fallback);
-String asciiName(const String &raw, const String &fallback);
-String buildClaimSlip(const Student &s);
-String buildDailySlip();
-String buildTestSlip();
-bool printClaimSlip(const Student &s);
-void handlePrintTest();
-void handlePrintSlip();
-void handlePrintDaily();
-void handleSavePrinterSettings();
 
 struct ScanQueueItem {
   uint8_t mac[6];
@@ -471,34 +318,20 @@ QueueHandle_t scanQueue = NULL;
 File fsUploadFile;
 String lastScannedUID       = "-";
 String lastScannedStudentId = "-";
-String lastScannedRefNo     = "-";   // เก็บเลขอ้างอิงจริงของรายการล่าสุด
 int lastScannedStation      = 0;
 String lastScannedStatus    = "READY";
+bool hostApReady            = false; // ปล่อยสัญญาณ Wi-Fi สำเร็จหรือไม่ ใช้บอกบนจอตอนบูต
+String lastScannedRef       = "-";   // เลขอ้างอิงของการสแกนครั้งล่าสุด
+                                     // เก็บไว้ ไม่สร้างใหม่ตอนวาดจอ ไม่งั้นเลขจะเดินทุกครั้งที่รีเฟรช
+
 uint32_t transactionCounter = 0;
-
-// ป้องกันการเดารหัสผ่านแบบสุ่มซ้ำ ๆ ที่หน้า /login
-int loginFailCount           = 0;
-unsigned long loginLockUntil = 0;
-const int LOGIN_MAX_FAILS         = 5;
-const unsigned long LOGIN_LOCK_MS = 60000;
-
-// คิววนของรายการที่ตัดสิทธิ์สำเร็จ ใช้แสดงบนหน้าจอสาธารณะเท่านั้น
-// เก็บเฉพาะรหัสนิสิตที่ปิดบังแล้ว เวลา และหมายเลขจุดบริการ — ไม่มีชื่อและไม่มีเลขบัตร
-#define DISPLAY_FEED_SIZE 12
-struct DisplayEvent {
-  char maskedId[20];
-  char timeStr[12];
-  uint8_t station;
-};
-DisplayEvent displayFeed[DISPLAY_FEED_SIZE] = {};
-uint8_t displayFeedCount = 0;
-uint8_t displayFeedHead  = 0;
 
 int currentHostPage         = 0;
 const int TOTAL_PAGES       = 3;
 bool isScreensaverActive    = false;
-bool isHostScreenOn         = true;   // ไฟหน้าจอของเครื่องแม่ข่าย
-uint8_t hostModeSeq         = 0;      // นับทุกครั้งที่โหมดการแสดงผลเปลี่ยน
+bool stationScreenOn        = true;   // แม่ข่ายสั่งให้ไฟจอของสถานีเปิดอยู่หรือไม่
+bool stationScreensaver     = false;  // แม่ข่ายสั่งให้สถานีพักหน้าจออยู่หรือไม่
+uint8_t hostModeSeq         = 0;      // นับทุกครั้งที่คำสั่งการแสดงผลเปลี่ยน
 bool isCreditActive         = false;
 bool isLiveScanDisplaying   = false;
 unsigned long liveScanHoldUntil = 0;
@@ -549,26 +382,15 @@ void ledDuplicate() { setLedColor(65, 25, 0); }
 void ledRejected()  { setLedColor(65, 0, 0); }
 void ledOff()       { setLedColor(0, 0, 0); }
 
-float cachedHostVoltage            = 0.0f;
-unsigned long lastHostBatteryReadMs = 0;
-const unsigned long BATTERY_CACHE_MS = 3000;
-
-// เดิมฟังก์ชันนี้ใช้ delay(2) แปดรอบ = บล็อกลูปหลัก 16 ms ทุกครั้งที่วาดแถบบน
-float readHostBatteryVoltage(bool forceFresh) {
-  unsigned long now = millis();
-  if (!forceFresh && lastHostBatteryReadMs != 0 && (now - lastHostBatteryReadMs) < BATTERY_CACHE_MS) {
-    return cachedHostVoltage;
-  }
+float readHostBatteryVoltage() {
   uint32_t sum = 0;
   for (int i = 0; i < 8; i++) {
     sum += analogRead(BATTERY_ADC_PIN);
-    delayMicroseconds(300);
+    delay(2);
   }
   float avgRaw = sum / 8.0f;
   float pinVoltage = (avgRaw / 4095.0f) * 3.3f;
-  cachedHostVoltage = pinVoltage * 2.0f;
-  lastHostBatteryReadMs = (millis() == 0) ? 1 : millis();
-  return cachedHostVoltage;
+  return pinVoltage * 2.0f;
 }
 
 int getHostBatteryPercentage(float voltage) {
@@ -580,129 +402,11 @@ int getHostBatteryPercentage(float voltage) {
   return percent;
 }
 
-// ---------------------------------------------------------------------------
-// ตัวช่วยความปลอดภัยของสตริง: กันชื่อที่มี < > & " ' ทำให้ HTML/JSON/CSV พัง
-// ---------------------------------------------------------------------------
-String htmlEscape(const String &raw) {
-  String out;
-  out.reserve(raw.length() + 8);
-  for (size_t i = 0; i < raw.length(); i++) {
-    char c = raw[i];
-    switch (c) {
-      case '&':  out += "&amp;";  break;
-      case '<':  out += "&lt;";   break;
-      case '>':  out += "&gt;";   break;
-      case '"':  out += "&quot;"; break;
-      case '\'': out += "&#39;";  break;
-      default:   out += c;        break;
-    }
-  }
-  return out;
-}
-
-String jsonEscape(const String &raw) {
-  String out;
-  out.reserve(raw.length() + 8);
-  for (size_t i = 0; i < raw.length(); i++) {
-    char c = raw[i];
-    if (c == '"' || c == '\\') { out += '\\'; out += c; }
-    else if (c == '\n') out += "\\n";
-    else if (c == '\r') out += "\\r";
-    else if (c == '\t') out += "\\t";
-    else if ((uint8_t)c < 0x20) { /* ตัดอักขระควบคุมทิ้ง */ }
-    else out += c;
-  }
-  return out;
-}
-
-// ครอบฟิลด์ด้วยเครื่องหมายคำพูดเสมอ เพื่อให้ชื่อที่มีลูกน้ำไม่ทำให้ระเบียนเพี้ยน
-String csvQuote(const String &field) {
-  String out = "\"";
-  for (size_t i = 0; i < field.length(); i++) {
-    char c = field[i];
-    if (c == '"') out += "\"\"";
-    else if (c == '\r' || c == '\n') out += ' ';
-    else out += c;
-  }
-  out += "\"";
-  return out;
-}
-
-// แยกฟิลด์ CSV โดยเข้าใจเครื่องหมายคำพูด (อ่านไฟล์รุ่นเก่าที่ไม่มีคำพูดได้ด้วย)
-int parseCsvLine(const String &line, String *out, int maxFields) {
-  int count = 0;
-  String cur = "";
-  bool inQuotes = false;
-  for (size_t i = 0; i < line.length(); i++) {
-    char c = line[i];
-    if (inQuotes) {
-      if (c == '"') {
-        if (i + 1 < line.length() && line[i + 1] == '"') { cur += '"'; i++; }
-        else inQuotes = false;
-      } else cur += c;
-    } else {
-      if (c == '"') inQuotes = true;
-      else if (c == ',') {
-        if (count < maxFields) { cur.trim(); out[count++] = cur; }
-        cur = "";
-        if (count >= maxFields) return count;
-      } else cur += c;
-    }
-  }
-  if (count < maxFields) { cur.trim(); out[count++] = cur; }
-  return count;
-}
-
-// เลือกขนาดฟอนต์ที่ใหญ่ที่สุดที่ยังพอดีกรอบ (ฟอนต์ GFX กว้าง 6px ต่อ 1 size)
-uint8_t fitTextSize(const char* text, int maxWidth, uint8_t maxSize) {
-  int len = (int)strlen(text);
-  if (len <= 0) return 1;
-  for (uint8_t sz = maxSize; sz > 1; sz--) {
-    if (len * 6 * (int)sz <= maxWidth) return sz;
-  }
-  return 1;
-}
-
-void drawFitCenteredText(int x, int y, int w, int h, const char* text, uint8_t maxSize, uint16_t fg, uint16_t bg) {
-  uint8_t sz = fitTextSize(text, w - 6, maxSize);
-  int textW = (int)strlen(text) * 6 * (int)sz;
-  int textX = x + (w - textW) / 2;
-  if (textX < x + 2) textX = x + 2;
-  int textY = y + (h - 8 * (int)sz) / 2;
-  if (textY < y) textY = y;
-  tft.setTextSize(sz);
-  tft.setTextColor(fg, bg);
-  tft.setCursor(textX, textY);
-  tft.print(text);
-}
-
-// (ชิ้นส่วนพื้นฐานของจอ TFT อยู่ใน HostDisplay.h)
+// (ย้ายไปอยู่ใน HostScreen.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup())
 
 String maskUID(String uid) {
   if (uid.length() < 4 || uid == "-") return uid;
   return uid.substring(0, uid.length() - 4) + "****";
-}
-
-// ปิดบังรหัสนิสิตสำหรับจอสาธารณะ: เหลือห้าหลักแรกพอให้เจ้าตัวจำได้ว่าเป็นของตน
-String maskStudentId(const String &id) {
-  if (id.length() == 0 || id == "-") return "-";
-  if (id.length() <= 5) return id;
-  String out = id.substring(0, 5);
-  for (size_t i = 5; i < id.length(); i++) out += '*';
-  return out;
-}
-
-void pushDisplayEvent(const String &studentId, uint8_t station, const String &timeStr) {
-  DisplayEvent &e = displayFeed[displayFeedHead];
-  String masked = maskStudentId(studentId);
-  strncpy(e.maskedId, masked.c_str(), sizeof(e.maskedId) - 1);
-  e.maskedId[sizeof(e.maskedId) - 1] = '\0';
-  String t = (timeStr.length() >= 8) ? timeStr.substring(timeStr.length() - 8) : getTimeOnlyStr();
-  strncpy(e.timeStr, t.c_str(), sizeof(e.timeStr) - 1);
-  e.timeStr[sizeof(e.timeStr) - 1] = '\0';
-  e.station = station;
-  displayFeedHead = (displayFeedHead + 1) % DISPLAY_FEED_SIZE;
-  if (displayFeedCount < DISPLAY_FEED_SIZE) displayFeedCount++;
 }
 
 uint16_t getStationServedCount(uint8_t stationId) {
@@ -767,270 +471,59 @@ bool ensureStationPeer(uint8_t stationId) {
     return true;
   }
 
-
   esp_err_t err = esp_now_add_peer(&peerInfo);
   if (err == ESP_OK || err == ESP_ERR_ESPNOW_EXIST) {
     stationPeerReady[stationId - 1] = true;
-    applyEspNowRate(node.mac);
     return true;
   }
   stationPeerReady[stationId - 1] = false;
   return false;
 }
 
-// เดิมถ้า unicast ล้มเหลวจะยิงเป็น broadcast แทน ซึ่งทำให้แย่ลงไม่ใช่ดีขึ้น
-// เพราะ broadcast ไม่มี ACK ระดับ MAC จึงไม่มีการส่งซ้ำอัตโนมัติของชิป
-// ขณะที่ unicast มี ARQ ในตัว ตอนนี้ใช้ broadcast เฉพาะตอนยังไม่รู้จัก MAC ของสถานี
 bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len) {
   if (stationId >= 1 && stationId <= 4 && ensureStationPeer(stationId)) {
-    return esp_now_send(stationNodes[stationId - 1].mac, data, len) == ESP_OK;
+    esp_err_t err = esp_now_send(stationNodes[stationId - 1].mac, data, len);
+    if (err == ESP_OK) return true;
   }
   return esp_now_send(broadcastAddress, data, len) == ESP_OK;
 }
 
-// ตั้งอัตราส่งของ peer ให้เป็นโหมดระยะไกล (เรียกทุกครั้งหลังเพิ่ม peer)
-void applyEspNowRate(const uint8_t *peerAddr) {
-#if ESPNOW_FORCE_LONG_RANGE_RATE && ESP_ARDUINO_VERSION_MAJOR >= 3
-  esp_now_rate_config_t rateCfg = {};
-  rateCfg.phymode = WIFI_PHY_MODE_LR;
-  rateCfg.rate = WIFI_PHY_RATE_LORA_250K;
-  rateCfg.ersu = false;
-  rateCfg.dcm = false;
-  esp_now_set_peer_rate_config(peerAddr, &rateCfg);
-#else
-  (void)peerAddr;
-#endif
-}
-
-// ชิปบอกได้ทันทีว่าส่งถึงหรือไม่ ใช้จังหวะนี้ยิงคำตอบการสแกนซ้ำแทนการรอ timeout
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
-  (void)tx_info;
-#else
-void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  (void)mac_addr;
-#endif
-  if (status != ESP_NOW_SEND_SUCCESS) respSendFailed = true;
-}
-
-static void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId) {
+// ประกอบคำสั่งการแสดงผลชุดเดียวใช้ร่วมกันทุกที่ จะได้ไม่มีทางส่งค่าไม่ตรงกัน
+void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId) {
   cfg.magic = ESPNOW_PROTO_MAGIC;
   cfg.version = ESPNOW_PROTO_VER;
   cfg.msgType = MSG_CONFIG;
   cfg.stationId = stationId;
   cfg.darkMode = isTftDarkMode ? 1 : 0;
-  cfg.screenOn = isHostScreenOn ? 1 : 0;
-  cfg.screensaver = isScreensaverActive ? 1 : 0;
+  cfg.screenOn = stationScreenOn ? 1 : 0;
+  cfg.screensaver = stationScreensaver ? 1 : 0;
   cfg.modeSeq = hostModeSeq;
 }
 
-// ฝากภาพรวมทั้งระบบไปกับช่องที่ไม่ได้ใช้ของแพ็กเก็ต heartbeat (message[32])
-// รูปแบบ "ใช้สิทธิ์/ผู้มีสิทธิ์ทั้งหมด/เปิดบริการ/เวลาเปิด-เวลาปิด" เช่น "268/412/1/1000-1330"
-// ขนาดแพ็กเก็ตไม่เปลี่ยน เฟิร์มแวร์สถานีรุ่นเก่าไม่อ่านช่องนี้ จึงอัปเดตทีละเครื่องได้
-void fillSystemSummary(HostResponsePacket &pkt) {
-  int used = 0;
-  for (const auto &st : db) if (st.claimed) used++;
-  snprintf(pkt.message, sizeof(pkt.message), "%d/%d/%d/%02d%02d-%02d%02d",
-           used, (int)db.size(), isWithinServiceTime() ? 1 : 0,
-           serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
-}
-
-void sendStationConfig(uint8_t stationId) {
+void sendStationTheme(uint8_t stationId) {
   HostConfigPacket cfg = {};
   fillStationConfig(cfg, stationId);
   sendToStation(stationId, (uint8_t *)&cfg, sizeof(cfg));
 }
 
-void broadcastStationConfig() {
-  HostConfigPacket cfg = {};
-  fillStationConfig(cfg, 0);
-  esp_now_send(broadcastAddress, (uint8_t *)&cfg, sizeof(cfg));
-}
-
-
-// ---------------------------------------------------------------------------
-// บัญชีสิทธิ์ย่อที่ผลักไปเก็บที่สถานี เพื่อให้ตรวจสิทธิ์ได้เองตอนลิงก์ขาด
-// ---------------------------------------------------------------------------
-
-// FNV-1a 32 บิต ต้องให้ผลเท่ากันเป๊ะทั้งสองฝั่ง ห้ามแก้ข้างเดียว
-uint32_t uidHash32(const String &uid) {
-  uint32_t h = 2166136261UL;
-  for (unsigned int i = 0; i < uid.length(); i++) {
-    h ^= (uint8_t)uid[i];
-    h *= 16777619UL;
-  }
-  return h;
-}
-
-// เรียกทุกครั้งที่ "ชุดผู้มีสิทธิ์" หรือ "สถานะใช้สิทธิ์" เปลี่ยน
-// สถานีรายงานเลขรุ่นที่ตัวเองถืออยู่มากับ heartbeat ถ้าไม่ตรงแม่ข่ายจะผลักชุดเต็มให้ใหม่
-void bumpRosterVer() {
-  rosterVer++;
-  if (rosterVer == 0) rosterVer = 1;   // 0 สงวนไว้แปลว่ายังไม่มีบัญชี
-}
-
-// วันที่ของวันนี้แบบ YYYYMMDD ติดไปกับบัญชีทุกชุด
-uint32_t todayYmd() {
-  DateTime now = rtc.now();
-  return (uint32_t)now.year() * 10000UL + (uint32_t)now.month() * 100UL + (uint32_t)now.day();
-}
-
-uint16_t countRosterEligible() {
-  uint16_t n = 0;
-  for (const auto &st : db) {
-    if (st.uid.length() > 0) n++;
-  }
-  return n;
-}
-
-void rebuildRosterSnapshot() {
-  rosterSnapshot.clear();
-  rosterSnapshot.reserve(db.size());
-  for (const auto &st : db) {
-    if (st.uid.length() == 0) continue;   // ไม่มีบัตรผูกอยู่ ไม่ต้องส่งไปกินที่
-    RosterEntry e;
-    e.hash  = uidHash32(st.uid);
-    e.state = st.claimed ? 1 : 0;
-    rosterSnapshot.push_back(e);
-  }
-  rosterSnapshotVer = rosterVer;
-}
-
-void startRosterPush(uint8_t stationId) {
-  if (stationId < 1 || stationId > 4) return;
-  if (rosterSnapshotVer != rosterVer) rebuildRosterSnapshot();
-  rosterPushActive[stationId - 1] = true;
-  rosterPushChunk[stationId - 1]  = 0;
-}
-
-// ส่งทีละก้อน ก้อนละ 30 ms เพื่อไม่ให้คิวส่งของ ESP-NOW ล้นและไม่แย่งจังหวะการสแกนสด
-void serviceRosterPush() {
-  if ((long)(millis() - rosterPushNextAt) < 0) return;
-
-  int total = (int)rosterSnapshot.size();
-  int chunkCount = (total + ROSTER_ENTRIES_PER_PKT - 1) / ROSTER_ENTRIES_PER_PKT;
-  if (chunkCount == 0) chunkCount = 1;   // บัญชีว่างก็ยังต้องบอกสถานีว่าว่าง
-
-  for (int i = 0; i < 4; i++) {
-    if (!rosterPushActive[i]) continue;
-
-    // ระหว่างทยอยส่ง ถ้าบัญชีเปลี่ยนไปแล้วให้ตั้งต้นใหม่ ไม่งั้นสถานีจะได้ของปนรุ่น
-    if (rosterSnapshotVer != rosterVer) {
-      rebuildRosterSnapshot();
-      rosterPushChunk[i] = 0;
-      total = (int)rosterSnapshot.size();
-      chunkCount = (total + ROSTER_ENTRIES_PER_PKT - 1) / ROSTER_ENTRIES_PER_PKT;
-      if (chunkCount == 0) chunkCount = 1;
-    }
-
-    int idx = rosterPushChunk[i];
-    HostRosterPacket pkt = {};
-    pkt.magic        = ESPNOW_PROTO_MAGIC;
-    pkt.version      = ESPNOW_PROTO_VER;
-    pkt.msgType      = MSG_ROSTER;
-    pkt.stationId    = i + 1;
-    pkt.rosterVer    = rosterSnapshotVer;
-    pkt.totalEntries = (uint16_t)total;
-    pkt.rosterDate   = todayYmd();
-    pkt.chunkIndex   = (uint8_t)idx;
-    pkt.chunkCount   = (uint8_t)chunkCount;
-
-    int from = idx * ROSTER_ENTRIES_PER_PKT;
-    int n = total - from;
-    if (n < 0) n = 0;
-    if (n > ROSTER_ENTRIES_PER_PKT) n = ROSTER_ENTRIES_PER_PKT;
-    pkt.entryCount = (uint8_t)n;
-    for (int k = 0; k < n; k++) pkt.entries[k] = rosterSnapshot[from + k];
-
-    if (idx == 0) pkt.flags |= ROSTER_FLAG_FULL_BEGIN;
-    if (idx == chunkCount - 1) pkt.flags |= ROSTER_FLAG_FULL_END;
-
-    sendToStation(i + 1, (uint8_t *)&pkt, sizeof(pkt));
-
-    rosterPushChunk[i]++;
-    if (rosterPushChunk[i] >= chunkCount) rosterPushActive[i] = false;
-
-    rosterPushNextAt = millis() + ROSTER_CHUNK_GAP_MS;
-    return;   // ก้อนเดียวต่อรอบ วนไปสถานีถัดไปในรอบหน้า
-  }
-}
-
-// อัปเดตทีละรายการตอนมีคนใช้สิทธิ์ ถูกกว่าการผลักบัญชีทั้งชุดใหม่ 268 ครั้งต่อวัน
-// สถานีจะรับก็ต่อเมื่อเลขรุ่นที่ถืออยู่เป็น rosterVer - 1 พอดี ถ้าพลาดไปก้อนหนึ่ง
-// เลขรุ่นจะไม่ตรงกันและ heartbeat รอบถัดไปจะดึงชุดเต็มมาทับเอง
-void sendRosterDelta(const String &uid, uint8_t state) {
-  if (uid.length() == 0) return;
-
-  RosterEntry e;
-  e.hash = uidHash32(uid);
-  e.state = state;
-
-  // ให้ภาพนิ่งที่ค้างอยู่ตรงกับความจริงด้วย เผื่อกำลังทยอยส่งให้สถานีอื่นอยู่
-  if (rosterSnapshotVer == rosterVer - 1) {
-    for (auto &entry : rosterSnapshot) {
-      if (entry.hash == e.hash) { entry.state = state; break; }
-    }
-    rosterSnapshotVer = rosterVer;
-  }
-
-  for (int i = 0; i < 4; i++) {
-    if (!stationNodes[i].isOnline || !stationRosterCapable[i]) continue;
-    HostRosterPacket pkt = {};
-    pkt.magic        = ESPNOW_PROTO_MAGIC;
-    pkt.version      = ESPNOW_PROTO_VER;
-    pkt.msgType      = MSG_ROSTER;
-    pkt.stationId    = i + 1;
-    pkt.rosterVer    = rosterVer;
-    pkt.totalEntries = 0;
-    pkt.rosterDate   = todayYmd();
-    pkt.chunkIndex   = 0;
-    pkt.chunkCount   = 1;
-    pkt.entryCount   = 1;
-    pkt.flags        = ROSTER_FLAG_DELTA;
-    pkt.entries[0]   = e;
-    sendToStation(i + 1, (uint8_t *)&pkt, sizeof(pkt));
-  }
-}
-
-// สถานีฝากเลขรุ่นบัญชีที่ตัวเองถืออยู่มากับช่อง offlineTime ของ heartbeat
-// (ช่องนั้นว่างอยู่แล้วในข้อความชนิดนี้ จึงไม่ต้องขยายขนาดแพ็กเก็ต
-//  และเฟิร์มแวร์สถานีรุ่นเก่าที่ไม่ได้ฝากอะไรมาจะถูกมองว่าเป็นรุ่น 0 = ยังไม่มีบัญชี)
-void noteStationRosterVer(uint8_t stationId, const char *stamp) {
-  if (stationId < 1 || stationId > 4) return;
-
-  // เฟิร์มแวร์สถานีรุ่นก่อน 120.0.0 ไม่ได้ฝากอะไรมาในช่องนี้เลย (เป็นศูนย์ล้วน)
-  // ต้องแยกให้ออกจากสถานีรุ่นใหม่ที่ยังไม่มีบัญชีซึ่งจะฝาก "R:0" มา
-  // ไม่งั้นจะไล่ผลักบัญชีไปให้เครื่องที่รับไม่เป็นทุก heartbeat ไม่มีวันจบ
-  bool capable = (stamp && stamp[0] == 'R' && stamp[1] == ':');
-  uint16_t reported = 0;
-  bool tooBig = false;
-  if (capable) {
-    long v = atol(stamp + 2);       // atol หยุดเองเมื่อเจอ '!' ที่ต่อท้าย
-    if (v > 0 && v <= 65535) reported = (uint16_t)v;
-    tooBig = (strchr(stamp, '!') != NULL);
-  }
-  stationRosterCapable[stationId - 1] = capable;
-  stationRosterVer[stationId - 1] = reported;
-  stationRosterTooBig[stationId - 1] = tooBig;
-
-  if (capable && reported != rosterVer && !rosterPushActive[stationId - 1]) {
-    startRosterPush(stationId);
-  }
-}
-
-void setHostScreenPower(bool on) {
-  isHostScreenOn = on;
-  digitalWrite(TFT_BLK, on ? HIGH : LOW);
-}
-
-// เรียกทุกครั้งที่โหมดการแสดงผลของแม่ข่ายเปลี่ยน เพื่อให้สถานีเปลี่ยนตามทันที
-// ส่งสามครั้งห่างกันเล็กน้อยเพราะ ESP-NOW แบบ broadcast ไม่มีการยืนยันการรับ
-void announceHostMode() {
+// เรียกทุกครั้งที่โหมดการแสดงผลเปลี่ยน ส่งสามรอบห่างกันเล็กน้อยเพราะ ESP-NOW
+// แบบ broadcast ไม่มีการยืนยันการรับ ถ้ารอบแรกหายไปยังมีรอบสองและสามตามไป
+void announceDisplayMode() {
   hostModeSeq++;
   for (int i = 0; i < 3; i++) {
-    broadcastStationConfig();
-    delay(8);
+    broadcastStationTheme();
+    delay(30);
   }
+}
+
+void broadcastStationTheme() {
+  HostConfigPacket cfg = {};
+  cfg.magic = ESPNOW_PROTO_MAGIC;
+  cfg.version = ESPNOW_PROTO_VER;
+  cfg.msgType = MSG_CONFIG;
+  cfg.stationId = 0;
+  cfg.darkMode = isTftDarkMode ? 1 : 0;
+  esp_now_send(broadcastAddress, (uint8_t *)&cfg, sizeof(cfg));
 }
 
 int calculateSignalQuality(int rssi) {
@@ -1099,22 +592,14 @@ void soundScreensaverBeep() { tone(BUZZER_PIN, 2400, 50); delay(70); tone(BUZZER
 void soundHomeBeep() { tone(BUZZER_PIN, 1800, 70); delay(80); tone(BUZZER_PIN, 2500, 100); }
 void soundScanSuccess() { tone(BUZZER_PIN, 1800, 80); delay(100); tone(BUZZER_PIN, 2400, 100); }
 
-// เดิมตอบกลับเป็นหน้า HTML ที่เรียก alert() แล้วรีโหลดทั้งหน้า ซึ่งทำให้เสียตำแหน่ง
-// แท็บที่ค้างอยู่ และข้อความที่มีเครื่องหมาย ' จะทำให้สคริปต์พัง ตอนนี้ตอบเป็น JSON
-void sendJson(bool ok, const String &message) {
-  String out = "{\"ok\":";
-  out += ok ? "true" : "false";
-  out += ",\"msg\":\"";
-  out += jsonEscape(message);
-  out += "\"}";
-  server.send(ok ? 200 : 400, "application/json; charset=utf-8", out);
-}
-
-bool requireAuth(bool isApi) {
-  if (isAuthenticated()) return true;
-  if (isApi) server.send(401, "application/json; charset=utf-8", "{\"ok\":false,\"msg\":\"UNAUTHORIZED\"}");
-  else redirectToLogin();
-  return false;
+void sendAlert(String message, String redirectUrl) {
+  String html = "<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>";
+  html += "<script>";
+  html += "alert('" + message + "');";
+  html += "window.location.href = '" + redirectUrl + "';";
+  html += "</script>";
+  html += "</body></html>";
+  server.send(200, "text/html; charset=utf-8", html);
 }
 
 String generateRefNo(int stationId) {
@@ -1172,15 +657,14 @@ void loadAdminsFromFS() {
   }
 }
 
-// random() ไม่ได้ถูก seed จึงให้ผลชุดเดิมทุกครั้งที่บูต ทำให้เดา session token ได้
-// เปลี่ยนมาใช้ตัวสร้างเลขสุ่มฮาร์ดแวร์ของ ESP32 (128 บิต)
 String generateSessionToken() {
-  char buf[33];
-  for (int i = 0; i < 4; i++) {
-    snprintf(buf + (i * 8), 9, "%08x", (unsigned)esp_random());
-  }
-  buf[32] = '\0';
-  return String(buf);
+  // esp_random() เป็นตัวสุ่มในตัวชิป ไม่ใช่ random() ของ Arduino ที่ให้ลำดับเดิม
+  // ทุกครั้งที่เปิดเครื่อง ซึ่งแปลว่าโทเคนของวันนี้เดาได้จากของเมื่อวาน
+  String token = "";
+  token.reserve(32);
+  const char chars[] = "abcdef0123456789";
+  for (int i = 0; i < 32; i++) token += chars[esp_random() & 0x0F];
+  return token;
 }
 
 bool isAuthenticated() {
@@ -1195,13 +679,11 @@ bool isAuthenticated() {
 
   for (int i = 0; i < 3; i++) {
     if (activeSessions[i].token.length() > 0 && activeSessions[i].token == token) {
-      // เทียบแบบ wrap-safe แทน millis() < expiry ที่พังเมื่อ millis() ล้นที่ 49 วัน
-      if ((long)(millis() - activeSessions[i].expiry) < 0) {
-        activeSessions[i].expiry = millis() + 7200000UL;
+      if (millis() < activeSessions[i].expiry) {
+        activeSessions[i].expiry = millis() + 7200000;
         return true;
       } else {
         activeSessions[i].token = "";
-        activeSessions[i].username = "";
       }
     }
   }
@@ -1213,22 +695,14 @@ void redirectToLogin() {
   server.send(302, "text/plain", "");
 }
 
-// ปลายทางของทุกคำขอที่ไม่ตรงเส้นทางใด รวมถึง URL ที่ระบบปฏิบัติการใช้ตรวจว่า
-// เครือข่ายนี้ออกอินเทอร์เน็ตได้หรือไม่ (generate_204, hotspot-detect.html,
-// connecttest.txt, ncsi.txt และอื่น ๆ) การตอบ 302 ทำให้เครื่องรู้ว่าติดหน้าล็อกอิน
-// แล้วเปิดหน้าต่างพอร์ทัลขึ้นมาเอง
-void handleCaptivePortal() {
-  String target = "http://" + WiFi.softAPIP().toString() + "/login";
-  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-  server.sendHeader("Location", target, true);
-  server.send(302, "text/html; charset=utf-8",
-              "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-              "<meta http-equiv='refresh' content='0; url=" + target + "'></head>"
-              "<body>Redirecting to <a href='" + target + "'>" + target + "</a></body></html>");
-}
+// (ย้ายไปอยู่ใน WebDashboard.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup())
 
-// หมายเหตุ: ฟังก์ชันวาดจอ TFT ทั้งหมดย้ายไปอยู่ใน HostDisplay.h
-// (ถูก #include ไว้ท้ายไฟล์ก่อน setup())
+// (ย้ายไปอยู่ใน HostScreen.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup())
+
+// ============================================================================
+// BENTO TFT SCREENS (320x240 Modular High-Density Display)
+// ============================================================================
+// (ย้ายไปอยู่ใน HostScreen.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup())
 
 void handleHostButton() {
   static unsigned long btnPressStartTime = 0;
@@ -1244,16 +718,6 @@ void handleHostButton() {
     unsigned long pressDuration = millis() - btnPressStartTime;
     btnWasPressed = false; lastActivity = millis();
     
-    // จอดับอยู่: กดปุ่มใดก็ตามคือสั่งเปิดจอ และสั่งให้สถานีเปิดตาม
-    if (!isHostScreenOn) {
-      setHostScreenPower(true);
-      soundHomeBeep();
-      announceHostMode();
-      renderHostPage(true);
-      clickCount = 0;
-      return;
-    }
-
     if (isLiveScanDisplaying) {
       isLiveScanDisplaying = false;
       renderHostPage(true);
@@ -1262,13 +726,14 @@ void handleHostButton() {
 
     if (isScreensaverActive || isCreditActive) {
       bool wasSaver = isScreensaverActive;
-      isScreensaverActive = false;
+      isScreensaverActive = false; 
       isCreditActive = false;
-      currentHostPage = 0;
-      soundHomeBeep();
-      renderHostPage(true);
-      if (wasSaver) announceHostMode();
+      currentHostPage = 0; 
+      soundHomeBeep(); 
+      renderHostPage(true); 
       clickCount = 0;
+      // ปลุกสถานีทุกเครื่องให้ออกจากโหมดพักหน้าจอพร้อมกัน
+      if (wasSaver) { stationScreensaver = false; stationScreenOn = true; announceDisplayMode(); }
       return;
     }
 
@@ -1277,14 +742,6 @@ void handleHostButton() {
       isScreensaverActive = false;
       soundCreditJingle(); 
       renderDeveloperCredit(); 
-      clickCount = 0;
-    }
-    else if (pressDuration >= 1500) {
-      // กดค้าง 1.5 วินาที = ปิดไฟหน้าจอ และสั่งให้ทุกสถานีดับจอตาม
-      soundBeep();
-      setHostScreenPower(false);
-      ledOff();
-      announceHostMode();
       clickCount = 0;
     }
     else if (pressDuration >= 30) {
@@ -1303,7 +760,9 @@ void handleHostButton() {
       isScreensaverActive = true;
       soundScreensaverBeep();
       renderScreensaver(true);
-      announceHostMode();
+      // สั่งให้สถานีทุกเครื่องพักหน้าจอตามไปด้วย
+      stationScreensaver = true;
+      announceDisplayMode();
     }
     else if (clickCount >= 3) {
       isTftDarkMode = !isTftDarkMode;
@@ -1312,7 +771,7 @@ void handleHostButton() {
       preferences.end();
       soundThemeSwitch();
       renderHostPage(true);
-      announceHostMode();
+      announceDisplayMode();
     }
     clickCount = 0;
   }
@@ -1358,10 +817,7 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   }
 
   if (pkt.msgType == MSG_HEARTBEAT) {
-    if (stId >= 1 && stId <= 4) {
-      hbAckPending[stId - 1] = true;
-      noteStationRosterVer(stId, pkt.offlineTime);
-    }
+    if (stId >= 1 && stId <= 4) hbAckPending[stId - 1] = true;
     return;
   }
 
@@ -1377,23 +833,20 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
 void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   lastActivity = millis();
   bool wasScreensaver = isScreensaverActive;
-  bool wasScreenOff = !isHostScreenOn;
   isScreensaverActive = false;
+  // มีนิสิตมาแตะบัตรแล้ว ปลุกทุกสถานีออกจากโหมดพักหน้าจอพร้อมกัน
+  if (wasScreensaver || stationScreensaver) {
+    stationScreensaver = false;
+    stationScreenOn = true;
+    announceDisplayMode();
+  }
   isCreditActive = false;
-  if (wasScreenOff) setHostScreenPower(true);
 
   String uid = String(pkt.uid);
   uid.trim();
 
-  // รายการที่สถานีบันทึกไว้ตอนขาดการเชื่อมต่อ แล้วส่งตามมาทีหลัง
-  // ใช้เวลาที่นิสิตแตะบัตรจริงเป็นเวลารับสิทธิ์ ไม่ใช่เวลาที่ซิงค์
-  String offlineStamp = String(pkt.offlineTime);
-  offlineStamp.trim();
-  bool isOfflineSync = (offlineStamp.length() >= 10);
-
   lastScannedUID = uid;
   lastScannedStation = pkt.stationId;
-  lastScannedRefNo = "-";
 
   if (pkt.stationId >= 1 && pkt.stationId <= 4 &&
       pkt.seq != 0 &&
@@ -1403,7 +856,6 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
                   (uint8_t *)&lastScanResponse[pkt.stationId - 1],
                   sizeof(HostResponsePacket));
     if (wasScreensaver) renderHostPage(true);
-    if (wasScreensaver || wasScreenOff) announceHostMode();
     return;
   }
 
@@ -1415,8 +867,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   resp.seq = pkt.seq;
   resp.amount = 35;
 
-  // รายการย้อนหลังต้องไม่ถูกปฏิเสธเพราะซิงค์หลังปิดบริการ ในเมื่อตอนแตะบัตรยังเปิดอยู่
-  if (!isOfflineSync && !isWithinServiceTime()) {
+  if (!isWithinServiceTime()) {
     strncpy(resp.status, "TIME_CLOSED", sizeof(resp.status) - 1);
     strncpy(resp.studentId, "-", sizeof(resp.studentId) - 1);
     strncpy(resp.name, "SERVICE CLOSED", sizeof(resp.name) - 1);
@@ -1424,6 +875,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     strncpy(resp.claimTime, getRealTimeStr().c_str(), sizeof(resp.claimTime) - 1);
     strncpy(resp.message, "OUT OF TIME", sizeof(resp.message) - 1);
     lastScannedStatus = "TIME_CLOSED";
+    lastScannedRef = "-";
     resp.servedCount = getStationServedCount(pkt.stationId);
     if (pkt.stationId >= 1 && pkt.stationId <= 4 && pkt.seq != 0) {
       lastScanSeq[pkt.stationId - 1] = pkt.seq;
@@ -1432,7 +884,6 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     }
     sendToStation(pkt.stationId, (uint8_t *)&resp, sizeof(HostResponsePacket));
     displayHostLiveScan(lastScannedUID, "-", lastScannedStatus, pkt.stationId);
-    if (wasScreensaver || wasScreenOff) announceHostMode();
     return;
   }
 
@@ -1464,9 +915,9 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         String msg = "SHOP 0" + String(s.station);
         strncpy(resp.message, msg.c_str(), sizeof(resp.message) - 1);
         lastScannedStatus = "DUPLICATE";
-        lastScannedRefNo = s.refNo;
+        lastScannedRef = s.refNo;
       } else {
-        String currentTimestamp = isOfflineSync ? offlineStamp : getRealTimeStr();
+        String currentTimestamp = getRealTimeStr();
         String currentRefNo = generateRefNo(pkt.stationId);
 
         s.claimed = true;
@@ -1474,7 +925,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         s.claimTime = currentTimestamp;
         s.refNo = currentRefNo;
         lastScannedStatus = "APPROVED";
-        lastScannedRefNo = currentRefNo;
+        lastScannedRef = currentRefNo;
 
         strncpy(resp.status, "SUCCESS", sizeof(resp.status) - 1);
         strncpy(resp.refNo, currentRefNo.c_str(), sizeof(resp.refNo) - 1);
@@ -1494,6 +945,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     strncpy(resp.claimTime, "-", sizeof(resp.claimTime) - 1);
     strncpy(resp.message, "CARD NOT FOUND", sizeof(resp.message) - 1);
     lastScannedStatus = "NOT FOUND";
+    lastScannedRef = "-";
   }
 
   resp.servedCount = getStationServedCount(pkt.stationId);
@@ -1503,46 +955,11 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     memcpy(&lastScanResponse[pkt.stationId - 1], &resp, sizeof(resp));
   }
   sendToStation(pkt.stationId, (uint8_t *)&resp, sizeof(HostResponsePacket));
-  memcpy(&lastRespPacket, &resp, sizeof(resp));
-  lastRespStation = pkt.stationId;
-  lastRespRetryLeft = 2;
-  lastRespRetryAt = millis() + 220;
-  respSendFailed = false;
-  if (isOfflineSync) {
-    // ซิงค์ย้อนหลังอาจมาทีละหลายสิบรายการติดกัน วาดจอใหม่อย่างมากวินาทีครึ่งครั้ง
-    // ไม่อย่างนั้นจอจะกะพริบรัวและหน่วงการตอบกลับของแม่ข่ายไปด้วย
-    static unsigned long lastSyncRedraw = 0;
-    if (millis() - lastSyncRedraw > 1500) {
-      lastSyncRedraw = millis();
-      renderHostPage(true);
-    }
-  } else {
-    displayHostLiveScan(lastScannedUID, lastScannedStudentId, lastScannedStatus, pkt.stationId);
-    // มีคนมาใช้บริการแล้ว ปลุกทุกสถานีออกจากโหมดพักหน้าจอพร้อมกัน
-    if (wasScreensaver || wasScreenOff) announceHostMode();
-  }
+  displayHostLiveScan(lastScannedUID, lastScannedStudentId, lastScannedStatus, pkt.stationId);
 
   if (found && matchedStudent && strcmp(resp.status, "SUCCESS") == 0) {
     String claimType = matchedStudent->isTempCard ? "Temp Card" : "Normal";
-    if (isOfflineSync) claimType += " (Offline)";
     appendLogToFS(matchedStudent->studentId, matchedStudent->fullName, matchedStudent->uid, matchedStudent->refNo, matchedStudent->claimTime, pkt.stationId, claimType);
-    pushDisplayEvent(matchedStudent->studentId, pkt.stationId, matchedStudent->claimTime);
-
-    // พิมพ์สลิปอัตโนมัติ — ข้ามรายการที่ซิงค์ย้อนหลัง เพราะนิสิตรับอาหารและกลับไปแล้ว
-    // ตั้งแต่ตอนที่ลิงก์ขาด การพิมพ์ทีละหลายสิบใบจะล้นคิวและเปลืองกระดาษเปล่า
-    // ยอดของรายการเหล่านั้นยังอยู่ครบในใบสรุปประจำวันและไฟล์ CSV
-    if (printerAutoSlip && !isOfflineSync) {
-      printClaimSlip(*matchedStudent);
-    }
-
-    // บอกทุกสถานีว่าบัตรใบนี้ใช้สิทธิ์ไปแล้ว เพื่อให้ปัดตกได้เองถ้าลิงก์ขาดหลังจากนี้
-    // ส่งทีละรายการแทนการผลักบัญชีทั้งชุด ซึ่งถ้าทำทุกครั้งจะกินอากาศวันละ 268 รอบ
-    // กรณีบัตรสำรองไม่ส่ง เพราะอีกสองบรรทัดถัดไปเลขบัตรของนิสิตคนนี้กำลังจะเปลี่ยน
-    // แล้ว saveDatabaseToFS() จะผลักบัญชีชุดเต็มตามไปเองอยู่แล้ว
-    if (!matchedStudent->isTempCard) {
-      bumpRosterVer();
-      sendRosterDelta(matchedStudent->uid, 1);
-    }
     
     if (matchedStudent->isTempCard) {
       if (matchedStudent->originalUid != "") {
@@ -1554,254 +971,18 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
       saveDatabaseToFS();
     }
 
-    if (!isOfflineSync) soundScanSuccess();
+    soundScanSuccess();
   }
-}
-
-// แดชบอร์ดสดของเว็บพอร์ทัล: ตัวเลขโควตา ฮาร์ดแวร์แม่ข่าย และสถานะจุดบริการทั้ง 4
-void handleDashboardAPI() {
-  if (!requireAuth()) return;
-
-  int usedCount = 0;
-  int shopCounts[4] = {0, 0, 0, 0};
-  int tempWaiting = 0;
-  for (const auto& st : db) {
-    if (st.claimed) {
-      usedCount++;
-      if (st.station >= 1 && st.station <= 4) shopCounts[st.station - 1]++;
-    }
-    if (st.isTempCard && !st.claimed) tempWaiting++;
-  }
-
-  int total = (int)db.size();
-  int quotaPct = (total > 0) ? (usedCount * 100) / total : 0;
-  float volt = readHostBatteryVoltage();
-
-  char win[16];
-  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d", serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
-
-  String j = "{";
-  j += "\"temp\":" + String(getChipTemperature(), 1);
-  j += ",\"cpu\":" + String(calculateCpuLoad(), 1);
-  j += ",\"heap\":" + String((unsigned)(ESP.getFreeHeap() / 1024));
-  j += ",\"uptime\":" + String((unsigned long)(millis() / 1000));
-  j += ",\"battPct\":" + String(getHostBatteryPercentage(volt));
-  j += ",\"battVolt\":" + String(volt, 2);
-  j += ",\"used\":" + String(usedCount);
-  j += ",\"total\":" + String(total);
-  j += ",\"remaining\":" + String(total - usedCount);
-  j += ",\"disbursed\":" + String(usedCount * 35);
-  j += ",\"quotaPct\":" + String(quotaPct);
-  j += ",\"tempWaiting\":" + String(tempWaiting);
-  j += ",\"officers\":" + String((unsigned)adminUsers.size());
-  j += ",\"clock\":\"" + jsonEscape(getRealTimeStr()) + "\"";
-  j += ",\"serviceOpen\":" + String(isWithinServiceTime() ? "true" : "false");
-  j += ",\"window\":\"" + String(win) + "\"";
-
-  j += ",\"roster\":{\"ver\":" + String((unsigned)rosterVer);
-  j += ",\"entries\":" + String((unsigned)countRosterEligible()) + "}";
-
-  j += ",\"printer\":{\"enabled\":" + String(ENABLE_THERMAL_PRINTER ? "true" : "false");
-  j += ",\"ready\":" + String(printerIsConnected() ? "true" : "false");
-  j += ",\"auto\":" + String(printerAutoSlip ? "true" : "false");
-  j += ",\"queue\":" + String((unsigned)printerQueueDepth());
-  j += ",\"status\":\"" + jsonEscape(printerStatusText()) + "\"}";
-
-  j += ",\"shops\":[";
-  for (int i = 0; i < 4; i++) {
-    if (i) j += ",";
-    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
-    j += ",\"vendor\":\"" + jsonEscape(shops[i].vendor) + "\"";
-    j += ",\"count\":" + String(shopCounts[i]);
-    j += ",\"amount\":" + String(shopCounts[i] * 35) + "}";
-  }
-  j += "]";
-
-  j += ",\"stations\":[";
-  for (int i = 0; i < 4; i++) {
-    if (i) j += ",";
-    bool on = stationNodes[i].isOnline;
-    j += "{\"id\":" + String(i + 1);
-    j += ",\"online\":" + String(on ? "true" : "false");
-    j += ",\"rssi\":" + String(on ? stationNodes[i].rssi : -100);
-    j += ",\"quality\":" + String(on ? calculateSignalQuality(stationNodes[i].rssi) : 0);
-    j += ",\"battPct\":" + String(on ? getHostBatteryPercentage(stationNodes[i].systemVoltage) : 0);
-    j += ",\"volt\":" + String(on ? stationNodes[i].systemVoltage : 0.0f, 2);
-    j += ",\"ageSec\":" + String(on ? (unsigned long)((millis() - stationNodes[i].lastSeen) / 1000UL) : 0UL);
-    j += ",\"rosterVer\":" + String((unsigned)stationRosterVer[i]);
-    j += ",\"rosterOk\":" + String((on && stationRosterCapable[i] && stationRosterVer[i] == rosterVer && !stationRosterTooBig[i]) ? "true" : "false");
-    j += ",\"rosterTooBig\":" + String(stationRosterTooBig[i] ? "true" : "false");
-    j += ",\"rosterCapable\":" + String(stationRosterCapable[i] ? "true" : "false");
-    j += "}";
-  }
-  j += "]";
-
-  j += ",\"lastScan\":{";
-  j += "\"uid\":\"" + jsonEscape(maskUID(lastScannedUID)) + "\"";
-  j += ",\"id\":\"" + jsonEscape(lastScannedStudentId) + "\"";
-  j += ",\"ref\":\"" + jsonEscape(lastScannedRefNo) + "\"";
-  j += ",\"status\":\"" + jsonEscape(lastScannedStatus) + "\"";
-  j += ",\"station\":" + String(lastScannedStation) + "}";
-  j += "}";
-
-  server.send(200, "application/json; charset=utf-8", j);
-}
-
-// ---------------------------------------------------------------------------
-// ข้อมูลสำหรับจอสาธารณะ — เปิดได้โดยไม่ต้องเข้าสู่ระบบ จึงส่งเฉพาะข้อมูลที่
-// เปิดเผยได้: ยอดรวม สถานะร้าน และรายการที่ปิดบังรหัสนิสิตแล้ว
-// ไม่มีชื่อนิสิต ไม่มีเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์แม่ข่าย
-// ---------------------------------------------------------------------------
-void handleDisplayAPI() {
-  if (!publicDisplayEnabled) {
-    server.send(403, "application/json; charset=utf-8", "{\"ok\":false,\"msg\":\"DISPLAY_DISABLED\"}");
-    return;
-  }
-
-  int usedCount = 0;
-  int shopCounts[4] = {0, 0, 0, 0};
-  for (const auto& st : db) {
-    if (st.claimed) {
-      usedCount++;
-      if (st.station >= 1 && st.station <= 4) shopCounts[st.station - 1]++;
-    }
-  }
-  int total = (int)db.size();
-  int quotaPct = (total > 0) ? (usedCount * 100) / total : 0;
-
-  char win[16];
-  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d", serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
-
-  String j = "{\"ok\":true";
-  j += ",\"clock\":\"" + jsonEscape(getTimeOnlyStr()) + "\"";
-  j += ",\"date\":\"" + jsonEscape(getDateFormattedStr()) + "\"";
-  j += ",\"serviceOpen\":" + String(isWithinServiceTime() ? "true" : "false");
-  j += ",\"window\":\"" + String(win) + "\"";
-  j += ",\"used\":" + String(usedCount);
-  j += ",\"total\":" + String(total);
-  j += ",\"remaining\":" + String(total - usedCount);
-  j += ",\"disbursed\":" + String(usedCount * 35);
-  j += ",\"quotaPct\":" + String(quotaPct);
-
-  j += ",\"shops\":[";
-  for (int i = 0; i < 4; i++) {
-    if (i) j += ",";
-    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
-    j += ",\"count\":" + String(shopCounts[i]);
-    j += ",\"amount\":" + String(shopCounts[i] * 35);
-    j += ",\"online\":" + String(stationNodes[i].isOnline ? "true" : "false") + "}";
-  }
-  j += "]";
-
-  // เรียงจากรายการใหม่สุดไปเก่าสุด
-  j += ",\"events\":[";
-  for (int i = 0; i < displayFeedCount; i++) {
-    int idx = (displayFeedHead - 1 - i + DISPLAY_FEED_SIZE * 2) % DISPLAY_FEED_SIZE;
-    if (i) j += ",";
-    j += "{\"id\":\"" + jsonEscape(String(displayFeed[idx].maskedId)) + "\"";
-    j += ",\"time\":\"" + jsonEscape(String(displayFeed[idx].timeStr)) + "\"";
-    j += ",\"station\":" + String(displayFeed[idx].station) + "}";
-  }
-  j += "]}";
-
-  server.send(200, "application/json; charset=utf-8", j);
-}
-
-void handleManualClaim() {
-  if (!requireAuth()) return;
-  String id = server.arg("id"); id.trim();
-  int station = server.arg("station").toInt();
-  if (station < 1 || station > 4) { sendJson(false, "หมายเลขจุดบริการต้องอยู่ระหว่าง 1-4"); return; }
-
-  for (auto& st : db) {
-    if (st.studentId == id) {
-      if (st.claimed) { sendJson(false, "นิสิต " + id + " ใช้สิทธิ์ของวันนี้ไปแล้ว"); return; }
-      st.claimed = true; st.station = station;
-      st.claimTime = getRealTimeStr(); st.refNo = generateRefNo(station);
-      lastScannedUID = st.uid; lastScannedStudentId = st.studentId;
-      lastScannedStation = station; lastScannedStatus = "APPROVED";
-      lastScannedRefNo = st.refNo;
-      appendLogToFS(st.studentId, st.fullName, st.uid, st.refNo, st.claimTime, station, st.isTempCard ? "Temp Card" : "Normal");
-      pushDisplayEvent(st.studentId, (uint8_t)station, st.claimTime);
-      if (printerAutoSlip) printClaimSlip(st);
-
-      if (st.isTempCard) {
-        st.uid = st.originalUid;
-        st.originalUid = "";
-        st.isTempCard = false;
-      }
-      saveDatabaseToFS();
-      renderHostPage(true);
-      sendJson(true, "ตัดสิทธิ์ด้วยตนเองให้รหัส " + id + " ที่จุดบริการ " + String(station) + " เรียบร้อย");
-      return;
-    }
-  }
-  sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ");
-}
-
-void handleDailyReset() {
-  if (!requireAuth()) return;
-
-  if (LittleFS.exists("/daily_log.csv")) {
-    DateTime now = rtc.now();
-    char arcName[40];
-    snprintf(arcName, sizeof(arcName), "/arc_%04d%02d%02d_%02d%02d%02d.csv",
-             now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
-    File src = LittleFS.open("/daily_log.csv", "r");
-    File dst = LittleFS.open(arcName, "w");
-    if (src && dst) {
-      uint8_t buf[256];
-      while (src.available()) {
-        size_t n = src.read(buf, sizeof(buf));
-        dst.write(buf, n);
-      }
-    }
-    if (src) src.close();
-    if (dst) dst.close();
-    LittleFS.remove("/daily_log.csv");
-  }
-
-  for (auto& st : db) {
-    if (st.isTempCard) { st.uid = st.originalUid; }
-    st.originalUid = "";
-    st.claimed = false; st.claimTime = "-"; st.refNo = "-"; st.station = 0; st.isTempCard = false;
-  }
-  saveDatabaseToFS();
-  displayFeedCount = 0;
-  displayFeedHead = 0;
-  lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedRefNo = "-";
-  lastScannedStation = 0; lastScannedStatus = "RESET";
-  renderHostPage(true);
-  sendJson(true, "ปิดยอดประจำวันและจัดเก็บประวัติเรียบร้อยแล้ว");
-}
-
-void handleSaveShops() {
-  if (!requireAuth()) return;
-  for (int i = 0; i < 4; i++) {
-    String name = server.arg("sname" + String(i));
-    String vendor = server.arg("vname" + String(i));
-    name.trim(); vendor.trim();
-    if (name.length() == 0) { sendJson(false, "กรุณากรอกชื่อร้านที่ " + String(i + 1)); return; }
-    if (name.length() > 48 || vendor.length() > 64) { sendJson(false, "ชื่อร้าน/ผู้ประกอบการยาวเกินกำหนด"); return; }
-    shops[i].name = name;
-    shops[i].vendor = vendor;
-  }
-  saveShopsToFS();
-  renderHostPage(true);
-  sendJson(true, "บันทึกข้อมูลร้านค้าเรียบร้อยแล้ว");
 }
 
 void handleGetStudentsAPI() {
-  if (!requireAuth()) return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
   int page = server.hasArg("page") ? server.arg("page").toInt() : 1;
   int limit = server.hasArg("limit") ? server.arg("limit").toInt() : 20;
   String search = server.hasArg("search") ? server.arg("search") : "";
   search.trim(); search.toUpperCase();
   if (page < 1) page = 1;
-  // เดิมไม่จำกัดเพดาน limit ผู้ใช้จึงขอ 1000 แถวได้ แล้วเอกสาร JSON ขนาด 8KB
-  // จะล้นจนสตริงที่ส่งกลับไม่สมบูรณ์ ทำให้หน้าเว็บค้าง
-  if (limit < 1) limit = 20;
-  if (limit > 100) limit = 100;
+  if (limit < 1 || limit > 100) limit = 20;
 
   std::vector<int> matchedIndices;
   for (size_t i = 0; i < db.size(); i++) {
@@ -1811,7 +992,8 @@ void handleGetStudentsAPI() {
       String fName = db[i].fullName; fName.toUpperCase();
       String rNo = db[i].refNo; rNo.toUpperCase();
       String uId = db[i].uid; uId.toUpperCase();
-      if (sId.indexOf(search) != -1 || fName.indexOf(search) != -1 || rNo.indexOf(search) != -1 || uId.indexOf(search) != -1) matchedIndices.push_back(i);
+      if (sId.indexOf(search) != -1 || fName.indexOf(search) != -1 ||
+          rNo.indexOf(search) != -1 || uId.indexOf(search) != -1) matchedIndices.push_back(i);
     }
   }
 
@@ -1823,26 +1005,48 @@ void handleGetStudentsAPI() {
   int startIdx = (page - 1) * limit;
   int endIdx = min(startIdx + limit, totalItems);
 
-  DynamicJsonDocument doc(1024 + (size_t)limit * 420);
-  doc["totalItems"] = totalItems;
-  doc["totalPages"] = totalPages;
-  doc["currentPage"] = page;
-  doc["limit"] = limit;
-
-  JsonArray arr = doc.createNestedArray("students");
+  // ต่อ JSON เองแทน DynamicJsonDocument ขนาดคงที่ ของเดิมจองไว้ 8 กิโล
+  // ซึ่งพอดีเกินไปสำหรับยี่สิบรายชื่อ ถ้าล้นขึ้นมา JSON จะขาดกลางคันแบบเงียบ ๆ
+  String j;
+  j.reserve(1024 + (endIdx - startIdx) * 160);
+  j = "{\"totalItems\":" + String(totalItems);
+  j += ",\"totalPages\":" + String(totalPages);
+  j += ",\"currentPage\":" + String(page);
+  j += ",\"limit\":" + String(limit);
+  j += ",\"students\":[";
   for (int i = startIdx; i < endIdx; i++) {
     int idx = matchedIndices[i];
-    JsonObject obj = arr.createNestedObject();
-    obj["id"] = db[idx].studentId; obj["name"] = db[idx].fullName;
-    obj["uid"] = db[idx].uid; obj["claimed"] = db[idx].claimed;
-    obj["time"] = db[idx].claimTime; obj["ref"] = db[idx].refNo;
-    obj["station"] = db[idx].station; obj["isTemp"] = db[idx].isTempCard;
-    obj["shopName"] = (db[idx].station > 0 && db[idx].station <= 4) ? shops[db[idx].station - 1].name : "-";
+    const Student &st = db[idx];
+    if (i > startIdx) j += ",";
+    j += "{\"id\":\"" + jsonEscape(st.studentId) + "\"";
+    j += ",\"name\":\"" + jsonEscape(st.fullName) + "\"";
+    j += ",\"uid\":\"" + jsonEscape(st.uid) + "\"";
+    j += ",\"claimed\":" + String(st.claimed ? "true" : "false");
+    j += ",\"time\":\"" + jsonEscape(st.claimTime) + "\"";
+    j += ",\"ref\":\"" + jsonEscape(st.refNo) + "\"";
+    j += ",\"station\":" + String(st.station);
+    j += ",\"isTemp\":" + String(st.isTempCard ? "true" : "false");
+    j += ",\"shopName\":\"";
+    j += jsonEscape((st.station > 0 && st.station <= 4) ? shops[st.station - 1].name : String("-"));
+    j += "\"}";
   }
+  j += "]}";
 
-  String res;
-  serializeJson(doc, res);
-  server.send(200, "application/json; charset=utf-8", res);
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
+// ครอบค่าด้วยเครื่องหมายคำพูดแบบที่โปรแกรมตารางเข้าใจ
+// ชื่อร้านอย่าง Rice "House", Drinks เคยทำให้คอลัมน์ในไฟล์เลื่อนทั้งแถว
+String csvField(const String &raw) {
+  String out = "\"";
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    if (c == '"') out += "\"\"";
+    else if (c == '\r' || c == '\n') out += ' ';
+    else out += c;
+  }
+  out += "\"";
+  return out;
 }
 
 void handleExportCSV() {
@@ -1857,16 +1061,14 @@ void handleExportCSV() {
     }
   }
 
-  String csv;
-  csv.reserve(2048 + db.size() * 160);
-  csv += "\xEF\xBB\xBF";
+  String csv = "\xEF\xBB\xBF";
   csv += "MCU Phrae Canteen Daily Claim Report (Claimed Only)\n";
   csv += "Export Date," + getRealTimeStr() + "\n\n";
 
   csv += "--- Summary Payout By Shop ---\n";
   csv += "No.,Shop Name,Vendor,Total Orders,Total Payout (THB)\n";
   for (int i = 0; i < 4; i++) {
-    csv += String(i + 1) + "," + csvQuote(shops[i].name) + "," + csvQuote(shops[i].vendor) + ","
+    csv += String(i + 1) + "," + csvField(shops[i].name) + "," + csvField(shops[i].vendor) + ","
         + String(shopCounts[i]) + "," + String(shopCounts[i] * 35) + "\n";
   }
   csv += "Total Payout,,," + String(totalClaimed) + "," + String(totalClaimed * 35) + "\n\n";
@@ -1882,15 +1084,15 @@ void handleExportCSV() {
     String cardType = s.isTempCard ? "Temporary Card" : "Standard Card";
 
     csv += String(rowNumber++) + ",";
-    csv += csvQuote(s.studentId) + ",";
-    csv += csvQuote(s.fullName) + ",";
-    csv += csvQuote(s.uid) + ",";
-    csv += csvQuote(s.refNo) + ",";
-    csv += csvQuote(s.claimTime) + ",";
-    csv += csvQuote(shopName) + ",";
-    csv += csvQuote(vendorName) + ",";
+    csv += csvField(s.studentId) + ",";
+    csv += csvField(s.fullName) + ",";
+    csv += csvField(s.uid) + ",";
+    csv += csvField(s.refNo) + ",";
+    csv += csvField(s.claimTime) + ",";
+    csv += csvField(shopName) + ",";
+    csv += csvField(vendorName) + ",";
     csv += "35,";
-    csv += csvQuote(cardType) + "\n";
+    csv += csvField(cardType) + "\n";
   }
 
   server.sendHeader("Content-Disposition", "attachment; filename=MCU_Canteen_Claim_Report.csv");
@@ -1898,47 +1100,30 @@ void handleExportCSV() {
 }
 
 void handleSetRTCTime() {
-  if (!requireAuth()) return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
   if (server.hasArg("date") && server.hasArg("time")) {
     String dStr = server.arg("date");
     String tStr = server.arg("time");
-    int y, m, d, h, mi, sec;
+    int y, m, d, h, mi, s;
     if (sscanf(dStr.c_str(), "%d-%d-%d", &y, &m, &d) == 3 &&
-        sscanf(tStr.c_str(), "%d:%d:%d", &h, &mi, &sec) == 3 &&
-        y >= 2000 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31 &&
-        h >= 0 && h <= 23 && mi >= 0 && mi <= 59 && sec >= 0 && sec <= 59) {
-      rtc.adjust(DateTime(y, m, d, h, mi, sec));
-      sendJson(true, "ตั้งค่านาฬิกา RTC DS3231 สำเร็จเรียบร้อย");
+        sscanf(tStr.c_str(), "%d:%d:%d", &h, &mi, &s) == 3) {
+      rtc.adjust(DateTime(y, m, d, h, mi, s));
+      sendAlert("ตั้งค่านาฬิกา RTC DS3231 สำเร็จเรียบร้อย!", "/");
       return;
     }
   }
-  sendJson(false, "รูปแบบวันที่หรือเวลาไม่ถูกต้อง");
-}
-
-// อนุญาตเฉพาะไฟล์ประวัติชื่อ arc_*.csv ที่อยู่ระดับรากเท่านั้น
-// เดิมพารามิเตอร์ file ไม่ถูกกรอง จึงดาวน์โหลด /admins.json ที่เก็บรหัสผ่านได้
-bool isSafeArchiveName(const String &name) {
-  if (!name.startsWith("arc_") || !name.endsWith(".csv")) return false;
-  if (name.length() > 48) return false;
-  for (size_t i = 0; i < name.length(); i++) {
-    char c = name[i];
-    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
-    if (!ok) return false;
-  }
-  if (name.indexOf("..") != -1) return false;
-  return true;
+  sendAlert("รูปแบบวันที่หรือเวลาไม่ถูกต้อง", "/");
 }
 
 void handleDownloadArchive() {
-  if (!requireAuth(false)) return;
-  String filename = server.arg("file");
-  filename.trim();
-  if (filename.startsWith("/")) filename = filename.substring(1);
-  if (isSafeArchiveName(filename) && LittleFS.exists("/" + filename)) {
-    File f = LittleFS.open("/" + filename, "r");
-    if (f) {
-      server.sendHeader("Content-Disposition", "attachment; filename=" + filename);
+  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (server.hasArg("file")) {
+    String filename = server.arg("file");
+    if (!filename.startsWith("/")) filename = "/" + filename;
+    // รับเฉพาะชื่อไฟล์ประวัติในรากเท่านั้น กันชื่อแบบ ../ ที่ไต่ไปอ่านไฟล์อื่น
+    if (filename.startsWith("/arc_") && filename.indexOf("/", 1) < 0 &&
+        filename.indexOf("..") < 0 && LittleFS.exists(filename)) {
+      File f = LittleFS.open(filename, "r");
       server.streamFile(f, "text/csv");
       f.close();
       return;
@@ -1948,77 +1133,41 @@ void handleDownloadArchive() {
 }
 
 void handleDeleteArchive() {
-  if (!requireAuth()) return;
-  String filename = server.arg("file");
-  filename.trim();
-  if (filename.startsWith("/")) filename = filename.substring(1);
-  if (isSafeArchiveName(filename) && LittleFS.exists("/" + filename)) {
-    LittleFS.remove("/" + filename);
-    sendJson(true, "ลบไฟล์ประวัติ " + filename + " เรียบร้อยแล้ว");
-    return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (server.hasArg("file")) {
+    String filename = server.arg("file");
+    if (!filename.startsWith("/")) filename = "/" + filename;
+    
+    if (filename.startsWith("/arc_") && filename.indexOf("/", 1) < 0 &&
+        filename.indexOf("..") < 0 && LittleFS.exists(filename)) {
+      LittleFS.remove(filename);
+      sendAlert("ลบไฟล์ประวัติ " + filename.substring(1) + " เรียบร้อยแล้ว!", "/");
+      return;
+    }
   }
-  sendJson(false, "ไม่สามารถลบไฟล์ได้");
+  sendAlert("ไม่สามารถลบไฟล์ได้", "/");
 }
 
 void handleSaveStudent() {
-  if (!requireAuth()) return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
   String oldId = server.arg("oldStudentId"); String sId = server.arg("studentId");
   String name = server.arg("fullName"); String uid = server.arg("uid");
-  oldId.trim(); sId.trim(); name.trim(); uid.trim();
-
-  if (sId.length() == 0) { sendJson(false, "กรุณากรอกรหัสนิสิต"); return; }
-  if (sId.length() > 24 || name.length() > 96 || uid.length() > 15) {
-    sendJson(false, "ข้อมูลยาวเกินกำหนด (รหัส 24 / ชื่อ 96 / UID 15 อักขระ)"); return;
-  }
-  // กันรหัสนิสิตซ้ำ ซึ่งเดิมเพิ่มซ้ำได้และทำให้การตัดสิทธิ์ไปโดนระเบียนผิดตัว
-  for (const auto& s : db) {
-    if (s.studentId == sId && sId != oldId) { sendJson(false, "รหัสนิสิต " + sId + " มีอยู่ในระบบแล้ว"); return; }
-  }
-  if (uid.length() > 0) {
-    for (const auto& s : db) {
-      if (s.uid == uid && s.studentId != oldId && s.studentId != sId) {
-        sendJson(false, "เลขบัตรนี้ถูกผูกกับรหัส " + s.studentId + " อยู่แล้ว"); return;
-      }
-    }
-  }
-
+  sId.trim(); name.trim(); uid.trim();
   if (oldId != "") {
-    bool found = false;
-    for (auto& s : db) {
-      if (s.studentId == oldId) {
-        s.studentId = sId; s.fullName = name;
-        // แก้ไข UID ของบัตรสำรองต้องไปเขียนที่ originalUid ไม่ใช่ทับบัตรชั่วคราว
-        if (s.isTempCard) s.originalUid = uid;
-        else s.uid = uid;
-        found = true; break;
-      }
-    }
-    if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + oldId + " ในระบบ"); return; }
+    for (auto& s : db) { if (s.studentId == oldId) { s.studentId = sId; s.fullName = name; s.uid = uid; break; } }
   } else {
     Student s; s.studentId = sId; s.fullName = name; s.uid = uid; s.originalUid = ""; s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
     db.push_back(s);
   }
-  saveDatabaseToFS(); renderHostPage(true);
-  sendJson(true, "บันทึกข้อมูลผู้มีสิทธิ์เรียบร้อยแล้ว");
+  saveDatabaseToFS(); renderHostPage(true); sendAlert("Beneficiary Saved Successfully!", "/");
 }
 
 void handleSaveTempCard() {
-  if (!requireAuth()) return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
   String sId = server.arg("studentId"); String uid = server.arg("uid");
-  sId.trim(); uid.trim();
-  if (sId.length() == 0 || uid.length() == 0) { sendJson(false, "กรุณากรอกรหัสนิสิตและเลขบัตรสำรอง"); return; }
-  if (uid.length() > 15) { sendJson(false, "เลขบัตรยาวเกิน 15 อักขระ"); return; }
-
-  for (const auto& s : db) {
-    if (s.uid == uid && s.studentId != sId) {
-      sendJson(false, "บัตรใบนี้ถูกผูกกับรหัส " + s.studentId + " อยู่แล้ว"); return;
-    }
-  }
-
-  bool found = false;
+  sId.trim(); uid.trim(); bool found = false;
   for (auto& s : db) {
     if (s.studentId == sId) {
-      if (s.claimed) { sendJson(false, "นิสิต " + sId + " ใช้สิทธิ์ของวันนี้ไปแล้ว"); return; }
       if (s.originalUid == "") s.originalUid = s.uid;
       s.uid = uid;
       s.isTempCard = true;
@@ -2026,56 +1175,38 @@ void handleSaveTempCard() {
       break;
     }
   }
-  if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + sId + " ในระบบ"); return; }
-  saveDatabaseToFS(); renderHostPage(true);
-  sendJson(true, "ผูกบัตรสำรองให้รหัส " + sId + " เรียบร้อยแล้ว");
+  if (!found) { sendAlert("Student ID Not Found!", "/"); return; }
+  saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Assigned Successfully!", "/");
 }
 
 void handleRemoveTempCard() {
-  if (!requireAuth()) return;
-  String id = server.arg("id"); id.trim();
-  bool found = false;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
+  String id = server.arg("id");
   for (auto& s : db) {
     if (s.studentId == id) {
-      s.uid = s.originalUid;   // ว่างได้ ถ้าเดิมนิสิตยังไม่เคยมีบัตรประจำตัว
+      if (s.originalUid != "") s.uid = s.originalUid;
       s.originalUid = "";
       s.isTempCard = false;
-      found = true;
       break;
     }
   }
-  if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ"); return; }
-  saveDatabaseToFS(); renderHostPage(true);
-  sendJson(true, "ยกเลิกบัตรสำรองของรหัส " + id + " เรียบร้อยแล้ว");
+  saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Revoked Successfully!", "/");
 }
 
 void handleDeleteStudent() {
-  if (!requireAuth()) return;
-  String id = server.arg("id"); id.trim();
-  bool found = false;
-  for (auto it = db.begin(); it != db.end(); ++it) {
-    if (it->studentId == id) { db.erase(it); found = true; break; }
-  }
-  if (!found) { sendJson(false, "ไม่พบรหัสนิสิต " + id + " ในระบบ"); return; }
-  saveDatabaseToFS(); renderHostPage(true);
-  sendJson(true, "ลบรายชื่อรหัส " + id + " เรียบร้อยแล้ว");
+  if (!isAuthenticated()) { redirectToLogin(); return; }
+  String id = server.arg("id");
+  for (auto it = db.begin(); it != db.end(); ++it) { if (it->studentId == id) { db.erase(it); break; } }
+  saveDatabaseToFS(); renderHostPage(true); sendAlert("Beneficiary Removed Successfully!", "/");
 }
 
 void handleSaveAdmin() {
-  if (!requireAuth()) return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
   String oldUser = server.arg("oldUsername");
   String user = server.arg("username");
   String pass = server.arg("password");
   String dName = server.arg("displayName");
-  oldUser.trim(); user.trim(); pass.trim(); dName.trim();
-
-  if (user.length() < 3 || user.length() > 24) { sendJson(false, "ชื่อผู้ใช้ต้องยาว 3-24 อักขระ"); return; }
-  if (dName.length() == 0 || dName.length() > 64) { sendJson(false, "กรุณากรอกชื่อ-ตำแหน่ง (ไม่เกิน 64 อักขระ)"); return; }
-  if (oldUser == "" && pass.length() < 8) { sendJson(false, "รหัสผ่านต้องยาวอย่างน้อย 8 อักขระ"); return; }
-  if (pass.length() > 0 && pass.length() < 8) { sendJson(false, "รหัสผ่านต้องยาวอย่างน้อย 8 อักขระ"); return; }
-  for (const auto& u : adminUsers) {
-    if (u.username == user && u.username != oldUser) { sendJson(false, "ชื่อผู้ใช้นี้มีในระบบแล้ว"); return; }
-  }
+  user.trim(); pass.trim(); dName.trim();
 
   if (oldUser != "") {
     for (auto& u : adminUsers) {
@@ -2088,8 +1219,14 @@ void handleSaveAdmin() {
     }
   } else {
     if (adminUsers.size() >= 3) {
-      sendJson(false, "ระบบจำกัดเจ้าหน้าที่ไม่เกิน 3 ท่าน");
+      sendAlert("ระบบจำกัดเจ้าหน้าที่ไม่เกิน 3 ท่าน!", "/");
       return;
+    }
+    for (const auto& u : adminUsers) {
+      if (u.username == user) {
+        sendAlert("ชื่อผู้ใช้นี้มีในระบบแล้ว!", "/");
+        return;
+      }
     }
     AdminUser nu;
     nu.username = user;
@@ -2098,31 +1235,24 @@ void handleSaveAdmin() {
     adminUsers.push_back(nu);
   }
   saveAdminsToFS();
-  sendJson(true, "บันทึกข้อมูลเจ้าหน้าที่เรียบร้อยแล้ว");
+  sendAlert("บันทึกข้อมูลเจ้าหน้าที่เรียบร้อยแล้ว!", "/");
 }
 
 void handleDeleteAdmin() {
-  if (!requireAuth()) return;
+  if (!isAuthenticated()) { redirectToLogin(); return; }
   if (adminUsers.size() <= 1) {
-    sendJson(false, "ไม่สามารถลบได้ ต้องมีเจ้าหน้าที่อย่างน้อย 1 ท่านในระบบ");
+    sendAlert("ไม่สามารถลบได้ ต้องมีเจ้าหน้าที่อย่างน้อย 1 ท่านในระบบ!", "/");
     return;
   }
-  String user = server.arg("user"); user.trim();
-  bool found = false;
+  String user = server.arg("user");
   for (auto it = adminUsers.begin(); it != adminUsers.end(); ++it) {
     if (it->username == user) {
-      // ปิด session ที่ยังเปิดค้างของบัญชีที่ถูกลบทันที
-      for (int i = 0; i < 3; i++) {
-        if (activeSessions[i].username == user) { activeSessions[i].token = ""; activeSessions[i].username = ""; }
-      }
       adminUsers.erase(it);
-      found = true;
       break;
     }
   }
-  if (!found) { sendJson(false, "ไม่พบผู้ใช้ " + user + " ในระบบ"); return; }
   saveAdminsToFS();
-  sendJson(true, "ลบเจ้าหน้าที่เรียบร้อยแล้ว");
+  sendAlert("ลบเจ้าหน้าที่เรียบร้อยแล้ว!", "/");
 }
 
 void saveShopsToFS() {
@@ -2154,10 +1284,7 @@ void loadShopsFromFS() {
 void appendLogToFS(String studentId, String fullName, String uid, String refNo, String timestamp, int station, String type) {
   File logFile = LittleFS.open("/daily_log.csv", FILE_APPEND);
   if (logFile) {
-    // ครอบทุกฟิลด์ด้วยเครื่องหมายคำพูด ชื่อที่มีลูกน้ำจึงไม่ดันฟิลด์อื่นเพี้ยน
-    String line = csvQuote(studentId) + "," + csvQuote(fullName) + "," + csvQuote(uid) + "," +
-                  csvQuote(refNo) + "," + csvQuote(timestamp) + "," + String(station) + ",35," + csvQuote(type);
-    logFile.println(line);
+    logFile.printf("%s,%s,%s,%s,%s,%d,35,%s\n", studentId.c_str(), fullName.c_str(), uid.c_str(), refNo.c_str(), timestamp.c_str(), station, type.c_str());
     logFile.close();
   }
 }
@@ -2170,17 +1297,20 @@ void restoreDailyLogs() {
     String line = logFile.readStringUntil('\n');
     line.trim();
     if (line.length() == 0) continue;
-    String f[8];
-    int n = parseCsvLine(line, f, 8);
-    if (n >= 6) {
-      String sId = f[0];
-      String ref = f[3];
-      String tStamp = f[4];
-      int st = f[5].toInt();
-      String type = (n >= 8) ? f[7] : "Normal";
+    int c1 = line.indexOf(','); int c2 = line.indexOf(',', c1 + 1);
+    int c3 = line.indexOf(',', c2 + 1); int c4 = line.indexOf(',', c3 + 1);
+    int c5 = line.indexOf(',', c4 + 1); int c6 = line.indexOf(',', c5 + 1);
+    int c7 = line.indexOf(',', c6 + 1);
+    if (c1 != -1 && c2 != -1 && c3 != -1 && c4 != -1 && c5 != -1 && c6 != -1) {
+      String sId = line.substring(0, c1);
+      String ref = line.substring(c3 + 1, c4);
+      String tStamp = line.substring(c4 + 1, c5);
+      int st = line.substring(c5 + 1, c6).toInt();
+      String type = (c7 != -1) ? line.substring(c7 + 1) : "Normal";
       for (auto& s : db) {
         if (s.studentId == sId) {
           s.claimed = true; s.refNo = ref; s.claimTime = tStamp; s.station = st;
+          if (type == "Temp Card") s.isTempCard = true;
           break;
         }
       }
@@ -2190,19 +1320,12 @@ void restoreDailyLogs() {
 }
 
 void saveDatabaseToFS() {
-  // ทุกเส้นทางที่แก้ "ชุดผู้มีสิทธิ์" (เพิ่ม ลบ แก้ไข ผูกบัตรสำรอง นำเข้า CSV ปิดยอด)
-  // ผ่านฟังก์ชันนี้ทั้งหมด จึงเป็นจุดเดียวที่ต้องเลื่อนเลขรุ่นบัญชีและผลักของใหม่ให้สถานี
-  bumpRosterVer();
-  for (int i = 0; i < 4; i++) {
-    if (stationNodes[i].isOnline && stationRosterCapable[i]) startRosterPush(i + 1);
-  }
-
   File file = LittleFS.open("/students.csv", "w");
   if (!file) return;
   file.println("studentId,fullName,uid");
   for (const auto& s : db) {
-    String permUid = s.isTempCard ? s.originalUid : s.uid;
-    file.println(csvQuote(s.studentId) + "," + csvQuote(s.fullName) + "," + csvQuote(permUid));
+    String permUid = (s.originalUid != "") ? s.originalUid : s.uid;
+    file.printf("%s,%s,%s\n", s.studentId.c_str(), s.fullName.c_str(), permUid.c_str());
   }
   file.close();
 }
@@ -2217,14 +1340,14 @@ void loadDatabaseFromFS() {
     String line = file.readStringUntil('\n');
     line.trim();
     if (line.length() == 0) continue;
-    if (isHeader) { isHeader = false; if (line.indexOf("studentId") != -1) continue; }
-    String f[3];
-    int n = parseCsvLine(line, f, 3);
-    if (n >= 1 && f[0].length() > 0) {
+    if (isHeader) { isHeader = false; continue; }
+    int c1 = line.indexOf(','); int c2 = line.indexOf(',', c1 + 1);
+    if (c1 != -1 && c2 != -1) {
       Student s;
-      s.studentId = f[0];
-      s.fullName = (n >= 2) ? f[1] : "";
-      s.uid = (n >= 3) ? f[2] : "";
+      s.studentId = line.substring(0, c1);
+      s.fullName = line.substring(c1 + 1, c2);
+      s.uid = line.substring(c2 + 1);
+      s.uid.trim();
       s.originalUid = "";
       s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
       db.push_back(s);
@@ -2235,10 +1358,10 @@ void loadDatabaseFromFS() {
 }
 
 void mergeImportedStudents() {
-  if (!requireAuth()) return;
-  if (!LittleFS.exists("/temp_import.csv")) { sendJson(false, "ไม่พบไฟล์ที่อัปโหลด"); return; }
+  if (!isAuthenticated()) { redirectToLogin(); return; }
+  if (!LittleFS.exists("/temp_import.csv")) { sendAlert("No file uploaded!", "/"); return; }
   File file = LittleFS.open("/temp_import.csv", "r");
-  if (!file) { sendJson(false, "เปิดไฟล์ที่อัปโหลดไม่สำเร็จ"); return; }
+  if (!file) { sendAlert("Failed to open uploaded file!", "/"); return; }
 
   bool isHeader = true;
   int newCount = 0;
@@ -2254,12 +1377,13 @@ void mergeImportedStudents() {
       if (line.indexOf("studentId") != -1 || line.indexOf("รหัส") != -1) continue;
     }
 
-    String f[3];
-    int n = parseCsvLine(line, f, 3);
-    {
-      String sId = f[0];
-      String fName = (n >= 2) ? f[1] : "";
-      String uId = (n >= 3) ? f[2] : "";
+    int c1 = line.indexOf(',');
+    int c2 = line.indexOf(',', c1 + 1);
+    if (c1 != -1) {
+      String sId = line.substring(0, c1);
+      String fName = (c2 != -1) ? line.substring(c1 + 1, c2) : line.substring(c1 + 1);
+      String uId = (c2 != -1) ? line.substring(c2 + 1) : "";
+      sId.trim(); fName.trim(); uId.trim();
 
       if (sId.length() == 0) continue;
 
@@ -2267,10 +1391,9 @@ void mergeImportedStudents() {
       for (auto& s : db) {
         if (s.studentId == sId) {
           if (fName.length() > 0) s.fullName = fName;
-          if (uId.length() > 0) {
-            // ถ้ากำลังถือบัตรสำรองอยู่ ให้ไปอัปเดตบัตรประจำตัวจริงแทน
-            if (s.isTempCard) s.originalUid = uId;
-            else { s.uid = uId; s.originalUid = ""; }
+          if (uId.length() > 0 && !s.isTempCard) {
+            s.uid = uId;
+            s.originalUid = "";
           }
           exists = true;
           updatedCount++;
@@ -2300,13 +1423,12 @@ void mergeImportedStudents() {
   saveDatabaseToFS();
   renderHostPage(true);
 
-  String msg = "นำเข้าสำเร็จ — เพิ่มใหม่ " + String(newCount) + " รายการ, ปรับปรุง " + String(updatedCount) + " รายการ";
-  sendJson(true, msg);
+  String msg = "นำเข้าสำเร็จ! เพิ่มใหม่: " + String(newCount) + " รายการ, ปรับปรุง: " + String(updatedCount) + " รายการ";
+  sendAlert(msg, "/");
 }
 
 void handleFileUpload() {
   if (!isAuthenticated()) return;
-  // หมายเหตุ: ตัวจัดการอัปโหลดตอบกลับไม่ได้ ผลลัพธ์จริงถูกแจ้งใน mergeImportedStudents()
   HTTPUpload& upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
     LittleFS.remove("/temp_import.csv");
@@ -2318,22 +1440,112 @@ void handleFileUpload() {
   }
 }
 
-// หมายเหตุ: เนื้อหาสลิปและปลายทาง API ของเครื่องพิมพ์ย้ายไปอยู่ใน HostSlips.h
-// (ถูก #include ไว้ท้ายไฟล์ก่อน setup())
+// ============================================================================
+// BENTO WEB PORTAL HTML
+// ============================================================================
+// (ย้ายไปอยู่ใน WebDashboard.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup())
+
 
 // ============================================================================
-// ส่วนที่แยกออกไปเป็นไฟล์ของตัวเอง ทั้งหมดถูก #include ตรงนี้เพราะโค้ดข้างใน
-// อ้างถึงตัวแปรส่วนกลางและฟังก์ชันช่วยเหลือที่ประกาศไว้ข้างบน
-// **อย่าย้ายบรรทัด #include เหล่านี้ขึ้นไปไว้บนสุด**
+// ข้อมูลสดสำหรับแดชบอร์ด
+// หน้าเว็บดึงชุดนี้ทุกสองวินาทีแล้ววาดใหม่เฉพาะตัวเลขที่เปลี่ยน ไม่ต้องรีโหลดทั้งหน้า
 // ============================================================================
-#include "HostDisplay.h"
-#include "HostSlips.h"
+
+// กันอักขระที่ทำให้ JSON พัง เช่นชื่อร้านที่มีเครื่องหมายคำพูด
+String jsonEscape(const String &raw) {
+  String out;
+  out.reserve(raw.length() + 8);
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') { }
+    else if (c == '\t') out += "\\t";
+    else if ((uint8_t)c < 0x20) { }
+    else out += c;
+  }
+  return out;
+}
+
+void handleDashboardAPI() {
+  if (!isAuthenticated()) { server.send(401, "application/json", "{}"); return; }
+
+  int served = 0;
+  int shopMeals[4] = {0, 0, 0, 0};
+  for (const auto &st : db) {
+    if (!st.claimed) continue;
+    served++;
+    if (st.station >= 1 && st.station <= 4) shopMeals[st.station - 1]++;
+  }
+  int total = (int)db.size();
+
+  char win[16];
+  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d",
+           serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+
+  String j = "{";
+  j += "\"clock\":\"" + jsonEscape(getTimeOnlyStr()) + "\"";
+  j += ",\"date\":\"" + jsonEscape(getDateFormattedStr()) + "\"";
+  j += ",\"open\":" + String(isWithinServiceTime() ? "true" : "false");
+  j += ",\"window\":\"" + String(win) + "\"";
+  j += ",\"served\":" + String(served);
+  j += ",\"total\":" + String(total);
+  j += ",\"left\":" + String(total - served);
+  j += ",\"amount\":" + String(served * 35);
+  j += ",\"dark\":" + String(isTftDarkMode ? "true" : "false");
+  j += ",\"saver\":" + String(stationScreensaver ? "true" : "false");
+
+  j += ",\"shops\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
+    j += ",\"owner\":\"" + jsonEscape(shops[i].vendor) + "\"";
+    j += ",\"meals\":" + String(shopMeals[i]);
+    j += ",\"amount\":" + String(shopMeals[i] * 35) + "}";
+  }
+  j += "]";
+
+  j += ",\"stations\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    bool on = stationNodes[i].isOnline;
+    j += "{\"id\":" + String(i + 1);
+    j += ",\"online\":" + String(on ? "true" : "false");
+    j += ",\"bars\":" + String(on ? calculateSignalQuality(stationNodes[i].rssi) : 0) + "}";
+  }
+  j += "]}";
+
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
+// เครื่องแม่ข่ายสั่งโหมดการแสดงผลของทุกสถานีจากหน้าเว็บ
+// (เดิมสั่งได้จากปุ่มกดบนเครื่องเท่านั้น ซึ่งคนที่มารับช่วงดูแลต่อจะไม่มีทางรู้)
+void handleSetDisplayMode() {
+  if (!isAuthenticated()) { server.send(401, "application/json", "{}"); return; }
+
+  if (server.hasArg("dark")) {
+    isTftDarkMode = (server.arg("dark") == "1");
+    preferences.begin("sys_cfg", false);
+    preferences.putBool("tft_dark", isTftDarkMode);
+    preferences.end();
+  }
+  if (server.hasArg("saver")) {
+    stationScreensaver = (server.arg("saver") == "1");
+    stationScreenOn = true;
+    isScreensaverActive = stationScreensaver;
+  }
+  announceDisplayMode();
+  renderHostPage(true);
+  server.send(200, "application/json", "{\"ok\":true}");
+}
 
 // ============================================================================
-// หน้าเว็บทั้งหมดอยู่ในไฟล์ WebPortal.h (แท็บถัดไปใน Arduino IDE)
-// วางไว้ตรงนี้เพราะโค้ดข้างในอ้างถึงตัวแปรส่วนกลางและฟังก์ชันช่วยเหลือข้างบน
+// ส่วนที่แยกออกไปเป็นไฟล์ของตัวเอง Arduino IDE จะแสดงเป็นแท็บของสเก็ตช์เดียวกัน
+// วางบรรทัด #include ไว้ตรงนี้เพราะโค้ดข้างในอ้างถึงตัวแปรส่วนกลางข้างบน
+// **อย่าย้ายขึ้นไปไว้บนสุด**
 // ============================================================================
-#include "WebPortal.h"
+#include "HostScreen.h"
+#include "WebDashboard.h"
 
 // ============================================================================
 // SETUP FUNCTION
@@ -2369,40 +1581,26 @@ void setup() {
   serviceEndHour    = preferences.getInt("end_h", 13);
   serviceEndMin     = preferences.getInt("end_m", 30);
   isTftDarkMode     = preferences.getBool("tft_dark", true);
-  publicDisplayEnabled = preferences.getBool("pub_disp", true);
-  printerAutoSlip      = preferences.getBool("prn_auto", true);
   preferences.end();
 
-  // Wi-Fi ต้องขึ้นให้ได้ก่อนสิ่งอื่นใด เพราะถ้าไม่มีชื่อ Wi-Fi โผล่มา เจ้าหน้าที่
-  // จะเข้าหน้าเว็บไม่ได้เลยและแก้อะไรไม่ได้ทั้งนั้น อะไรที่อาจค้างได้ให้ไปอยู่ท้ายสุด
+  // เคยเจอมาแล้วว่าชื่อ Wi-Fi ไม่โผล่มาเลยทั้งที่เครื่องบูตปกติ
+  // ลองซ้ำสามครั้งแล้วจำผลไว้ เพื่อเอาไปขึ้นจอบอกตอนบูตว่าสำเร็จหรือไม่
   WiFi.mode(WIFI_AP);
-  // เดิมรับได้ 4 เครื่อง ซึ่งจอสาธารณะจะกินไปหนึ่งช่อง เหลือให้เจ้าหน้าที่แค่สาม
-  for (int attempt = 0; attempt < 3 && !apStarted; attempt++) {
-    apStarted = WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 8);
-    if (!apStarted) delay(300);
+  bool apReady = false;
+  for (int attempt = 0; attempt < 3 && !apReady; attempt++) {
+    apReady = WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 4);
+    if (!apReady) delay(300);
   }
+  hostApReady = apReady;
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
-  // ดูคำอธิบายที่ ENABLE_WIFI_LONG_RANGE ข้างบน โดยค่าเริ่มต้นจะไม่ใส่ LR ลงไป
-  // เพราะทำให้โทรศัพท์มองไม่เห็นชื่อ Wi-Fi ของเครื่องนี้
-  esp_wifi_set_protocol(WIFI_IF_AP,
-                        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N
-#if ENABLE_WIFI_LONG_RANGE
-                        | WIFI_PROTOCOL_LR
-#endif
-                        );
-  // 80 = 20 dBm ซึ่งเป็นค่าสูงสุดของ ESP32-S3 เดิมตั้งไว้ 68 = 17 dBm
-  esp_wifi_set_max_tx_power(80);
+  esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+  esp_wifi_set_max_tx_power(68);
 
-  // ตั้งค่าที่ captive portal ต้องการ: ตอบทุกโดเมนมาที่ตัวเอง และ TTL = 0
-  // เพื่อไม่ให้โทรศัพท์จำการชี้โดเมนนี้ไว้หลังตัดการเชื่อมต่อไปแล้ว
-  dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-  dnsServer.setTTL(0);
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
   esp_now_init();
   esp_now_register_recv_cb(onDataRecv);
-  esp_now_register_send_cb(onDataSent);
 
   esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
@@ -2410,10 +1608,9 @@ void setup() {
   peerInfo.ifidx = WIFI_IF_AP;
   peerInfo.encrypt = false;
   esp_now_add_peer(&peerInfo);
-  applyEspNowRate(broadcastAddress);
 
   delay(50);
-  broadcastStationConfig();
+  broadcastStationTheme();
 
   MDNS.begin(mdns_hostname);
   MDNS.addService("http", "tcp", 80);
@@ -2422,21 +1619,11 @@ void setup() {
   server.collectHeaders(headerkeys, 1);
 
   server.on("/login", HTTP_GET, []() {
-    String err = "";
-    String code = server.arg("error");
-    if (code == "1") err = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง";
-    else if (code == "lock") err = "ป้อนรหัสผิดหลายครั้งเกินกำหนด กรุณารอ 1 นาทีแล้วลองใหม่";
-    server.send(200, "text/html; charset=utf-8", getLoginHTML(err));
+    bool hasErr = server.hasArg("error");
+    server.send(200, "text/html; charset=utf-8", getLoginHTML(hasErr));
   });
 
   server.on("/login", HTTP_POST, []() {
-    // หน่วงเวลาเมื่อพิมพ์รหัสผิดติดกันหลายครั้ง เพื่อกันการไล่เดารหัสผ่าน
-    if (loginLockUntil != 0 && (long)(millis() - loginLockUntil) < 0) {
-      server.sendHeader("Location", "/login?error=lock", true);
-      server.send(302, "text/plain", "");
-      return;
-    }
-
     String user = server.arg("username");
     String pass = server.arg("password");
     user.trim(); pass.trim();
@@ -2452,56 +1639,29 @@ void setup() {
     }
 
     if (ok) {
-      loginFailCount = 0;
-      loginLockUntil = 0;
-
       String token = generateSessionToken();
       int slot = 0;
       for (int i = 0; i < 3; i++) {
-        if (activeSessions[i].token == "" || (long)(millis() - activeSessions[i].expiry) >= 0) {
+        if (activeSessions[i].token == "" || millis() >= activeSessions[i].expiry) {
           slot = i;
           break;
         }
       }
       activeSessions[slot].token = token;
       activeSessions[slot].username = matchedUser;
-      activeSessions[slot].expiry = millis() + 7200000UL;
+      activeSessions[slot].expiry = millis() + 7200000;
 
-      // SameSite=Strict ปิดช่องทางที่เว็บอื่นยิงคำสั่งเข้ามาพร้อมคุกกี้ของเรา
-      server.sendHeader("Set-Cookie",
-                        "CANTEEN_SESSION=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=7200");
+      server.sendHeader("Set-Cookie", "CANTEEN_SESSION=" + token + "; Path=/; HttpOnly");
       server.sendHeader("Location", "/", true);
       server.send(302, "text/plain", "");
     } else {
-      loginFailCount++;
-      if (loginFailCount >= LOGIN_MAX_FAILS) {
-        loginFailCount = 0;
-        loginLockUntil = millis() + LOGIN_LOCK_MS;
-        server.sendHeader("Location", "/login?error=lock", true);
-        server.send(302, "text/plain", "");
-        return;
-      }
       server.sendHeader("Location", "/login?error=1", true);
       server.send(302, "text/plain", "");
     }
   });
 
   server.on("/logout", HTTP_GET, []() {
-    // ล้าง session ฝั่งเซิร์ฟเวอร์ด้วย ไม่ใช่แค่ลบคุกกี้ฝั่งเบราว์เซอร์
-    if (server.hasHeader("Cookie")) {
-      String cookie = server.header("Cookie");
-      int idx = cookie.indexOf("CANTEEN_SESSION=");
-      if (idx != -1) {
-        String tok = cookie.substring(idx + 16);
-        int semi = tok.indexOf(';');
-        if (semi != -1) tok = tok.substring(0, semi);
-        tok.trim();
-        for (int i = 0; i < 3; i++) {
-          if (activeSessions[i].token == tok) { activeSessions[i].token = ""; activeSessions[i].username = ""; }
-        }
-      }
-    }
-    server.sendHeader("Set-Cookie", "CANTEEN_SESSION=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+    server.sendHeader("Set-Cookie", "CANTEEN_SESSION=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
     server.sendHeader("Location", "/login", true);
     server.send(302, "text/plain", "");
   });
@@ -2511,69 +1671,48 @@ void setup() {
     server.send(200, "text/html; charset=utf-8", getHTML());
   });
 
-  // ---------------------------------------------------------------------
-  // เส้นทาง API — คำสั่งที่เปลี่ยนแปลงข้อมูลทุกตัวย้ายมาเป็น POST ทั้งหมด
-  // เดิมเป็น GET จึงถูกเบราว์เซอร์ prefetch หรือถูกเว็บอื่นยิงเข้ามาได้
-  // ---------------------------------------------------------------------
-  server.on("/api/students", HTTP_GET, handleGetStudentsAPI);
-  server.on("/export.csv", HTTP_GET, handleExportCSV);
-  server.on("/api/archive/download", HTTP_GET, handleDownloadArchive);
-  server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);
-
-  // จอสาธารณะ: เปิดได้โดยไม่ต้องเข้าสู่ระบบ จึงไม่กินช่อง session ของเจ้าหน้าที่
-  server.on("/display", HTTP_GET, []() {
-    if (!publicDisplayEnabled) { redirectToLogin(); return; }
-    server.send(200, "text/html; charset=utf-8", getDisplayHTML());
+  // ไฟล์หน้าตาเว็บ เสิร์ฟตรงจากแฟลช ไม่ต้องสร้างสตริงในแรม และเบราว์เซอร์แคชไว้ได้
+  server.on("/s.css", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "max-age=86400");
+    server.send_P(200, "text/css", DASH_CSS);
   });
-  server.on("/api/display", HTTP_GET, handleDisplayAPI);
-  server.on("/api/system/health", HTTP_GET, handleDashboardAPI);
-
+  server.on("/a.js", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "max-age=86400");
+    server.send_P(200, "application/javascript", DASH_JS);
+  });
+  server.on("/api/students", HTTP_GET, handleGetStudentsAPI);
+  server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);
+  server.on("/api/display", HTTP_POST, handleSetDisplayMode);
+  server.on("/export.csv", HTTP_GET, handleExportCSV);
   server.on("/api/rtc/set", HTTP_POST, handleSetRTCTime);
+  server.on("/api/archive/download", HTTP_GET, handleDownloadArchive);
   server.on("/api/archive/delete", HTTP_POST, handleDeleteArchive);
   server.on("/api/student/save", HTTP_POST, handleSaveStudent);
-  server.on("/api/student/delete", HTTP_POST, handleDeleteStudent);
   server.on("/api/tempcard/save", HTTP_POST, handleSaveTempCard);
   server.on("/api/tempcard/remove", HTTP_POST, handleRemoveTempCard);
+  server.on("/api/student/delete", HTTP_POST, handleDeleteStudent);
+
   server.on("/api/admin/save", HTTP_POST, handleSaveAdmin);
   server.on("/api/admin/delete", HTTP_POST, handleDeleteAdmin);
-  server.on("/api/shops/save", HTTP_POST, handleSaveShops);
-  server.on("/api/claim/manual", HTTP_POST, handleManualClaim);
-  server.on("/api/system/reset", HTTP_POST, handleDailyReset);
-  server.on("/api/print/test", HTTP_POST, handlePrintTest);
-  server.on("/api/print/slip", HTTP_POST, handlePrintSlip);
-  server.on("/api/print/daily", HTTP_POST, handlePrintDaily);
-  server.on("/api/settings/printer", HTTP_POST, handleSavePrinterSettings);
 
-  server.on("/api/settings/display", HTTP_POST, []() {
-    if (!requireAuth()) return;
-    publicDisplayEnabled = (server.arg("enabled") == "1");
-    preferences.begin("sys_cfg", false);
-    preferences.putBool("pub_disp", publicDisplayEnabled);
-    preferences.end();
-    sendJson(true, publicDisplayEnabled
-                     ? "เปิดหน้าจอสาธารณะแล้ว เปิดดูได้ที่ /display"
-                     : "ปิดหน้าจอสาธารณะแล้ว ผู้ที่ไม่ได้เข้าสู่ระบบจะเปิดหน้านี้ไม่ได้");
+  server.on("/api/system/health", HTTP_GET, []() {
+    DynamicJsonDocument doc(256);
+    doc["temp"] = String(getChipTemperature(), 1);
+    doc["cpu"]  = String(calculateCpuLoad(), 1);
+    doc["heap"] = ESP.getFreeHeap() / 1024;
+    doc["uptime"] = millis() / 1000;
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json; charset=utf-8", res);
   });
 
   server.on("/api/settings/time", HTTP_POST, []() {
-    if (!requireAuth()) return;
-    int sh = 0, sm = 0, eh = 0, em = 0;
+    if (!isAuthenticated()) { redirectToLogin(); return; }
+    timeWindowEnabled = (server.arg("enabled") == "1");
     String startStr = server.arg("start");
     String endStr = server.arg("end");
-    if (sscanf(startStr.c_str(), "%d:%d", &sh, &sm) != 2 ||
-        sscanf(endStr.c_str(), "%d:%d", &eh, &em) != 2 ||
-        sh < 0 || sh > 23 || eh < 0 || eh > 23 || sm < 0 || sm > 59 || em < 0 || em > 59) {
-      sendJson(false, "รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM)");
-      return;
-    }
-    if ((sh * 60 + sm) >= (eh * 60 + em)) {
-      sendJson(false, "เวลาเปิดต้องมาก่อนเวลาปิด");
-      return;
-    }
-
-    timeWindowEnabled = (server.arg("enabled") == "1");
-    serviceStartHour = sh; serviceStartMin = sm;
-    serviceEndHour = eh;  serviceEndMin = em;
+    sscanf(startStr.c_str(), "%d:%d", &serviceStartHour, &serviceStartMin);
+    sscanf(endStr.c_str(), "%d:%d", &serviceEndHour, &serviceEndMin);
 
     preferences.begin("sys_cfg", false);
     preferences.putBool("win_en", timeWindowEnabled);
@@ -2583,30 +1722,92 @@ void setup() {
     preferences.putInt("end_m", serviceEndMin);
     preferences.end();
 
-    renderHostPage(true);
-    sendJson(true, "บันทึกกำหนดเวลาให้บริการเรียบร้อยแล้ว");
+    sendAlert("Settings Saved Successfully!", "/");
+  });
+
+  server.on("/save-shops", HTTP_POST, []() {
+    if (!isAuthenticated()) { redirectToLogin(); return; }
+    for (int i = 0; i < 4; i++) {
+      shops[i].name = server.arg("sname" + String(i));
+      shops[i].vendor = server.arg("vname" + String(i));
+    }
+    saveShopsToFS(); renderHostPage(true); sendAlert("Vendors Saved Successfully!", "/");
+  });
+
+  server.on("/bind-temp", HTTP_POST, []() {
+    if (!isAuthenticated()) { redirectToLogin(); return; }
+    String id = server.arg("id"); String tempUid = server.arg("uid"); tempUid.trim();
+    for (auto& s : db) {
+      if (s.studentId == id) {
+        if (s.originalUid == "") s.originalUid = s.uid;
+        s.uid = tempUid;
+        s.isTempCard = true;
+        break;
+      }
+    }
+    saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Assigned Successfully!", "/");
+  });
+
+  server.on("/manual-claim", HTTP_POST, []() {
+    if (!isAuthenticated()) { redirectToLogin(); return; }
+    String id = server.arg("id"); int station = server.arg("station").toInt();
+    for (auto& s : db) {
+      if (s.studentId == id && !s.claimed) {
+        s.claimed = true; s.station = station; s.claimTime = getRealTimeStr(); s.refNo = generateRefNo(station);
+        lastScannedUID = s.uid; lastScannedStudentId = s.studentId;
+        lastScannedStation = station; lastScannedStatus = "APPROVED";
+        lastScannedRef = s.refNo;
+        appendLogToFS(s.studentId, s.fullName, s.uid, s.refNo, s.claimTime, station, s.isTempCard ? "Temp Card" : "Normal");
+        
+        if (s.isTempCard) {
+          if (s.originalUid != "") { s.uid = s.originalUid; s.originalUid = ""; }
+          else { s.uid = ""; }
+          saveDatabaseToFS();
+        }
+        break;
+      }
+    }
+    renderHostPage(true); sendAlert("Manual Claim Approved Successfully!", "/");
+  });
+
+  server.on("/reset", HTTP_POST, []() {
+    if (!isAuthenticated()) { redirectToLogin(); return; }
+    if (LittleFS.exists("/daily_log.csv")) {
+      DateTime now = rtc.now();
+      char arcName[40];
+      snprintf(arcName, sizeof(arcName), "/arc_%04d%02d%02d_%02d%02d%02d.csv",
+               now.year(), now.month(), now.day(),
+               now.hour(), now.minute(), now.second());
+      File src = LittleFS.open("/daily_log.csv", "r");
+      File dst = LittleFS.open(arcName, "w");
+      if (src && dst) {
+        while (src.available()) dst.write(src.read());
+        src.close(); dst.close();
+      }
+      LittleFS.remove("/daily_log.csv");
+    }
+
+    for (auto& s : db) {
+      if (s.originalUid != "") {
+        s.uid = s.originalUid;
+        s.originalUid = "";
+      }
+      s.claimed = false; s.claimTime = "-"; s.refNo = "-"; s.station = 0; s.isTempCard = false;
+    }
+    saveDatabaseToFS();
+    lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedStation = 0; lastScannedStatus = "RESET"; lastScannedRef = "-";
+    renderHostPage(true); sendAlert("Daily Reset & Archived Successfully!", "/");
   });
 
   server.on("/upload", HTTP_POST, mergeImportedStudents, handleFileUpload);
 
-  // เบราว์เซอร์ขอ favicon เองทุกครั้ง ถ้าปล่อยให้ตกไปที่ onNotFound จะกลายเป็น
-  // การโหลดหน้าล็อกอินทั้งหน้ามาเป็นไอคอน เปลืองทั้งเวลาและแรมของแม่ข่าย
-  server.on("/favicon.ico", HTTP_GET, []() { server.send(204, "image/x-icon", ""); });
-
-  // ทุก URL ที่ไม่รู้จักถูกพาไปหน้าล็อกอิน ซึ่งเป็นกลไกที่ทำให้โทรศัพท์และคอมพิวเตอร์
-  // เด้งหน้าต่าง "เข้าสู่ระบบเครือข่าย" ขึ้นมาเองเมื่อเชื่อมต่อ Wi-Fi ของแม่ข่าย
-  // ใช้ URL แบบเต็มเพราะตัวตรวจจับของบางระบบปฏิบัติการดูโฮสต์ในส่วนหัว Location
-  server.onNotFound(handleCaptivePortal);
+  server.on("/generate_204", HTTP_GET, []() { server.sendHeader("Location", "/login", true); server.send(302, "text/plain", ""); });
+  server.on("/hotspot-detect.html", HTTP_GET, []() { server.sendHeader("Location", "/login", true); server.send(302, "text/plain", ""); });
+  server.onNotFound([]() { server.sendHeader("Location", "/login", true); server.send(302, "text/plain", ""); });
 
   server.begin();
-
-  // เริ่มสแต็กเครื่องพิมพ์ **หลัง** เว็บเซิร์ฟเวอร์ขึ้นแล้วเท่านั้น
-  // ของเดิมเรียกก่อนเปิด Wi-Fi ซึ่งถ้า usb_host_install() ค้างหรือแพนิก
-  // จะไม่มีชื่อ Wi-Fi โผล่มาเลยและเข้าไปแก้อะไรไม่ได้ทั้งสิ้น
-  printerBegin();
-
   playBootAnimation();
-  drawBootNetworkStatus(apStarted);
+  showBootNetworkStatus();
 
   for (int i = 1; i <= 4; i++) {
     HostResponsePacket beacon = {};
@@ -2618,14 +1819,12 @@ void setup() {
     strcpy(beacon.status, "ONLINE");
     strncpy(beacon.claimTime, getRealTimeStr().c_str(), sizeof(beacon.claimTime) - 1);
     beacon.servedCount = getStationServedCount(i);
-    fillSystemSummary(beacon);
     sendToStation(i, (uint8_t *)&beacon, sizeof(HostResponsePacket));
     delay(20);
   }
 
   lastActivity = millis();
   renderHostPage(true);
-  broadcastStationConfig();
 }
 
 // ============================================================================
@@ -2636,20 +1835,10 @@ void loop() {
   server.handleClient();
   handleHostButton();
   calculateCpuLoad();
-  printerLoop();      // ทยอยปล่อยข้อมูลสลิปออกทีละก้อน ไม่บล็อกลูปหลัก
-  serviceRosterPush();// ทยอยผลักบัญชีสิทธิ์ไปยังสถานีที่ยังตามไม่ทัน
 
   ScanQueueItem item;
   if (scanQueue != NULL && xQueueReceive(scanQueue, &item, 0) == pdTRUE) {
     processScanRequest(item.mac, item.pkt, item.rssi);
-  }
-
-  // ถ้าชิปรายงานว่าคำตอบการสแกนส่งไม่ถึง ให้ยิงซ้ำทันทีโดยไม่ต้องรอสถานีถามใหม่
-  if (lastRespRetryLeft > 0 && respSendFailed && (long)(millis() - lastRespRetryAt) >= 0) {
-    respSendFailed = false;
-    lastRespRetryLeft--;
-    lastRespRetryAt = millis() + 260;
-    sendToStation(lastRespStation, (uint8_t *)&lastRespPacket, sizeof(HostResponsePacket));
   }
 
   for (int i = 0; i < 4; i++) {
@@ -2664,27 +1853,22 @@ void loop() {
       strcpy(ack.status, "ONLINE");
       strncpy(ack.claimTime, getRealTimeStr().c_str(), sizeof(ack.claimTime) - 1);
       ack.servedCount = getStationServedCount(i + 1);
-      fillSystemSummary(ack);
       sendToStation(i + 1, (uint8_t *)&ack, sizeof(HostResponsePacket));
-      // ย้ำโหมดการแสดงผลทุกครั้งที่ตอบ heartbeat เพื่อให้สถานีที่เพิ่งบูต
-      // หรือที่พลาดคำสั่ง broadcast ไป กลับมาตรงกับแม่ข่ายภายในไม่กี่วินาที
-      sendStationConfig(i + 1);
+      sendStationTheme(i + 1);
     }
   }
 
-  if (isLiveScanDisplaying && (long)(millis() - liveScanHoldUntil) > 0) {
+  if (isLiveScanDisplaying && millis() > liveScanHoldUntil) {
     isLiveScanDisplaying = false;
     renderHostPage(true);
   }
 
-  if (isHostScreenOn && !isLiveScanDisplaying && !isScreensaverActive && !isCreditActive &&
-      (millis() - lastActivity >= TIMEOUT_SCREENSAVER)) {
-    isScreensaverActive = true;
+  if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && (millis() - lastActivity >= TIMEOUT_SCREENSAVER)) {
+    isScreensaverActive = true; 
     renderScreensaver(true);
-    announceHostMode();
   }
 
-  if (isHostScreenOn && !isLiveScanDisplaying && (isScreensaverActive || currentHostPage == 0 || currentHostPage == 1) && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
+  if (!isLiveScanDisplaying && (isScreensaverActive || currentHostPage == 0 || currentHostPage == 1) && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
     lastClockRefresh = millis();
     if (isScreensaverActive) renderScreensaver(false);
     else renderHostPage(false);
@@ -2697,7 +1881,7 @@ void loop() {
         stationNodes[i].isOnline = false;
       }
     }
-    if (isHostScreenOn && !isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
+    if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
       renderHostPage(false);
     }
   }
