@@ -1,7 +1,7 @@
 /**
  * @file      HostScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
- * @version   113.2.0
+ * @version   113.3.0
  * @date      2026-09-22
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -21,6 +21,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร ใช้การเขียนทับที่เดิมแทน จอไม่กะพริบทุกวินาทีแล้ว |
  * | 113.2.0 | 2026-09-22 | วาดซ้ำเฉพาะช่องที่ค่าเปลี่ยน ยอดรายร้านและยอดบนหน้าพักจออัปเดตเองแล้ว |
  * | 113.0.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก แล้วออกแบบหน้าจอใหม่ให้เรียบง่าย ตัวอักษรน้อย แบ่งช่องชัดเจน และรองรับสองโหมดสี |
  * | 107.0.1 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
@@ -30,6 +31,38 @@
  */
 
 #pragma once
+
+#include <stdarg.h>   // drawFixedText รับอาร์กิวเมนต์แบบ printf
+
+// [113.3.0] เพิ่ม: วาดข้อความทับที่เดิมโดยไม่ต้องล้างพื้นก่อน
+//
+// ต้นเหตุของการกะพริบคือลำดับ "ล้างพื้น แล้วค่อยเขียนตัวอักษร"
+// ระหว่างสองจังหวะนั้นจอว่างเปล่าจริง ๆ ตาคนจึงเห็นเป็นการกะพริบทุกวินาที
+//
+// Adafruit GFX ลงสีพื้นให้ทุกตัวอักษรอยู่แล้วเมื่อกำหนดสีพื้นไว้ด้วย
+// (setTextColor สองอาร์กิวเมนต์) ข้อความใหม่จึงเขียนทับของเดิมได้ในจังหวะเดียว
+// ไม่มีช่วงที่จอว่าง ไม่ต้องเรียก fillRect เลย
+//
+// เงื่อนไขเดียวคือความยาวต้องคงที่ จึงเติมช่องว่างท้ายข้อความให้ครบ width เสมอ
+// ไม่งั้นตัวอักษรเก่าที่ยาวกว่าจะค้างอยู่ เช่น 187 เปลี่ยนเป็น 9 แล้วเหลือ 87
+// ใช้ %-*s ซึ่งเติมให้ครบแต่ไม่ตัดทิ้ง ค่าที่ยาวเกินคาดจึงยังแสดงครบ ไม่โกหกตัวเลข
+void drawFixedText(int x, int y, uint8_t size, uint16_t fg, uint16_t bg,
+                   int width, const char* fmt, ...) {
+  char raw[64];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(raw, sizeof(raw), fmt, args);
+  va_end(args);
+
+  char padded[72];
+  snprintf(padded, sizeof(padded), "%-*s", width, raw);
+
+  tft.setTextSize(size);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(x, y);
+  tft.print(padded);
+}
+
 
 // --- ชิ้นส่วนพื้นฐาน: การ์ด ป้าย แถบบน แถบล่าง ไอคอนแบตเตอรี่ ---
 void drawBentoCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor) {
@@ -238,6 +271,10 @@ void drawStatusDot(int cx, int cy, bool good) {
 void drawProgressBar(int x, int y, int w, int h, int pct) {
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
+  // [113.3.0] แก้: สี่เหลี่ยมมุมโค้งไม่ลงสีที่มุมทั้งสี่ ค่าเก่าจึงค้างอยู่ตรงนั้น
+  //           ล้างกรอบสี่เหลี่ยมเต็มก่อนหนึ่งครั้ง แถบนี้วาดเฉพาะตอนยอดเปลี่ยน
+  //           ไม่ได้วาดทุกวินาที จึงไม่ทำให้กะพริบ
+  tft.fillRect(x, y, w, h, getTftCardBg());
   tft.fillRoundRect(x, y, w, h, h / 2, getTftBg());
   int fillW = (w * pct) / 100;
   if (fillW < 2 && pct > 0) fillW = 2;
@@ -291,51 +328,31 @@ void renderHostPage(bool fullRedraw) {
 
     // ช่องซ้าย: จำนวนจานที่จ่ายไปแล้ว พร้อมแถบความคืบหน้า
     if (fullRedraw || usedCount != lastUsed || (int)db.size() != lastTotal) {
-      tft.fillRect(12, 54, 140, 60, getTftCardBg());
-      tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setTextSize(4);
-      tft.setCursor(14, 56);
-      tft.printf("%d", usedCount);
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(14, 92);
-      tft.printf("of %d students", (int)db.size());
+      drawFixedText(14, 56, 4, getTftTextMain(), getTftCardBg(), 4, "%d", usedCount);
+      drawFixedText(14, 92, 1, getTftTextMuted(), getTftCardBg(), 20,
+                    "of %d students", (int)db.size());
       int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
       drawProgressBar(14, 106, 134, 6, pct);
 
       // ช่องขวา: เป็นเงินเท่าไร เปลี่ยนพร้อมกันกับจำนวนจานเสมอ
-      tft.fillRect(170, 54, 140, 60, getTftCardBg());
-      tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-      tft.setTextSize(4);
-      tft.setCursor(172, 56);
-      tft.printf("%d", usedCount * 35);
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(172, 92);
-      tft.print("35 baht per student");
+      drawFixedText(172, 56, 4, getTftAccentGreen(), getTftCardBg(), 5, "%d", usedCount * 35);
+      drawFixedText(172, 92, 1, getTftTextMuted(), getTftCardBg(), 20, "35 baht per student");
 
       lastUsed = usedCount;
       lastTotal = (int)db.size();
     }
 
-    // ช่องล่าง: นาฬิกาเดินทุกวินาที จึงล้างเฉพาะกรอบของนาฬิกา ไม่ล้างทั้งการ์ด
+    // ช่องล่าง: นาฬิกาเดินทุกวินาที จึงเป็นจุดที่คนเห็นการกะพริบชัดที่สุด
+    // เขียนทับที่เดิมอย่างเดียว ไม่ล้างพื้นก่อน รูปแบบ HH:MM:SS ยาวคงที่แปดตัวเสมอ
     String nowClock = getTimeOnlyStr();
     if (fullRedraw || nowClock != lastClock) {
-      tft.fillRect(12, 148, 196, 34, getTftCardBg());
-      tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setTextSize(4);
-      tft.setCursor(14, 150);
-      tft.print(nowClock);
+      drawFixedText(14, 150, 4, getTftTextMain(), getTftCardBg(), 8, "%s", nowClock.c_str());
       lastClock = nowClock;
     }
 
     String nowDate = getDateFormattedStr();
     if (fullRedraw || nowDate != lastDate) {
-      tft.fillRect(12, 184, 190, 12, getTftCardBg());
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(14, 186);
-      tft.print(nowDate);
+      drawFixedText(14, 186, 1, getTftTextMuted(), getTftCardBg(), 24, "%s", nowDate.c_str());
       lastDate = nowDate;
     }
 
@@ -388,50 +405,61 @@ void renderHostPage(bool fullRedraw) {
       //           ย้ายออกมาข้างนอก แล้ววาดซ้ำเฉพาะตอนค่าเปลี่ยนจริง
       static int lastShopCount[4] = {-1, -1, -1, -1};
       if (fullRedraw || shopCounts[i] != lastShopCount[i]) {
-        tft.fillRect(x + 6, y + 34, w - 12, 30, getTftCardBg());
-
         // ยอดของร้าน ตัวเลขจานใหญ่สุดในการ์ด อ่านได้จากอีกฝั่งของโรงอาหาร
-        tft.setTextColor(getTftTextMain(), getTftCardBg());
-        tft.setTextSize(3);
-        tft.setCursor(x + 8, y + 36);
-        tft.printf("%d", shopCounts[i]);
-
-        int numW = String(shopCounts[i]).length() * 18;
-        tft.setTextSize(1);
-        tft.setTextColor(getTftTextMuted(), getTftCardBg());
-        tft.setCursor(x + 14 + numW, y + 38);
-        tft.print("meals");
-        tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-        tft.setCursor(x + 14 + numW, y + 52);
-        tft.printf("%d baht", shopCounts[i] * 35);
+        // ตัวเลขกว้างคงที่สามหลัก ป้ายกำกับจึงอยู่กับที่ ไม่ขยับตามจำนวนหลัก
+        drawFixedText(x + 8, y + 36, 3, getTftTextMain(), getTftCardBg(), 3,
+                      "%d", shopCounts[i]);
+        drawFixedText(x + 68, y + 38, 1, getTftTextMuted(), getTftCardBg(), 6, "meals");
+        drawFixedText(x + 68, y + 52, 1, getTftAccentGreen(), getTftCardBg(), 10,
+                      "%d baht", shopCounts[i] * 35);
 
         lastShopCount[i] = shopCounts[i];
       }
 
-      // สองแถวนี้วาดซ้ำทุกรอบ จึงล้างพื้นที่ของตัวเองก่อน และต้องไม่ทับชื่อร้าน
-      tft.fillRect(x + 8, y + 20, 74, 12, getTftCardBg());
-      drawStatusDot(x + 12, y + 25, stationNodes[i].isOnline);
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(x + 22, y + 22);
-      tft.printf("Point %d", i + 1);
+      // [113.3.0] แก้: สองแถวนี้เคยล้างพื้นแล้ววาดใหม่ทุกวินาทีแม้ค่าไม่เปลี่ยน
+      //           ซึ่งเป็นต้นเหตุการกะพริบบนหน้านี้ ตอนนี้แตะเฉพาะตอนค่าเปลี่ยนจริง
+      static int lastOnlineState[4] = {-1, -1, -1, -1};
+      static int lastBars[4]  = {-1, -1, -1, -1};
+      static int lastBatt[4]  = {-1, -1, -1, -1};
+      static int lastDots[4]  = {-1, -1, -1, -1};
 
-      tft.fillRect(x + 8, y + 66, w - 16, 14, getTftCardBg());
-      if (stationNodes[i].isOnline) {
-        int sPct = getHostBatteryPercentage(stationNodes[i].systemVoltage);
-        drawSignalBars(x + 8, y + 68, stationNodes[i].rssi, true, getTftCardBg());
-        tft.setTextColor(getTftTextMuted(), getTftCardBg());
-        tft.setCursor(x + 40, y + 70);
-        tft.print("signal");
-        tft.setCursor(x + 92, y + 70);
-        tft.printf("%d%%", sPct);
-        drawMiniBattery(x + 120, y + 68, sPct);
-      } else {
-        String wait = "Waiting";
-        for (int d = 0; d <= waitDots; d++) wait += ".";
-        tft.setTextColor(getTftAccentRose(), getTftCardBg());
-        tft.setCursor(x + 8, y + 70);
-        tft.print(wait);
+      bool online = stationNodes[i].isOnline;
+      // นับจำนวนขีดจากคุณภาพสัญญาณ ใช้เกณฑ์เดียวกับ drawSignalBars
+      // เทียบด้วยจำนวนขีด ไม่ใช่ค่า dBm ดิบ ๆ จอจะได้ไม่วาดใหม่ทุกครั้งที่สัญญาณขยับนิดเดียว
+      int  q      = calculateSignalQuality(stationNodes[i].rssi);
+      int  bars   = !online ? 0 : (q >= 85 ? 4 : q >= 60 ? 3 : q >= 35 ? 2 : 1);
+      int  batt   = online ? getHostBatteryPercentage(stationNodes[i].systemVoltage) : 0;
+      bool stateChanged = (fullRedraw || (int)online != lastOnlineState[i]);
+
+      if (stateChanged) {
+        // ชื่อ "Point N" ไม่เคยเปลี่ยน วาดตอนเริ่มกับตอนสลับสถานะก็พอ
+        drawStatusDot(x + 12, y + 25, online);
+        drawFixedText(x + 22, y + 22, 1, getTftTextMuted(), getTftCardBg(), 9,
+                      "Point %d", i + 1);
+        lastOnlineState[i] = (int)online;
+        lastBars[i] = -1;   // บังคับให้แถวล่างวาดใหม่ เพราะเพิ่งเปลี่ยนรูปแบบ
+        lastBatt[i] = -1;
+        lastDots[i] = -1;
+        tft.fillRect(x + 8, y + 66, w - 16, 14, getTftCardBg());
+      }
+
+      if (online) {
+        if (stateChanged || bars != lastBars[i]) {
+          drawSignalBars(x + 8, y + 68, stationNodes[i].rssi, true, getTftCardBg());
+          drawFixedText(x + 40, y + 70, 1, getTftTextMuted(), getTftCardBg(), 7, "signal");
+          lastBars[i] = bars;
+        }
+        if (stateChanged || batt != lastBatt[i]) {
+          drawFixedText(x + 92, y + 70, 1, getTftTextMuted(), getTftCardBg(), 4, "%d%%", batt);
+          drawMiniBattery(x + 120, y + 68, batt);
+          lastBatt[i] = batt;
+        }
+      } else if (stateChanged || waitDots != lastDots[i]) {
+        // จุดไข่ปลาวิ่งบอกว่าเครื่องยังตามหาอยู่ ความยาวคงที่จึงไม่ต้องล้างพื้น
+        char wait[12] = "Waiting";
+        for (int d = 0; d <= waitDots; d++) strcat(wait, ".");
+        drawFixedText(x + 8, y + 70, 1, getTftAccentRose(), getTftCardBg(), 11, "%s", wait);
+        lastDots[i] = waitDots;
       }
     }
   }
@@ -508,27 +536,23 @@ void renderHostPage(bool fullRedraw) {
     int heapKB = ESP.getFreeHeap() / 1024;
 
     if (fullRedraw || (int)db.size() != lastDbSize || (int)adminUsers.size() != lastAdmins) {
-      tft.fillRect(170, 142, 138, 30, getTftCardBg());
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setCursor(172, 148); tft.printf("Students %d", (int)db.size());
-      tft.setCursor(172, 164); tft.printf("Staff    %d of 3", (int)adminUsers.size());
+      drawFixedText(172, 148, 1, getTftTextMain(), getTftCardBg(), 22,
+                    "Students %d", (int)db.size());
+      drawFixedText(172, 164, 1, getTftTextMain(), getTftCardBg(), 22,
+                    "Staff    %d of 3", (int)adminUsers.size());
       lastDbSize = (int)db.size();
       lastAdmins = (int)adminUsers.size();
     }
     if (fullRedraw || tempC != lastTempC) {
-      tft.fillRect(170, 176, 138, 12, getTftCardBg());
-      tft.setTextSize(1);
-      tft.setTextColor((cTemp < 65.0f) ? getTftTextMain() : getTftAccentYellow(), getTftCardBg());
-      tft.setCursor(172, 180); tft.printf("Chip     %d C", tempC);
+      drawFixedText(172, 180, 1,
+                    (cTemp < 65.0f) ? getTftTextMain() : getTftAccentYellow(),
+                    getTftCardBg(), 22, "Chip     %d C", tempC);
       lastTempC = tempC;
     }
     // หน่วยความจำว่างแกว่งเป็นไบต์ตลอด จึงถือว่าเปลี่ยนเมื่อขยับเกินสองกิโล
     if (fullRedraw || abs(heapKB - lastHeapKB) >= 2) {
-      tft.fillRect(170, 188, 138, 12, getTftCardBg());
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(172, 192); tft.printf("Free memory %d KB", heapKB);
+      drawFixedText(172, 192, 1, getTftTextMuted(), getTftCardBg(), 22,
+                    "Free memory %d KB", heapKB);
       lastHeapKB = heapKB;
     }
   }
@@ -558,30 +582,16 @@ void renderScreensaver(bool fullRedraw) {
     tft.setCursor(160 - (int)dateStr.length() * 3, 124);
     tft.print(dateStr);
 
-    // สรุปยอดวันนี้บรรทัดเดียว พอให้รู้ว่าถึงไหนแล้ว
-    char line[48];
-    snprintf(line, sizeof(line), "%d of %d served   %d baht",
-             usedCount, (int)db.size(), usedCount * 35);
-    tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(160 - (int)strlen(line) * 3, 152);
-    tft.print(line);
-
-    int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
-    drawProgressBar(60, 170, 200, 6, pct);
-
+    // สรุปยอดวันนี้กับแถบความคืบหน้า วาดอยู่ที่เดียวข้างล่าง
+    // ถ้าวาดตรงนี้ด้วยจะได้สองบรรทัดคนละตำแหน่ง
     drawBentoBottomBar("Tap a card or press the button to wake");
   }
 
-  // นาฬิกาตัวโต วาดซ้ำเฉพาะตอนเวลาเปลี่ยน จอจะได้ไม่กระพริบ
+  // นาฬิกาตัวโตบนหน้าพักจอ ยาวคงที่แปดตัว จึงเขียนทับที่เดิมได้เลย ไม่ต้องล้างพื้น
   String curTime = getTimeOnlyStr();
   if (fullRedraw || curTime != lastHostClock) {
     lastHostClock = curTime;
-    tft.fillRect(30, 60, 260, 52, getTftCardBg());
-    tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.setTextSize(5);
-    tft.setCursor(160 - (int)curTime.length() * 15, 68);
-    tft.print(curTime);
+    drawFixedText(40, 68, 5, getTftTextMain(), getTftCardBg(), 8, "%s", curTime.c_str());
   }
 
   // [113.2.0] แก้: ยอดวันนี้บนหน้าพักจอเคยวาดครั้งเดียวตอนเข้าโหมด
@@ -589,14 +599,8 @@ void renderScreensaver(bool fullRedraw) {
   static int lastSaverUsed = -1;
   if (fullRedraw || usedCount != lastSaverUsed) {
     lastSaverUsed = usedCount;
-    char line[48];
-    snprintf(line, sizeof(line), "%d of %d served   %d baht",
-             usedCount, (int)db.size(), usedCount * 35);
-    tft.fillRect(24, 144, 272, 12, getTftCardBg());
-    tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(160 - (int)strlen(line) * 3, 146);
-    tft.print(line);
+    drawFixedText(62, 146, 1, getTftAccentGreen(), getTftCardBg(), 34,
+                  "%d of %d served   %d baht", usedCount, (int)db.size(), usedCount * 35);
     int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
     drawProgressBar(60, 170, 200, 6, pct);
   }

@@ -15,21 +15,17 @@ function hostTodayFull(used, total, clock, date, open) {
   hostTodayOpen(open);
 }
 function hostTodayServed(used, total) {
-  fillRect(12, 54, 140, 60, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(14, 56); print(String(used));
-  setTextSize(1); setTextColor(MUTED(), CARD()); setCursor(14, 92); print('of ' + total + ' students');
+  drawFixedText(14, 56, 4, TEXT(), CARD(), 4, String(used));
+  drawFixedText(14, 92, 1, MUTED(), CARD(), 20, 'of ' + total + ' students');
   drawProgressBar(14, 106, 134, 6, Math.floor(used * 100 / total));
-  fillRect(170, 54, 140, 60, CARD());
-  setTextColor(GREEN(), CARD()); setTextSize(4); setCursor(172, 56); print(String(used * 35));
-  setTextSize(1); setTextColor(MUTED(), CARD()); setCursor(172, 92); print('35 baht per student');
+  drawFixedText(172, 56, 4, GREEN(), CARD(), 5, String(used * 35));
+  drawFixedText(172, 92, 1, MUTED(), CARD(), 20, '35 baht per student');
 }
 function hostTodayClock(clock) {
-  fillRect(12, 148, 196, 34, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(14, 150); print(clock);
+  drawFixedText(14, 150, 4, TEXT(), CARD(), 8, clock);
 }
 function hostTodayDate(date) {
-  fillRect(12, 184, 190, 12, CARD());
-  setTextSize(1); setTextColor(MUTED(), CARD()); setCursor(14, 186); print(date);
+  drawFixedText(14, 186, 1, MUTED(), CARD(), 24, date);
 }
 function hostTodayOpen(open) {
   const hours = '10:00-13:30';
@@ -71,13 +67,10 @@ function hostShopsFull(counts) {
 }
 function hostShopValue(i, n) {
   const coords = [[6,32],[164,32],[6,122],[164,122]];
-  const x = coords[i][0], y = coords[i][1], w = 150;
-  fillRect(x + 6, y + 34, w - 12, 30, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(3); setCursor(x + 8, y + 36); print(String(n));
-  const numW = String(n).length * 18;
-  setTextSize(1); setTextColor(MUTED(), CARD());
-  setCursor(x + 14 + numW, y + 38); print('meals');
-  setTextColor(GREEN(), CARD()); setCursor(x + 14 + numW, y + 52); print(n * 35 + ' baht');
+  const x = coords[i][0], y = coords[i][1];
+  drawFixedText(x + 8, y + 36, 3, TEXT(), CARD(), 3, String(n));
+  drawFixedText(x + 68, y + 38, 1, MUTED(), CARD(), 6, 'meals');
+  drawFixedText(x + 68, y + 52, 1, GREEN(), CARD(), 10, n * 35 + ' baht');
 }
 
 /* ---------- station หน้าแรก ---------- */
@@ -94,13 +87,10 @@ function stnStandbyFull(served, clock) {
   drawStationBottomBar('Page 1/3    Press the button for the next page');
 }
 function stnStandbyServed(served) {
-  fillRect(26, 188, 120, 18, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(2); setCursor(28, 191); print(String(served));
+  drawFixedText(28, 191, 2, TEXT(), CARD(), 4, String(served));
 }
 function stnStandbyClock(clock) {
-  fillRect(180, 184, 124, 18, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(2);
-  setCursor(292 - clock.length * 12, 186); print(clock);
+  drawFixedText(196, 186, 2, TEXT(), CARD(), 8, clock);
 }
 
 /* ---------- station หน้าสอง ---------- */
@@ -113,18 +103,15 @@ function stnStatsFull(served, clock, online) {
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(14, 174); print('35 baht per student');
   drawStationCard(164, 30, 150, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(172, 40); print('THIS POINT');
-  setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(172, 62); print(String(ST_ID));
+  drawFixedText(172, 62, 4, TEXT(), CARD(), 3, String(ST_ID));
   stnStatsPill(online);
   stnStatsClock(clock);
   drawStationBottomBar('Page 2/3    Press the button for the next page');
 }
 function stnStatsServed(served) {
-  fillRect(12, 60, 140, 36, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(14, 62); print(String(served));
-  fillRect(12, 116, 140, 26, CARD());
-  setTextColor(GREEN(), CARD()); setTextSize(3); setCursor(14, 118); print(String(served * 35));
-  setTextSize(1); setTextColor(MUTED(), CARD());
-  setCursor(14 + String(served * 35).length * 18 + 6, 134); print('baht');
+  drawFixedText(14, 62, 4, TEXT(), CARD(), 3, String(served));
+  drawFixedText(14, 118, 3, GREEN(), CARD(), 5, String(served * 35));
+  drawFixedText(110, 134, 1, MUTED(), CARD(), 5, 'baht');
 }
 function stnStatsPill(online) {
   fillRect(172, 118, 96, 20, CARD());
@@ -132,15 +119,14 @@ function stnStatsPill(online) {
                        online ? (dark ? 0x0000 : 0xFFFF) : 0xFFFF, online ? GREEN() : ROSE());
 }
 function stnStatsClock(clock) {
-  fillRect(170, 164, 138, 18, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(2); setCursor(172, 166); print(clock);
+  drawFixedText(172, 166, 2, TEXT(), CARD(), 8, clock);
 }
 
 window.CASES = [
   { id: 'host-today-served', full: () => hostTodayFull(9, 420, '11:47:05', 'Tue, 22 Sep 2026', true),
     start: () => hostTodayFull(187, 420, '11:47:05', 'Tue, 22 Sep 2026', true),
     patch: () => hostTodayServed(9, 420) },
-  { id: 'host-today-clock', full: () => hostTodayFull(187, 420, '9:05:01', 'Tue, 22 Sep 2026', true),
+  { id: 'host-today-clock', perSecond: true, full: () => hostTodayFull(187, 420, '9:05:01', 'Tue, 22 Sep 2026', true),
     start: () => hostTodayFull(187, 420, '11:47:05', 'Tue, 22 Sep 2026', true),
     patch: () => hostTodayClock('9:05:01') },
   { id: 'host-today-closed', full: () => hostTodayFull(187, 420, '11:47:05', 'Tue, 22 Sep 2026', false),
@@ -152,7 +138,7 @@ window.CASES = [
   { id: 'stn-standby-served', full: () => stnStandbyFull(5, '11:47:05'),
     start: () => stnStandbyFull(72, '11:47:05'),
     patch: () => stnStandbyServed(5) },
-  { id: 'stn-standby-clock', full: () => stnStandbyFull(72, '9:05:01'),
+  { id: 'stn-standby-clock', perSecond: true, full: () => stnStandbyFull(72, '9:05:01'),
     start: () => stnStandbyFull(72, '11:47:05'),
     patch: () => stnStandbyClock('9:05:01') },
   { id: 'stn-stats-served', full: () => stnStatsFull(5, '11:47:05', true),
@@ -161,7 +147,7 @@ window.CASES = [
   { id: 'stn-stats-offline', full: () => stnStatsFull(72, '11:47:05', false),
     start: () => stnStatsFull(72, '11:47:05', true),
     patch: () => stnStatsPill(false) },
-  { id: 'stn-stats-clock', full: () => stnStatsFull(72, '9:05:01', true),
+  { id: 'stn-stats-clock', perSecond: true, full: () => stnStatsFull(72, '9:05:01', true),
     start: () => stnStatsFull(72, '11:47:05', true),
     patch: () => stnStatsClock('9:05:01') },
 ];

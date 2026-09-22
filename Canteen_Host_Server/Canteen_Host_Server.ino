@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.2.0
+ * @version   113.3.0
  * @date      2026-09-22
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.3.0 | 2026-09-22 | ตามการแก้เรื่องกะพริบของ HostScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.2.0 | 2026-09-22 | รีเฟรชหน้าจอทุกหน้า ไม่ใช่แค่สองหน้าแรก หน้า SYSTEM จึงไม่ค้างอีกต่อไป |
  * | 113.1.0 | 2026-09-22 | หน้าเว็บเป็นสองภาษา ไทย/อังกฤษ และเสิร์ฟสคริปต์พร้อม charset |
  * | 113.0.0 | 2026-09-22 | เริ่มใหม่จากต้นฉบับ แยกไฟล์จอและเว็บออกมา คุมการแสดงผลของทุกจุดบริการ เพิ่ม /api/dashboard เปลี่ยนเส้นทางที่แก้ข้อมูลเป็น POST ซ่อม CSV โทเคนเซสชัน และเลขอ้างอิงบนจอ |
@@ -59,7 +60,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.2.0"
+#define APP_VERSION         "113.3.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"

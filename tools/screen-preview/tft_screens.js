@@ -52,6 +52,7 @@ function drawCardLabel(x, y, t) { setTextColor(MUTED(), CARD()); setTextSize(1);
 function drawStatusDot(cx, cy, good) { fillCircle(cx, cy, 4, good ? GREEN() : ROSE()); }
 function drawProgressBar(x, y, w, h, pct) {
   pct = Math.max(0, Math.min(100, pct));
+  fillRect(x, y, w, h, CARD());
   fillRoundRect(x, y, w, h, h / 2, BG());
   let fw = Math.floor(w * pct / 100); if (fw < 2 && pct > 0) fw = 2;
   if (fw > 0) fillRoundRect(x, y, fw, h, h / 2, GREEN());
@@ -151,13 +152,9 @@ function hostPage1() {
     setTextColor(TEXT(), CARD()); setTextSize(1);
     setCursor(x + 8, y + 7); print(fitLabel(names[i], 22));
 
-    setTextColor(TEXT(), CARD()); setTextSize(3);
-    setCursor(x + 8, y + 36); print(String(SHOP[i]));
-    const numW = String(SHOP[i]).length * 18;
-    setTextSize(1); setTextColor(MUTED(), CARD());
-    setCursor(x + 14 + numW, y + 38); print('meals');
-    setTextColor(GREEN(), CARD());
-    setCursor(x + 14 + numW, y + 52); print(SHOP[i] * 35 + ' baht');
+    drawFixedText(x + 8, y + 36, 3, TEXT(), CARD(), 3, String(SHOP[i]));
+    drawFixedText(x + 68, y + 38, 1, MUTED(), CARD(), 6, 'meals');
+    drawFixedText(x + 68, y + 52, 1, GREEN(), CARD(), 10, SHOP[i] * 35 + ' baht');
 
     fillRect(x + 8, y + 20, 74, 12, CARD());
     drawStatusDot(x + 12, y + 25, NODES[i].on);
@@ -249,9 +246,8 @@ function hostScreensaver() {
   drawBentoCard(20, 40, 280, 156, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1);
   setCursor(160 - DATE_H.length * 3, 124); print(DATE_H);
-  const line = USED + ' of ' + DB_TOTAL + ' served   ' + (USED * 35) + ' baht';
-  setTextColor(GREEN(), CARD()); setTextSize(1);
-  setCursor(160 - line.length * 3, 152); print(line);
+  drawFixedText(62, 146, 1, GREEN(), CARD(), 34,
+                USED + ' of ' + DB_TOTAL + ' served   ' + (USED * 35) + ' baht');
   drawProgressBar(60, 170, 200, 6, Math.floor(USED * 100 / DB_TOTAL));
   drawBentoBottomBar('Tap a card or press the button to wake');
   fillRect(30, 60, 260, 52, CARD());
@@ -342,17 +338,16 @@ function stStats() {
 
   drawStationCard(6, 30, 150, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(14, 40); print('SERVED TODAY');
-  setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(14, 62); print(String(ST_SERVED));
-  setTextColor(GREEN(), CARD()); setTextSize(3); setCursor(14, 118); print(String(ST_SERVED * 35));
-  setTextSize(1); setTextColor(MUTED(), CARD());
-  setCursor(14 + String(ST_SERVED * 35).length * 18 + 6, 134); print('baht');
+  drawFixedText(14, 62, 4, TEXT(), CARD(), 3, String(ST_SERVED));
+  drawFixedText(14, 118, 3, GREEN(), CARD(), 5, String(ST_SERVED * 35));
+  drawFixedText(110, 134, 1, MUTED(), CARD(), 5, 'baht');
   setTextColor(MUTED(), CARD()); setCursor(14, 174); print('35 baht per student');
 
   drawStationCard(164, 30, 150, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(172, 40); print('THIS POINT');
   setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(172, 62); print(String(ST_ID));
   drawStationPillBadge(172, 118, 96, 20, 'ONLINE', dark ? 0x0000 : 0xFFFF, GREEN());
-  setTextColor(TEXT(), CARD()); setTextSize(2); setCursor(172, 166); print(CLOCK);
+  drawFixedText(172, 166, 2, TEXT(), CARD(), 8, CLOCK);
 
   drawStationBottomBar('Page 2/3    Press the button for the next page');
 }
@@ -384,9 +379,8 @@ function stScreensaver() {
   drawStationCard(20, 36, 280, 162, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1);
   setCursor(160 - DATE_S.length * 3, 118); print(DATE_S);
-  const line = ST_SERVED + ' served today   ' + (ST_SERVED * 35) + ' baht';
-  setTextColor(GREEN(), CARD()); setTextSize(1);
-  setCursor(160 - line.length * 3, 146); print(line);
+  drawFixedText(62, 146, 1, GREEN(), CARD(), 32,
+                ST_SERVED + ' served today   ' + (ST_SERVED * 35) + ' baht');
   const line2 = 'battery ' + battPct(ST_V) + '%';
   setTextColor(MUTED(), CARD()); setCursor(160 - line2.length * 3, 168); print(line2);
   drawStationBottomBar('Tap your card or press the button to wake');
