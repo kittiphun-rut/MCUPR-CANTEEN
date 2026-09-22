@@ -26,6 +26,8 @@ release/07-h110.0.1-s120.0.0
 release/08-h110.0.2-s120.0.1
 release/09-h111.0.0-s120.0.1
 release/10-h111.1.0-s120.0.1
+release/11-h112.0.0-s121.0.0
+release/12-h113.0.0-s122.0.0
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -49,6 +51,15 @@ release/10-h111.1.0-s120.0.1
 | `release/08-h110.0.2-s120.0.1` | 110.0.2 | 120.0.1 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/08-h110.0.2-s120.0.1.zip) | [`b7dfc73`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/b7dfc734119d9352e1c4e2de58a9e684670a343c) | **แก้ให้คอมไพล์ผ่าน Arduino IDE** — เพิ่ม forward declaration ที่ขาดสองจุด ฟีเจอร์เท่ากับ `release/07` ทุกอย่าง<br><sub>22 ก.ย. 2026</sub> |
 | `release/09-h111.0.0-s120.0.1` | 111.0.0 | 120.0.1 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/09-h111.0.0-s120.0.1.zip) | [`4ade160`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/4ade160790e7f5dd9c22b044dd1ec9f31f60fb70) | **ปิดเครื่องพิมพ์สลิปเป็นค่าเริ่มต้น** เพื่อลดขนาดเฟิร์มแวร์ ฟีเจอร์เดิมคงไว้ครบทุกอย่าง เปิดกลับได้ด้วยการแก้ `#define` บรรทัดเดียว<br><sub>22 ก.ย. 2026</sub> |
 | `release/10-h111.1.0-s120.0.1` | 111.1.0 | 120.0.1 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/10-h111.1.0-s120.0.1.zip) | [ล่าสุดของ branch นี้](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/release/10-h111.1.0-s120.0.1) | **แยกไฟล์หลักให้เหลือ 2,674 บรรทัด** ย้ายส่วนวาดจอไป `HostDisplay.h` และเนื้อหาสลิปไป `HostSlips.h` เป็นการย้ายที่อยู่ล้วน ๆ ตรรกะไม่เปลี่ยน<br><sub>22 ก.ย. 2026</sub> |
+
+| `release/11-h112.0.0-s121.0.0` | 112.0.0 | 121.0.0 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/11-h112.0.0-s121.0.0.zip) | [`427e5d4`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/427e5d499f3dde2921b1fac6c9f8b9882c37a870) | **แก้ปัญหาชื่อ Wi-Fi ไม่โผล่มา** ปิด `WIFI_PROTOCOL_LR` เป็นค่าเริ่มต้น ย้าย `printerBegin()` ไปหลังเว็บเซิร์ฟเวอร์ และเพิ่มจอแจ้งสถานะเครือข่ายตอนบูต<br><sub>22 ก.ย. 2026</sub> |
+| `release/12-h113.0.0-s122.0.0` | 113.0.0 | 122.0.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/12-h113.0.0-s122.0.0.zip) | [`7f4fed9`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/7f4fed947d667942dbf3e8ceccf1079165cfda96) | **เริ่มใหม่จากต้นฉบับ 107.0.1/117.0.7** แล้วรื้ออินเตอร์เฟสทั้งหมดเป็นภาษาอังกฤษสองโหมด แยกไฟล์แดชบอร์ดและไฟล์วาดจอออกมา แม่ข่ายคุมการแสดงผลของทุกจุดบริการ **ยังไม่มีเครื่องพิมพ์สลิป คิวออฟไลน์ และจอสาธารณะ**<br><sub>22 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
+> `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
+> การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
+> และทุกหน้าจอถูกเรนเดอร์ดูแล้วว่าตัวอักษรไม่ล้นกรอบ
+> **รบกวนท่านคอมไพล์แล้วแจ้งผลกลับมา** ถ้าผ่านจะได้แก้ช่องนี้เป็น ✅
 
 > ⚠️ **`release/03` ถึง `release/07` คอมไพล์ไม่ผ่าน** ด้วย Arduino IDE
 > ติดปัญหา forward declaration ที่หายไป (`fillStationConfig` และ `rosterApplyPacket`)
