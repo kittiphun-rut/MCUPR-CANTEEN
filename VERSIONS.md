@@ -30,6 +30,7 @@ release/11-h112.0.0-s121.0.0
 release/12-h113.0.0-s122.0.0
 release/13-h113.1.0-s122.0.0
 release/14-h113.1.0-s122.1.0
+release/15-h113.1.0-s122.1.0-docs
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -61,7 +62,9 @@ release/14-h113.1.0-s122.1.0
 
 | `release/14-h113.1.0-s122.1.0` | 113.1.0 | 122.1.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/14-h113.1.0-s122.1.0.zip) | [`0a4bd73`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/0a4bd7397e8102e8c929b02df0e71965e987ec8a) | **แยกส่วนวาดจอของฝั่งจุดบริการออกเป็น `StationScreen.h`** ไฟล์หลักเหลือ 1,141 บรรทัด ย้ายแบบยกก้อน ไม่แก้เนื้อใน · เพิ่มเครื่องมือ `splitcheck.py` ตรวจปัญหาจากการแยกไฟล์<br><sub>22 ก.ย. 2026</sub> |
 
-> ❔ **`release/12` ถึง `release/14` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
+| `release/15-h113.1.0-s122.1.0-docs` | 113.1.0 | 122.1.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/15-h113.1.0-s122.1.0-docs.zip) | [`3d8a123`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/3d8a12324dd3261527af9bf94af9fc76b7b5620e) | **มาตรฐานคอมเมนต์แบบ Doxygen** หัวไฟล์มีตารางประวัติการแก้ไข และป้าย `// [เวอร์ชัน] เพิ่ม/แก้/ย้าย` ในเนื้อโค้ด · เพิ่ม `headercheck.py` บังคับใช้ · **แตะแต่คอมเมนต์ ตรรกะเหมือน `release/14` ทุกบรรทัด**<br><sub>22 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` ถึง `release/15` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
 > `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
 > การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
 > และทุกหน้าจอถูกเรนเดอร์ดูแล้วว่าตัวอักษรไม่ล้นกรอบ
