@@ -30,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "120.0.0"
+#define APP_VERSION         "120.0.1"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -404,6 +404,9 @@ void rosterMarkClaimedLocal(const String &uid);
 void loadRoster();
 void saveRosterIfDue(bool force);
 void stampRosterVer(StationPacket &pkt);
+// เช่นเดียวกับฝั่งแม่ข่าย ฟังก์ชันที่รับโครงสร้างของสเก็ตช์เป็นพารามิเตอร์
+// ต้องมีการประกาศล่วงหน้าไว้หลังนิยามโครงสร้างเสมอ
+void rosterApplyPacket(const HostRosterPacket &r);
 uint32_t stationTodayYmd();
 void displayOfflineRejected(const String &uid, bool alreadyUsed);
 void playBootAnimation();

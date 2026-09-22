@@ -9,8 +9,8 @@
 
 | โฟลเดอร์ | บทบาท | เวอร์ชัน |
 |---|---|---|
-| `Canteen_Host_Server/` | เครื่องแม่ข่าย: ฐานข้อมูลนิสิต, RTC, เว็บพอร์ทัล, เครื่องพิมพ์สลิป | 110.0.1 |
-| `Canteen_Station_Client/` | เครื่องลูกข่ายประจำร้านค้า: อ่านบัตร RFID แล้วถามสิทธิ์จากแม่ข่าย | 120.0.0 |
+| `Canteen_Host_Server/` | เครื่องแม่ข่าย: ฐานข้อมูลนิสิต, RTC, เว็บพอร์ทัล, เครื่องพิมพ์สลิป | 110.0.2 |
+| `Canteen_Station_Client/` | เครื่องลูกข่ายประจำร้านค้า: อ่านบัตร RFID แล้วถามสิทธิ์จากแม่ข่าย | 120.0.1 |
 
 ### โครงสร้างไฟล์ของสเก็ตช์แม่ข่าย
 
@@ -78,6 +78,26 @@ Arduino IDE จะแสดง `WebPortal.h` และ `ThermalPrinter.h` เป
 > **สำคัญ:** บน ESP32-S3 ตัวแปร `SPI` มาตรฐานผูกกับ FSPI (SPI2_HOST) และไลบรารี MFRC522
 > เรียกใช้ตัวแปรนั้น จอจึงต้องอยู่บน HSPI (SPI3_HOST) มิฉะนั้นอุปกรณ์สองตัวจะแย่ง
 > peripheral เดียวกันคนละขา และจอจะเพี้ยนหลัง `PCD_Init()`
+
+## ข้อควรรู้เวลาแก้โค้ดต่อ
+
+Arduino IDE **สร้างต้นแบบฟังก์ชัน (prototype) ให้เองอัตโนมัติ** แล้ววางไว้ใกล้หัวไฟล์
+ซึ่งอยู่ **เหนือจุดที่นิยาม struct ของสเก็ตช์** ถ้าเพิ่มฟังก์ชันที่รับ struct ของโครงการ
+เป็นพารามิเตอร์แล้วลืมประกาศล่วงหน้า จะคอมไพล์ไม่ผ่านด้วยข้อความชวนงงแบบนี้
+
+```
+error: variable or field 'fillStationConfig' declared void
+error: 'HostConfigPacket' was not declared in this scope
+```
+
+ทุกฟังก์ชันแบบนั้นต้องมีบรรทัดประกาศอยู่ในบล็อก *Forward Declarations*
+(อยู่หลังนิยามโครงสร้างทั้งหมด) ตรวจได้ด้วย
+
+```sh
+python3 tools/proto-check/protoscan.py \
+  Canteen_Host_Server/Canteen_Host_Server.ino \
+  Canteen_Station_Client/Canteen_Station_Client.ino
+```
 
 ## ไลบรารีที่ต้องติดตั้ง
 

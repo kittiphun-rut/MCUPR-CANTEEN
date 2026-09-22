@@ -43,7 +43,7 @@
 #define PRINTER_TRANSPORT_UART 0
 #include "ThermalPrinter.h"
 
-#define APP_VERSION         "110.0.1"
+#define APP_VERSION         "110.0.2"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -374,6 +374,10 @@ String getTimeOnlyStr();
 bool isWithinServiceTime();
 bool ensureStationPeer(uint8_t stationId);
 bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len);
+// ต้องประกาศไว้ตรงนี้ (หลังนิยาม HostConfigPacket) มิฉะนั้น Arduino IDE จะสร้าง
+// ต้นแบบฟังก์ชันให้เองแล้ววางไว้เหนือจุดที่นิยามโครงสร้าง ทำให้คอมไพล์ไม่ผ่านด้วย
+// ข้อความ "variable or field 'fillStationConfig' declared void"
+static void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId);
 void sendStationConfig(uint8_t stationId);
 void broadcastStationConfig();
 void setHostScreenPower(bool on);
