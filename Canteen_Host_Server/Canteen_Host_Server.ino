@@ -275,6 +275,9 @@ void sendStationTheme(uint8_t stationId);
 void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId);
 void broadcastStationTheme();
 void announceDisplayMode();
+String jsonEscape(const String &raw);
+void handleDashboardAPI();
+void handleSetDisplayMode();
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void ledStandby();
 void ledApproved();
@@ -1081,7 +1084,9 @@ void handleDownloadArchive() {
   if (server.hasArg("file")) {
     String filename = server.arg("file");
     if (!filename.startsWith("/")) filename = "/" + filename;
-    if (LittleFS.exists(filename)) {
+    // รับเฉพาะชื่อไฟล์ประวัติในรากเท่านั้น กันชื่อแบบ ../ ที่ไต่ไปอ่านไฟล์อื่น
+    if (filename.startsWith("/arc_") && filename.indexOf("/", 1) < 0 &&
+        filename.indexOf("..") < 0 && LittleFS.exists(filename)) {
       File f = LittleFS.open(filename, "r");
       server.streamFile(f, "text/csv");
       f.close();
@@ -1097,7 +1102,8 @@ void handleDeleteArchive() {
     String filename = server.arg("file");
     if (!filename.startsWith("/")) filename = "/" + filename;
     
-    if (filename.startsWith("/arc_") && LittleFS.exists(filename)) {
+    if (filename.startsWith("/arc_") && filename.indexOf("/", 1) < 0 &&
+        filename.indexOf("..") < 0 && LittleFS.exists(filename)) {
       LittleFS.remove(filename);
       sendAlert("ลบไฟล์ประวัติ " + filename.substring(1) + " เรียบร้อยแล้ว!", "/");
       return;
@@ -1403,6 +1409,100 @@ void handleFileUpload() {
 // ============================================================================
 // (ย้ายไปอยู่ใน WebDashboard.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup())
 
+
+// ============================================================================
+// ข้อมูลสดสำหรับแดชบอร์ด
+// หน้าเว็บดึงชุดนี้ทุกสองวินาทีแล้ววาดใหม่เฉพาะตัวเลขที่เปลี่ยน ไม่ต้องรีโหลดทั้งหน้า
+// ============================================================================
+
+// กันอักขระที่ทำให้ JSON พัง เช่นชื่อร้านที่มีเครื่องหมายคำพูด
+String jsonEscape(const String &raw) {
+  String out;
+  out.reserve(raw.length() + 8);
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') { }
+    else if (c == '\t') out += "\\t";
+    else if ((uint8_t)c < 0x20) { }
+    else out += c;
+  }
+  return out;
+}
+
+void handleDashboardAPI() {
+  if (!isAuthenticated()) { server.send(401, "application/json", "{}"); return; }
+
+  int served = 0;
+  int shopMeals[4] = {0, 0, 0, 0};
+  for (const auto &st : db) {
+    if (!st.claimed) continue;
+    served++;
+    if (st.station >= 1 && st.station <= 4) shopMeals[st.station - 1]++;
+  }
+  int total = (int)db.size();
+
+  char win[16];
+  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d",
+           serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+
+  String j = "{";
+  j += "\"clock\":\"" + jsonEscape(getTimeOnlyStr()) + "\"";
+  j += ",\"date\":\"" + jsonEscape(getDateFormattedStr()) + "\"";
+  j += ",\"open\":" + String(isWithinServiceTime() ? "true" : "false");
+  j += ",\"window\":\"" + String(win) + "\"";
+  j += ",\"served\":" + String(served);
+  j += ",\"total\":" + String(total);
+  j += ",\"left\":" + String(total - served);
+  j += ",\"amount\":" + String(served * 35);
+  j += ",\"dark\":" + String(isTftDarkMode ? "true" : "false");
+  j += ",\"saver\":" + String(stationScreensaver ? "true" : "false");
+
+  j += ",\"shops\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
+    j += ",\"owner\":\"" + jsonEscape(shops[i].vendor) + "\"";
+    j += ",\"meals\":" + String(shopMeals[i]);
+    j += ",\"amount\":" + String(shopMeals[i] * 35) + "}";
+  }
+  j += "]";
+
+  j += ",\"stations\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    bool on = stationNodes[i].isOnline;
+    j += "{\"id\":" + String(i + 1);
+    j += ",\"online\":" + String(on ? "true" : "false");
+    j += ",\"bars\":" + String(on ? calculateSignalQuality(stationNodes[i].rssi) : 0) + "}";
+  }
+  j += "]}";
+
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
+// เครื่องแม่ข่ายสั่งโหมดการแสดงผลของทุกสถานีจากหน้าเว็บ
+// (เดิมสั่งได้จากปุ่มกดบนเครื่องเท่านั้น ซึ่งคนที่มารับช่วงดูแลต่อจะไม่มีทางรู้)
+void handleSetDisplayMode() {
+  if (!isAuthenticated()) { server.send(401, "application/json", "{}"); return; }
+
+  if (server.hasArg("dark")) {
+    isTftDarkMode = (server.arg("dark") == "1");
+    preferences.begin("sys_cfg", false);
+    preferences.putBool("tft_dark", isTftDarkMode);
+    preferences.end();
+  }
+  if (server.hasArg("saver")) {
+    stationScreensaver = (server.arg("saver") == "1");
+    stationScreenOn = true;
+    isScreensaverActive = stationScreensaver;
+  }
+  announceDisplayMode();
+  renderHostPage(true);
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 // ============================================================================
 // ส่วนที่แยกออกไปเป็นไฟล์ของตัวเอง Arduino IDE จะแสดงเป็นแท็บของสเก็ตช์เดียวกัน
 // วางบรรทัด #include ไว้ตรงนี้เพราะโค้ดข้างในอ้างถึงตัวแปรส่วนกลางข้างบน
@@ -1528,18 +1628,29 @@ void setup() {
     server.send(200, "text/html; charset=utf-8", getHTML());
   });
 
+  // ไฟล์หน้าตาเว็บ เสิร์ฟตรงจากแฟลช ไม่ต้องสร้างสตริงในแรม และเบราว์เซอร์แคชไว้ได้
+  server.on("/s.css", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "max-age=86400");
+    server.send_P(200, "text/css", DASH_CSS);
+  });
+  server.on("/a.js", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "max-age=86400");
+    server.send_P(200, "application/javascript", DASH_JS);
+  });
   server.on("/api/students", HTTP_GET, handleGetStudentsAPI);
+  server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);
+  server.on("/api/display", HTTP_POST, handleSetDisplayMode);
   server.on("/export.csv", HTTP_GET, handleExportCSV);
   server.on("/api/rtc/set", HTTP_POST, handleSetRTCTime);
   server.on("/api/archive/download", HTTP_GET, handleDownloadArchive);
-  server.on("/api/archive/delete", HTTP_GET, handleDeleteArchive);
+  server.on("/api/archive/delete", HTTP_POST, handleDeleteArchive);
   server.on("/api/student/save", HTTP_POST, handleSaveStudent);
   server.on("/api/tempcard/save", HTTP_POST, handleSaveTempCard);
-  server.on("/api/tempcard/remove", HTTP_GET, handleRemoveTempCard);
-  server.on("/api/student/delete", HTTP_GET, handleDeleteStudent);
+  server.on("/api/tempcard/remove", HTTP_POST, handleRemoveTempCard);
+  server.on("/api/student/delete", HTTP_POST, handleDeleteStudent);
 
   server.on("/api/admin/save", HTTP_POST, handleSaveAdmin);
-  server.on("/api/admin/delete", HTTP_GET, handleDeleteAdmin);
+  server.on("/api/admin/delete", HTTP_POST, handleDeleteAdmin);
 
   server.on("/api/system/health", HTTP_GET, []() {
     DynamicJsonDocument doc(256);
@@ -1580,7 +1691,7 @@ void setup() {
     saveShopsToFS(); renderHostPage(true); sendAlert("Vendors Saved Successfully!", "/");
   });
 
-  server.on("/bind-temp", HTTP_GET, []() {
+  server.on("/bind-temp", HTTP_POST, []() {
     if (!isAuthenticated()) { redirectToLogin(); return; }
     String id = server.arg("id"); String tempUid = server.arg("uid"); tempUid.trim();
     for (auto& s : db) {
@@ -1594,7 +1705,7 @@ void setup() {
     saveDatabaseToFS(); renderHostPage(true); sendAlert("Temporary Card Assigned Successfully!", "/");
   });
 
-  server.on("/manual-claim", HTTP_GET, []() {
+  server.on("/manual-claim", HTTP_POST, []() {
     if (!isAuthenticated()) { redirectToLogin(); return; }
     String id = server.arg("id"); int station = server.arg("station").toInt();
     for (auto& s : db) {
@@ -1615,7 +1726,7 @@ void setup() {
     renderHostPage(true); sendAlert("Manual Claim Approved Successfully!", "/");
   });
 
-  server.on("/reset", HTTP_GET, []() {
+  server.on("/reset", HTTP_POST, []() {
     if (!isAuthenticated()) { redirectToLogin(); return; }
     if (LittleFS.exists("/daily_log.csv")) {
       DateTime now = rtc.now();
