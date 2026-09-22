@@ -35,15 +35,22 @@
 
 // ---------------------------------------------------------------------------
 // เครื่องพิมพ์ความร้อน 58 มม. (ESC/POS)
-//   ENABLE_THERMAL_PRINTER 0 = ปิดทั้งระบบ ไม่กินแฟลช/แรม และปุ่มบนเว็บจะแจ้งว่าปิดอยู่
-//   PRINTER_TRANSPORT_UART 0 = ต่อผ่าน USB OTG (ค่าเริ่มต้น), 1 = ต่อผ่าน UART TTL GPIO17/18
+//
+//   ENABLE_THERMAL_PRINTER 1 = เปิดใช้งาน  ·  0 = ปิดทั้งระบบ
+//   PRINTER_TRANSPORT_UART 0 = ต่อผ่าน USB OTG  ·  1 = ต่อผ่าน UART TTL GPIO17/18
+//
+// **ค่าเริ่มต้นคือปิด** เพราะสแต็ก USB host กินแฟลชราว 20-30 KB และไดรเวอร์
+// คลาสปริ้นเตอร์ยังไม่เคยทดสอบกับเครื่องจริง เมื่อใดที่ต่อเครื่องพิมพ์แล้ว
+// ให้เปลี่ยนบรรทัดล่างเป็น 1 แล้วอัปโหลดใหม่ ฟีเจอร์กลับมาครบทันที
+// ตอนปิดอยู่ ปุ่มบนหน้าเว็บจะแจ้งว่าปิดใช้งานไว้ในเฟิร์มแวร์ ไม่ได้พังแต่อย่างใด
+//
 // อ่านข้อกำหนดการต่อไฟและการตั้งค่า USB Mode ได้ที่หัวไฟล์ ThermalPrinter.h
 // ---------------------------------------------------------------------------
-#define ENABLE_THERMAL_PRINTER 1
+#define ENABLE_THERMAL_PRINTER 0
 #define PRINTER_TRANSPORT_UART 0
 #include "ThermalPrinter.h"
 
-#define APP_VERSION         "110.0.2"
+#define APP_VERSION         "111.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -2876,6 +2883,8 @@ void handleFileUpload() {
   }
 }
 
+#if ENABLE_THERMAL_PRINTER
+
 // ============================================================================
 // สลิปเครื่องพิมพ์ความร้อน 58 มม.
 // เนื้อหาเป็น "อังกฤษ + ตัวเลข" ล้วนตามที่ตกลงไว้ เพราะหัวพิมพ์ราคาประหยัด
@@ -3072,25 +3081,14 @@ bool printClaimSlip(const Student &s) {
 // ---------------------------------------------------------------------------
 // ปลายทาง API ของเครื่องพิมพ์
 // ---------------------------------------------------------------------------
-static bool printerGuard() {
-#if ENABLE_THERMAL_PRINTER
-  return true;
-#else
-  sendJson(false, "เฟิร์มแวร์นี้ปิดการใช้งานเครื่องพิมพ์ไว้ (ENABLE_THERMAL_PRINTER 0)");
-  return false;
-#endif
-}
-
 void handlePrintTest() {
   if (!requireAuth()) return;
-  if (!printerGuard()) return;
   if (!printerEnqueue(buildTestSlip())) { sendJson(false, "คิวงานพิมพ์เต็ม กรุณารอสักครู่แล้วลองใหม่"); return; }
   sendJson(true, "ส่งสลิปทดสอบเข้าคิวแล้ว (สถานะ: " + printerStatusText() + ")");
 }
 
 void handlePrintSlip() {
   if (!requireAuth()) return;
-  if (!printerGuard()) return;
   String id = server.arg("id"); id.trim();
   for (const auto &st : db) {
     if (st.studentId == id) {
@@ -3105,7 +3103,6 @@ void handlePrintSlip() {
 
 void handlePrintDaily() {
   if (!requireAuth()) return;
-  if (!printerGuard()) return;
   if (!printerEnqueue(buildDailySlip())) { sendJson(false, "คิวงานพิมพ์เต็ม กรุณารอสักครู่แล้วลองใหม่"); return; }
   sendJson(true, "ส่งใบสรุปยอดประจำวันเข้าคิวพิมพ์แล้ว");
 }
@@ -3118,6 +3115,29 @@ void handleSavePrinterSettings() {
   preferences.end();
   sendJson(true, printerAutoSlip ? "เปิดการพิมพ์สลิปอัตโนมัติแล้ว" : "ปิดการพิมพ์สลิปอัตโนมัติแล้ว");
 }
+
+#else   // ENABLE_THERMAL_PRINTER == 0
+// ---------------------------------------------------------------------------
+// ปิดเครื่องพิมพ์ไว้: เนื้อหาสลิปทั้งหมดไม่ถูกคอมไพล์เข้าไปเลย เหลือแค่โครงเปล่า
+// ให้ส่วนอื่นเรียกได้โดยไม่ต้องใส่ #if กระจายเต็มไฟล์ ประหยัดแฟลชได้ทั้งก้อน
+// ---------------------------------------------------------------------------
+String asciiSafe(const String &raw, const String &fallback) { (void)raw; return fallback; }
+String asciiName(const String &raw, const String &fallback) { (void)raw; return fallback; }
+String buildClaimSlip(const Student &s) { (void)s; return String(); }
+String buildDailySlip() { return String(); }
+String buildTestSlip()  { return String(); }
+bool   printClaimSlip(const Student &s) { (void)s; return false; }
+
+static const char PRINTER_OFF_MSG[] =
+  "เฟิร์มแวร์นี้ปิดการใช้งานเครื่องพิมพ์ไว้ (ENABLE_THERMAL_PRINTER 0) "
+  "ถ้าต่อเครื่องพิมพ์แล้วให้เปลี่ยนเป็น 1 ที่หัวสเก็ตช์แล้วอัปโหลดใหม่";
+
+void handlePrintTest()  { if (!requireAuth()) return; sendJson(false, PRINTER_OFF_MSG); }
+void handlePrintSlip()  { if (!requireAuth()) return; sendJson(false, PRINTER_OFF_MSG); }
+void handlePrintDaily() { if (!requireAuth()) return; sendJson(false, PRINTER_OFF_MSG); }
+void handleSavePrinterSettings() { if (!requireAuth()) return; sendJson(false, PRINTER_OFF_MSG); }
+
+#endif  // ENABLE_THERMAL_PRINTER
 
 // ============================================================================
 // หน้าเว็บทั้งหมดอยู่ในไฟล์ WebPortal.h (แท็บถัดไปใน Arduino IDE)

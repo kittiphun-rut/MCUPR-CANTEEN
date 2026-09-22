@@ -459,7 +459,10 @@ String getHTML() {
 
           <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
             <a href="/export.csv" class="btn btn-emerald" style="width: 100%;" data-th="📥 ดาวน์โหลดรายงานสรุป (CSV)" data-en="📥 Export Summary (CSV)">📥 ดาวน์โหลดรายงานสรุป (CSV)</a>
-            <button onclick="printDaily()" class="btn btn-indigo" style="width: 100%;" title="พิมพ์ใบสรุปยอดประจำวันออกเครื่องพิมพ์ความร้อน 58 มม." data-th="🖨️ พิมพ์ใบสรุปประจำวัน" data-en="🖨️ Print Daily Summary">🖨️ พิมพ์ใบสรุปประจำวัน</button>
+            )rawliteral" + String(ENABLE_THERMAL_PRINTER ?
+              "<button onclick='printDaily()' class='btn btn-indigo' style='width:100%;' "
+              "title='พิมพ์ใบสรุปยอดประจำวันออกเครื่องพิมพ์ความร้อน 58 มม.'>"
+              "&#128424; พิมพ์ใบสรุปประจำวัน</button>" : "") + R"rawliteral(
             <button onclick="syncDeviceTime()" class="btn btn-slate" style="width: 100%;" data-th="⚡ ซิงค์เวลากับเครื่องนี้" data-en="⚡ Sync Device Time">⚡ ซิงค์เวลากับเครื่องนี้</button>
             <div id="printerBadge" style="font-size: 0.72rem; font-weight: 700; text-align: center; padding: 0.2rem 0; color: var(--text-muted);">🖨️ —</div>
           </div>
@@ -699,6 +702,14 @@ String getHTML() {
 
         <div class="col-span-12 bento-card">
           <h2 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 0.5rem;" data-th="🖨️ เครื่องพิมพ์สลิปความร้อน 58 มม." data-en="🖨️ 58 mm Thermal Slip Printer">🖨️ เครื่องพิมพ์สลิปความร้อน 58 มม.</h2>
+          )rawliteral" + String(ENABLE_THERMAL_PRINTER ? "" :
+            "<div style='background:rgba(245,158,11,0.15); border:1px solid var(--accent-yellow); "
+            "color:var(--accent-yellow); border-radius:0.9rem; padding:0.7rem 1rem; margin-bottom:1rem; "
+            "font-size:0.85rem; font-weight:700;'>"
+            "&#9888; ปิดการใช้งานไว้ในเฟิร์มแวร์เพื่อประหยัดพื้นที่โปรแกรม ปุ่มด้านล่างจึงยังใช้ไม่ได้<br>"
+            "<span style='font-weight:400;'>เมื่อต่อเครื่องพิมพ์แล้ว ให้แก้ "
+            "<code>#define ENABLE_THERMAL_PRINTER</code> ที่หัวสเก็ตช์เป็น <code>1</code> "
+            "แล้วอัปโหลดใหม่ ฟีเจอร์จะกลับมาครบทันที</span></div>") + R"rawliteral(
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
             เมื่อเปิดใช้งาน ระบบจะพิมพ์สลิปให้อัตโนมัติ <b>ทุกครั้ง</b> ที่ตัดสิทธิ์สำเร็จ ทั้งจากการแตะบัตรที่จุดบริการ
             และจากการกดตัดสิทธิ์ด้วยตนเองบนหน้าเว็บ หรือจะสั่งพิมพ์ย้อนหลังทีละรายการจากปุ่ม 🖨️ ในตารางรายชื่อก็ได้
