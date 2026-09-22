@@ -27,7 +27,7 @@ ESP-NOW ระหว่างสองฝั่งเปลี่ยนไปใ
 | `release-04-h108.0.0-s118.2.0` | 108.0.0 | 118.2.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-04-h108.0.0-s118.2.0.zip) | [`1ca1c8a`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/1ca1c8ac3f8d21df85a88f87a076334e787bf659) | เติมข้อมูลหน้า 2 ของสถานีให้เต็มจอและเป็นข้อมูลสด (ยอดทั้งโรงอาหาร + รายการที่จ่ายล่าสุด)<br><sub>21 ก.ย. 2026</sub> |
 | `release-05-h108.0.0-s119.0.0` | 108.0.0 | 119.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-05-h108.0.0-s119.0.0.zip) | [`6620ab5`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/6620ab5382a80fa3a9519bbb75f90561896788f5) | เสริมความทนทานของลิงก์สำหรับระยะ 20 เมตร และเพิ่ม **คิวออฟไลน์** ฝั่งสถานี<br><sub>21 ก.ย. 2026</sub> |
 | `release-06-h109.0.0-s119.0.0` | 109.0.0 | 119.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-06-h109.0.0-s119.0.0.zip) | [`c3584ff`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/c3584ffe8522ec5314dd960944e6ae16a2df569a) | เพิ่ม **เครื่องพิมพ์สลิปความร้อน 58 มม.** (`ThermalPrinter.h`) ผ่าน USB OTG หรือ UART<br><sub>21 ก.ย. 2026</sub> |
-| `release-07-h110.0.1-s120.0.0` | 110.0.1 | 120.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-07-h110.0.1-s120.0.0.zip) | [`778a3d3`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/778a3d3a8e39b911e0e937274614e6809b5163b2) | **ตรวจสิทธิ์ได้เองตอนลิงก์ขาด** ด้วยบัญชีสิทธิ์ย่อที่แม่ข่ายผลักไปเก็บที่สถานี<br><sub>22 ก.ย. 2026</sub> |
+| `release-07-h110.0.1-s120.0.0` | 110.0.1 | 120.0.0 | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/claude/release-07-h110.0.1-s120.0.0.zip) | [ล่าสุดของ branch นี้](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/claude/release-07-h110.0.1-s120.0.0) | **ตรวจสิทธิ์ได้เองตอนลิงก์ขาด** ด้วยบัญชีสิทธิ์ย่อที่แม่ข่ายผลักไปเก็บที่สถานี<br><sub>22 ก.ย. 2026</sub> |
 
 รายละเอียดของแต่ละรุ่นอยู่ใน [`CHANGELOG.md`](CHANGELOG.md)
 
@@ -80,7 +80,7 @@ git tag -a release-03-h108.0.0-s118.1.0 a883805 -m "Host 108.0.0 / Station 118.1
 git tag -a release-04-h108.0.0-s118.2.0 1ca1c8a -m "Host 108.0.0 / Station 118.2.0"
 git tag -a release-05-h108.0.0-s119.0.0 6620ab5 -m "Host 108.0.0 / Station 119.0.0"
 git tag -a release-06-h109.0.0-s119.0.0 c3584ff -m "Host 109.0.0 / Station 119.0.0"
-git tag -a release-07-h110.0.1-s120.0.0 778a3d3 -m "Host 110.0.1 / Station 120.0.0"
+git tag -a release-07-h110.0.1-s120.0.0 origin/claude/release-07-h110.0.1-s120.0.0 -m "Host 110.0.1 / Station 120.0.0"
 git push origin --tags
 ```
 
