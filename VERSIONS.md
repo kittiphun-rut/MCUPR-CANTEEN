@@ -32,6 +32,7 @@ release/13-h113.1.0-s122.0.0
 release/14-h113.1.0-s122.1.0
 release/15-h113.1.0-s122.1.0-docs
 release/16-h113.2.0-s122.2.0
+release/17-h113.3.0-s122.3.0
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -67,7 +68,9 @@ release/16-h113.2.0-s122.2.0
 
 | `release/16-h113.2.0-s122.2.0` | 113.2.0 | 122.2.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/16-h113.2.0-s122.2.0.zip) | [`beda1b4`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/beda1b4c5d6f682d200c53eec77cb17fd8cb0119) | **ซ่อมการรีเฟรชตัวเลขบนจอทั้งสองฝั่ง** ยอดรายร้าน หน้า SYSTEM นาฬิกาของจุดบริการ และแถบสัญญาณที่ไม่เคยขึ้นมาเลย · วาดซ้ำเฉพาะช่องที่เปลี่ยน จอไม่กะพริบ · เพิ่ม `tools/screen-preview/`<br><sub>22 ก.ย. 2026</sub> |
 
-> ❔ **`release/12` ถึง `release/16` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
+| `release/17-h113.3.0-s122.3.0` | 113.3.0 | 122.3.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/17-h113.3.0-s122.3.0.zip) | [`38eb7ee`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/38eb7eefd48ba438e35ab521dffe0f8c704c6bac) | **แก้จอกะพริบทุกวินาที** ต้นเหตุคือการล้างพื้นก่อนเขียนตัวอักษร เปลี่ยนมาเขียนทับที่เดิมด้วย `drawFixedText()` · แก้สีค้างที่มุมโค้งของแถบความคืบหน้า<br><sub>22 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` ถึง `release/17` ยังไม่ผ่านการคอมไพล์จริง** เพราะเครื่องที่ใช้พัฒนาเข้า
 > `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
 > การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
 > และทุกหน้าจอถูกเรนเดอร์ดูแล้วว่าตัวอักษรไม่ล้นกรอบ
