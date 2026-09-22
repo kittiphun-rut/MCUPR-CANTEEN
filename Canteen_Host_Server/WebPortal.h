@@ -1155,6 +1155,11 @@ String getHTML() {
           ros.textContent = '📋 รายชื่อออฟไลน์: —';
           ros.style.color = 'var(--text-muted)';
           ros.title = 'จุดบริการนี้ออฟไลน์อยู่ จึงยังตรวจสอบไม่ได้';
+        } else if (!st.rosterCapable) {
+          ros.textContent = '📋 รายชื่อออฟไลน์: เฟิร์มแวร์เก่า ไม่รองรับ';
+          ros.style.color = 'var(--accent-yellow)';
+          ros.title = 'จุดบริการนี้ใช้เฟิร์มแวร์ก่อนรุ่น 120.0.0 ซึ่งยังไม่มีการตรวจสิทธิ์ตอนลิงก์ขาด '
+                    + 'ทำงานได้ตามปกติทุกอย่าง แต่ตอนลิงก์ขาดจะรับบัตรทุกใบไว้ก่อนเหมือนเดิม';
         } else if (st.rosterTooBig) {
           ros.textContent = '📋 รายชื่อออฟไลน์: เกินที่เครื่องเก็บไหว';
           ros.style.color = 'var(--accent-rose)';

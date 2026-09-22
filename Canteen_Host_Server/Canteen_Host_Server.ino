@@ -43,7 +43,7 @@
 #define PRINTER_TRANSPORT_UART 0
 #include "ThermalPrinter.h"
 
-#define APP_VERSION         "110.0.0"
+#define APP_VERSION         "110.0.1"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -278,6 +278,7 @@ std::vector<RosterEntry> rosterSnapshot;      // ภาพนิ่งที่�
 uint16_t rosterSnapshotVer = 0;
 uint16_t stationRosterVer[4] = {0, 0, 0, 0};  // เลขรุ่นที่แต่ละสถานีรายงานกลับมา
 bool stationRosterTooBig[4] = {false, false, false, false};  // สถานีบอกว่าบัญชีใหญ่เกินเก็บไหว
+bool stationRosterCapable[4] = {false, false, false, false}; // สถานีรุ่นนี้รองรับบัญชีสิทธิ์หรือไม่
 bool     rosterPushActive[4] = {false, false, false, false};
 uint8_t  rosterPushChunk[4]  = {0, 0, 0, 0};
 unsigned long rosterPushNextAt = 0;
@@ -1014,7 +1015,7 @@ void sendRosterDelta(const String &uid, uint8_t state) {
   }
 
   for (int i = 0; i < 4; i++) {
-    if (!stationNodes[i].isOnline) continue;
+    if (!stationNodes[i].isOnline || !stationRosterCapable[i]) continue;
     HostRosterPacket pkt = {};
     pkt.magic        = ESPNOW_PROTO_MAGIC;
     pkt.version      = ESPNOW_PROTO_VER;
@@ -1038,17 +1039,22 @@ void sendRosterDelta(const String &uid, uint8_t state) {
 void noteStationRosterVer(uint8_t stationId, const char *stamp) {
   if (stationId < 1 || stationId > 4) return;
 
+  // เฟิร์มแวร์สถานีรุ่นก่อน 120.0.0 ไม่ได้ฝากอะไรมาในช่องนี้เลย (เป็นศูนย์ล้วน)
+  // ต้องแยกให้ออกจากสถานีรุ่นใหม่ที่ยังไม่มีบัญชีซึ่งจะฝาก "R:0" มา
+  // ไม่งั้นจะไล่ผลักบัญชีไปให้เครื่องที่รับไม่เป็นทุก heartbeat ไม่มีวันจบ
+  bool capable = (stamp && stamp[0] == 'R' && stamp[1] == ':');
   uint16_t reported = 0;
   bool tooBig = false;
-  if (stamp && stamp[0] == 'R' && stamp[1] == ':') {
+  if (capable) {
     long v = atol(stamp + 2);       // atol หยุดเองเมื่อเจอ '!' ที่ต่อท้าย
     if (v > 0 && v <= 65535) reported = (uint16_t)v;
     tooBig = (strchr(stamp, '!') != NULL);
   }
+  stationRosterCapable[stationId - 1] = capable;
   stationRosterVer[stationId - 1] = reported;
   stationRosterTooBig[stationId - 1] = tooBig;
 
-  if (reported != rosterVer && !rosterPushActive[stationId - 1]) {
+  if (capable && reported != rosterVer && !rosterPushActive[stationId - 1]) {
     startRosterPush(stationId);
   }
 }
@@ -2177,8 +2183,9 @@ void handleDashboardAPI() {
     j += ",\"volt\":" + String(on ? stationNodes[i].systemVoltage : 0.0f, 2);
     j += ",\"ageSec\":" + String(on ? (unsigned long)((millis() - stationNodes[i].lastSeen) / 1000UL) : 0UL);
     j += ",\"rosterVer\":" + String((unsigned)stationRosterVer[i]);
-    j += ",\"rosterOk\":" + String((on && stationRosterVer[i] == rosterVer && !stationRosterTooBig[i]) ? "true" : "false");
+    j += ",\"rosterOk\":" + String((on && stationRosterCapable[i] && stationRosterVer[i] == rosterVer && !stationRosterTooBig[i]) ? "true" : "false");
     j += ",\"rosterTooBig\":" + String(stationRosterTooBig[i] ? "true" : "false");
+    j += ",\"rosterCapable\":" + String(stationRosterCapable[i] ? "true" : "false");
     j += "}";
   }
   j += "]";
@@ -2741,7 +2748,7 @@ void saveDatabaseToFS() {
   // ผ่านฟังก์ชันนี้ทั้งหมด จึงเป็นจุดเดียวที่ต้องเลื่อนเลขรุ่นบัญชีและผลักของใหม่ให้สถานี
   bumpRosterVer();
   for (int i = 0; i < 4; i++) {
-    if (stationNodes[i].isOnline) startRosterPush(i + 1);
+    if (stationNodes[i].isOnline && stationRosterCapable[i]) startRosterPush(i + 1);
   }
 
   File file = LittleFS.open("/students.csv", "w");

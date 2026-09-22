@@ -108,6 +108,10 @@ int main() {
   }
   db.push_back({String(""), false});   // นิสิตที่ยังไม่ผูกบัตร ต้องไม่ถูกส่งไปกินที่
 
+  // ในการใช้งานจริง แม่ข่ายรู้ว่าสถานีรองรับบัญชีจาก heartbeat แรกที่ฝาก "R:.." มา
+  // จำลองว่าทั้งสี่จุดรายงานตัวเข้ามาแล้ว (ข้อ 10 จะทดสอบกรณีเฟิร์มแวร์รุ่นเก่าแยกต่างหาก)
+  for (int i = 0; i < 4; i++) hostsim::stationRosterCapable[i] = true;
+
   printf("== 1) ผลักบัญชีชุดเต็มครั้งแรก ==\n");
   hostDbChanged();
   check("สถานีได้จำนวนรายการครบ 412 (ตัดคนที่ไม่มีบัตรออก)", stnsim::rosterCount == 412);
@@ -217,10 +221,19 @@ int main() {
   check("ข้ามค่า 0 ไปเป็น 1", hostsim::rosterVer == 1);
   printf("\n");
 
-  printf("== 10) heartbeat จากเฟิร์มแวร์สถานีรุ่นเก่า (ไม่ฝากเลขรุ่นมา) ==\n");
+  printf("== 10) อยู่ร่วมกับเฟิร์มแวร์สถานีรุ่นเก่า ==\n");
   hostsim::rosterPushActive[1] = false;
-  hostsim::noteStationRosterVer(2, "");
-  check("ถูกมองว่าเป็นรุ่น 0 แล้วสั่งผลักชุดเต็มให้", hostsim::rosterPushActive[1] == true);
+  hostsim::noteStationRosterVer(2, "");          // รุ่นเก่าไม่ฝากอะไรมาเลย
+  check("รุ่นเก่าถูกมองว่าไม่รองรับ จึงไม่ผลักบัญชีไปให้",
+        hostsim::rosterPushActive[1] == false && hostsim::stationRosterCapable[1] == false);
+  {
+    int before10 = g_sent;
+    hostClaim("0305420081");
+    check("ไม่ส่ง delta ไปให้สถานีที่รับไม่เป็น", g_sent - before10 == 3);
+  }
+  hostsim::noteStationRosterVer(2, "R:0");       // พอแฟลชรุ่นใหม่แล้วฝาก R:0 มา
+  check("พอเป็นรุ่นใหม่แล้วจึงผลักบัญชีให้ทันที",
+        hostsim::stationRosterCapable[1] == true && hostsim::rosterPushActive[1] == true);
   printf("\n");
 
   printf(fails ? "*** มี %d ข้อไม่ผ่าน ***\n" : "ผ่านทั้งหมด (%d ข้อที่ไม่ผ่าน)\n", fails);
