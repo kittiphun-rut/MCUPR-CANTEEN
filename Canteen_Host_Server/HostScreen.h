@@ -146,6 +146,51 @@ void playBootAnimation() {
   delay(200);
 }
 
+// หน้าบอกสถานะเครือข่ายตอนบูต ค้างไว้สามวินาที
+// มีไว้เพราะเคยเจอปัญหาชื่อ Wi-Fi ไม่โผล่มา แล้วไม่มีอะไรบนเครื่องบอกเลยว่าเกิดอะไรขึ้น
+void showBootNetworkStatus() {
+  tft.fillScreen(getTftBg());
+  drawHostTopBar("NETWORK");
+
+  uint16_t tone = hostApReady ? getTftAccentGreen() : getTftAccentRose();
+  tft.fillRect(0, 30, 320, 34, tone);
+  const char* head = hostApReady ? "WI-FI IS ON" : "WI-FI FAILED TO START";
+  tft.setTextSize(2);
+  tft.setTextColor(isTftDarkMode ? 0x0000 : BENTO_WHITE, tone);
+  tft.setCursor(max(4, (320 - (int)strlen(head) * 12) / 2), 39);
+  tft.print(head);
+
+  drawBentoCard(6, 74, 308, 134, getTftCardBorder(), getTftCardBg());
+  tft.setTextSize(1);
+  if (hostApReady) {
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
+    tft.setCursor(20, 92);  tft.print("Wi-Fi name");
+    tft.setCursor(20, 122); tft.print("Password");
+    tft.setCursor(20, 152); tft.print("Web page");
+    tft.setTextColor(getTftTextMain(), getTftCardBg());
+    tft.setTextSize(2);
+    tft.setCursor(20, 102); tft.print(default_ap_ssid);
+    tft.setCursor(20, 132); tft.print(default_ap_pass);
+    tft.setCursor(20, 162); tft.print(WiFi.softAPIP().toString());
+    tft.setTextSize(1);
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
+    tft.setCursor(20, 186); tft.printf("or http://%s.local", mdns_hostname);
+  } else {
+    tft.setTextColor(getTftTextMain(), getTftCardBg());
+    tft.setTextSize(2);
+    tft.setCursor(20, 100); tft.print("Turn the power off");
+    tft.setCursor(20, 124); tft.print("and on again");
+    tft.setTextSize(1);
+    tft.setTextColor(getTftTextMuted(), getTftCardBg());
+    tft.setCursor(20, 162); tft.print("If it keeps happening, flash the board again.");
+    tft.setCursor(20, 176); tft.print("Card reading still works without Wi-Fi.");
+    soundBeep();
+  }
+
+  drawBentoBottomBar(hostApReady ? "Starting up..." : "Wi-Fi is off, the rest still works");
+  delay(3000);
+}
+
 // --- ชิ้นส่วนเพิ่มเติมสำหรับหน้าจอแบบใหม่ ---
 
 // ตัดข้อความให้พอดีความกว้างที่ให้มา (ฟอนต์ในตัวกว้างตัวละ 6 พิกเซลต่อขนาด 1)

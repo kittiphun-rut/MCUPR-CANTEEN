@@ -24,7 +24,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "118.0.0"
+#define APP_VERSION         "122.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -809,7 +809,7 @@ void renderDeveloperCredit() {
   tft.println("Mahachulalongkornrajavidyalaya Phrae");
 
   tft.setTextColor(getStTextMuted(), getStCardBg());
-  tft.setCursor(22, 134); tft.printf("Firmware: v%s (Bento Edition)\n", APP_VERSION);
+  tft.setCursor(22, 134); tft.printf("Firmware  v%s\n", APP_VERSION);
   tft.setCursor(22, 150); tft.printf("Hardware: ESP32-S3 + ST7789V + RC522\n");
   tft.setCursor(22, 166); tft.println("Display : 2.8\" ST7789V 320x240 Modular Bento");
 
@@ -1516,18 +1516,10 @@ void handlePhysicalButton() {
       renderScreensaver(true);
     }
     else if (clickCount == 3) {
-      isStationDarkMode = !isStationDarkMode;
-      stationPrefs.begin("st_cfg", false);
-      stationPrefs.putBool("dark", isStationDarkMode);
-      stationPrefs.end();
-      soundThemeSwitch();
-      if (isScreenOn) {
-        if (currentState == STATE_STANDBY && currentStationPage == 1) displayTapCardStandby();
-        else if (currentState == STATE_STANDBY && currentStationPage == 2) displayStatsDashboard();
-        else if (currentState == STATE_STATUS) displayStatusScreen(true);
-        else if (currentState == STATE_SCREENSAVER) renderScreensaver(true);
-        else if (currentState == STATE_CREDIT) renderDeveloperCredit();
-      }
+      // เดิมกดสามครั้งแล้วสลับธีมของเครื่องนี้เองได้
+      // ตอนนี้เครื่องแม่ข่ายเป็นผู้กำหนดธีมของทุกจุดบริการฝ่ายเดียว
+      // ถ้าปล่อยให้สลับเองที่นี่ แม่ข่ายจะสั่งกลับในไม่กี่วินาที จอจะกระพริบเปล่า ๆ
+      showDisplayLockedNotice();
     }
     clickCount = 0;
   }

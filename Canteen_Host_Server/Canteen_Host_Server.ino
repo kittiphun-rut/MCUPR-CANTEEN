@@ -32,7 +32,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "108.0.0"
+#define APP_VERSION         "113.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -294,6 +294,7 @@ void soundThemeSwitch();
 void mergeImportedStudents();
 void handleFileUpload();
 void handleGetStudentsAPI();
+String csvField(const String &raw);
 void handleExportCSV();
 void handleSetRTCTime();
 void handleDownloadArchive();
@@ -304,6 +305,7 @@ void handleRemoveTempCard();
 void handleDeleteStudent();
 void handleSaveAdmin();
 void handleDeleteAdmin();
+void showBootNetworkStatus();
 void handleHostButton();
 
 struct ScanQueueItem {
@@ -318,6 +320,7 @@ String lastScannedUID       = "-";
 String lastScannedStudentId = "-";
 int lastScannedStation      = 0;
 String lastScannedStatus    = "READY";
+bool hostApReady            = false; // ปล่อยสัญญาณ Wi-Fi สำเร็จหรือไม่ ใช้บอกบนจอตอนบูต
 String lastScannedRef       = "-";   // เลขอ้างอิงของการสแกนครั้งล่าสุด
                                      // เก็บไว้ ไม่สร้างใหม่ตอนวาดจอ ไม่งั้นเลขจะเดินทุกครั้งที่รีเฟรช
 
@@ -655,9 +658,12 @@ void loadAdminsFromFS() {
 }
 
 String generateSessionToken() {
+  // esp_random() เป็นตัวสุ่มในตัวชิป ไม่ใช่ random() ของ Arduino ที่ให้ลำดับเดิม
+  // ทุกครั้งที่เปิดเครื่อง ซึ่งแปลว่าโทเคนของวันนี้เดาได้จากของเมื่อวาน
   String token = "";
+  token.reserve(32);
   const char chars[] = "abcdef0123456789";
-  for (int i = 0; i < 24; i++) token += chars[random(0, 16)];
+  for (int i = 0; i < 32; i++) token += chars[esp_random() & 0x0F];
   return token;
 }
 
@@ -976,7 +982,7 @@ void handleGetStudentsAPI() {
   String search = server.hasArg("search") ? server.arg("search") : "";
   search.trim(); search.toUpperCase();
   if (page < 1) page = 1;
-  if (limit < 1) limit = 20;
+  if (limit < 1 || limit > 100) limit = 20;
 
   std::vector<int> matchedIndices;
   for (size_t i = 0; i < db.size(); i++) {
@@ -986,7 +992,8 @@ void handleGetStudentsAPI() {
       String fName = db[i].fullName; fName.toUpperCase();
       String rNo = db[i].refNo; rNo.toUpperCase();
       String uId = db[i].uid; uId.toUpperCase();
-      if (sId.indexOf(search) != -1 || fName.indexOf(search) != -1 || rNo.indexOf(search) != -1 || uId.indexOf(search) != -1) matchedIndices.push_back(i);
+      if (sId.indexOf(search) != -1 || fName.indexOf(search) != -1 ||
+          rNo.indexOf(search) != -1 || uId.indexOf(search) != -1) matchedIndices.push_back(i);
     }
   }
 
@@ -998,26 +1005,48 @@ void handleGetStudentsAPI() {
   int startIdx = (page - 1) * limit;
   int endIdx = min(startIdx + limit, totalItems);
 
-  DynamicJsonDocument doc(8192);
-  doc["totalItems"] = totalItems;
-  doc["totalPages"] = totalPages;
-  doc["currentPage"] = page;
-  doc["limit"] = limit;
-
-  JsonArray arr = doc.createNestedArray("students");
+  // ต่อ JSON เองแทน DynamicJsonDocument ขนาดคงที่ ของเดิมจองไว้ 8 กิโล
+  // ซึ่งพอดีเกินไปสำหรับยี่สิบรายชื่อ ถ้าล้นขึ้นมา JSON จะขาดกลางคันแบบเงียบ ๆ
+  String j;
+  j.reserve(1024 + (endIdx - startIdx) * 160);
+  j = "{\"totalItems\":" + String(totalItems);
+  j += ",\"totalPages\":" + String(totalPages);
+  j += ",\"currentPage\":" + String(page);
+  j += ",\"limit\":" + String(limit);
+  j += ",\"students\":[";
   for (int i = startIdx; i < endIdx; i++) {
     int idx = matchedIndices[i];
-    JsonObject obj = arr.createNestedObject();
-    obj["id"] = db[idx].studentId; obj["name"] = db[idx].fullName;
-    obj["uid"] = db[idx].uid; obj["claimed"] = db[idx].claimed;
-    obj["time"] = db[idx].claimTime; obj["ref"] = db[idx].refNo;
-    obj["station"] = db[idx].station; obj["isTemp"] = db[idx].isTempCard;
-    obj["shopName"] = (db[idx].station > 0 && db[idx].station <= 4) ? shops[db[idx].station - 1].name : "-";
+    const Student &st = db[idx];
+    if (i > startIdx) j += ",";
+    j += "{\"id\":\"" + jsonEscape(st.studentId) + "\"";
+    j += ",\"name\":\"" + jsonEscape(st.fullName) + "\"";
+    j += ",\"uid\":\"" + jsonEscape(st.uid) + "\"";
+    j += ",\"claimed\":" + String(st.claimed ? "true" : "false");
+    j += ",\"time\":\"" + jsonEscape(st.claimTime) + "\"";
+    j += ",\"ref\":\"" + jsonEscape(st.refNo) + "\"";
+    j += ",\"station\":" + String(st.station);
+    j += ",\"isTemp\":" + String(st.isTempCard ? "true" : "false");
+    j += ",\"shopName\":\"";
+    j += jsonEscape((st.station > 0 && st.station <= 4) ? shops[st.station - 1].name : String("-"));
+    j += "\"}";
   }
+  j += "]}";
 
-  String res;
-  serializeJson(doc, res);
-  server.send(200, "application/json; charset=utf-8", res);
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
+// ครอบค่าด้วยเครื่องหมายคำพูดแบบที่โปรแกรมตารางเข้าใจ
+// ชื่อร้านอย่าง Rice "House", Drinks เคยทำให้คอลัมน์ในไฟล์เลื่อนทั้งแถว
+String csvField(const String &raw) {
+  String out = "\"";
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    char c = raw[i];
+    if (c == '"') out += "\"\"";
+    else if (c == '\r' || c == '\n') out += ' ';
+    else out += c;
+  }
+  out += "\"";
+  return out;
 }
 
 void handleExportCSV() {
@@ -1039,7 +1068,7 @@ void handleExportCSV() {
   csv += "--- Summary Payout By Shop ---\n";
   csv += "No.,Shop Name,Vendor,Total Orders,Total Payout (THB)\n";
   for (int i = 0; i < 4; i++) {
-    csv += String(i + 1) + ",\"" + shops[i].name + "\",\"" + shops[i].vendor + "\"," 
+    csv += String(i + 1) + "," + csvField(shops[i].name) + "," + csvField(shops[i].vendor) + ","
         + String(shopCounts[i]) + "," + String(shopCounts[i] * 35) + "\n";
   }
   csv += "Total Payout,,," + String(totalClaimed) + "," + String(totalClaimed * 35) + "\n\n";
@@ -1055,15 +1084,15 @@ void handleExportCSV() {
     String cardType = s.isTempCard ? "Temporary Card" : "Standard Card";
 
     csv += String(rowNumber++) + ",";
-    csv += "\"" + s.studentId + "\",";
-    csv += "\"" + s.fullName + "\",";
-    csv += "\"" + s.uid + "\",";
-    csv += "\"" + s.refNo + "\",";
-    csv += "\"" + s.claimTime + "\",";
-    csv += "\"" + shopName + "\",";
-    csv += "\"" + vendorName + "\",";
+    csv += csvField(s.studentId) + ",";
+    csv += csvField(s.fullName) + ",";
+    csv += csvField(s.uid) + ",";
+    csv += csvField(s.refNo) + ",";
+    csv += csvField(s.claimTime) + ",";
+    csv += csvField(shopName) + ",";
+    csv += csvField(vendorName) + ",";
     csv += "35,";
-    csv += "\"" + cardType + "\"\n";
+    csv += csvField(cardType) + "\n";
   }
 
   server.sendHeader("Content-Disposition", "attachment; filename=MCU_Canteen_Claim_Report.csv");
@@ -1554,8 +1583,15 @@ void setup() {
   isTftDarkMode     = preferences.getBool("tft_dark", true);
   preferences.end();
 
+  // เคยเจอมาแล้วว่าชื่อ Wi-Fi ไม่โผล่มาเลยทั้งที่เครื่องบูตปกติ
+  // ลองซ้ำสามครั้งแล้วจำผลไว้ เพื่อเอาไปขึ้นจอบอกตอนบูตว่าสำเร็จหรือไม่
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 4);
+  bool apReady = false;
+  for (int attempt = 0; attempt < 3 && !apReady; attempt++) {
+    apReady = WiFi.softAP(default_ap_ssid, default_ap_pass, ESPNOW_CHANNEL, 0, 4);
+    if (!apReady) delay(300);
+  }
+  hostApReady = apReady;
   esp_wifi_set_ps(WIFI_PS_NONE);
   esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
   esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
@@ -1771,6 +1807,7 @@ void setup() {
 
   server.begin();
   playBootAnimation();
+  showBootNetworkStatus();
 
   for (int i = 1; i <= 4; i++) {
     HostResponsePacket beacon = {};
