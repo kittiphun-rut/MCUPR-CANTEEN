@@ -1148,7 +1148,29 @@ String getHTML() {
         sig.appendChild(sigText);
         body.appendChild(sig);
 
-        card.appendChild(head); card.appendChild(body);
+        /* สถานะบัญชีสิทธิ์ที่ผลักไปเก็บไว้ที่จุดบริการ ใช้ตรวจบัตรเองตอนลิงก์ขาด */
+        var ros = document.createElement('div');
+        ros.style.cssText = 'margin-top:0.7rem; font-size:0.74rem; font-weight:700; display:flex; align-items:center; gap:0.35rem;';
+        if (!st.online) {
+          ros.textContent = '📋 รายชื่อออฟไลน์: —';
+          ros.style.color = 'var(--text-muted)';
+          ros.title = 'จุดบริการนี้ออฟไลน์อยู่ จึงยังตรวจสอบไม่ได้';
+        } else if (st.rosterTooBig) {
+          ros.textContent = '📋 รายชื่อออฟไลน์: เกินที่เครื่องเก็บไหว';
+          ros.style.color = 'var(--accent-rose)';
+          ros.title = 'จำนวนผู้มีสิทธิ์มากกว่าที่เฟิร์มแวร์จุดบริการเก็บได้ (ROSTER_MAX) '
+                    + 'ตอนลิงก์ขาดจุดบริการนี้จะรับบัตรทุกใบเหมือนเดิม';
+        } else if (st.rosterOk) {
+          ros.textContent = '📋 รายชื่อออฟไลน์: พร้อมใช้ (รุ่น ' + st.rosterVer + ')';
+          ros.style.color = 'var(--accent-green)';
+          ros.title = 'จุดบริการนี้ตรวจบัตรที่ไม่ได้ลงทะเบียนและบัตรที่ใช้สิทธิ์แล้วได้เองตอนลิงก์ขาด';
+        } else {
+          ros.textContent = '📋 รายชื่อออฟไลน์: กำลังส่งให้...';
+          ros.style.color = 'var(--accent-yellow)';
+          ros.title = 'กำลังผลักรายชื่อรุ่นล่าสุดไปให้ ใช้เวลาไม่กี่วินาที '
+                    + 'ระหว่างนี้ถ้าลิงก์ขาดจุดบริการจะรับบัตรทุกใบไว้ก่อน';
+        }
+        card.appendChild(head); card.appendChild(body); card.appendChild(ros);
         grid.appendChild(card);
       });
     }

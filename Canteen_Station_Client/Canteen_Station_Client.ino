@@ -30,7 +30,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "119.0.0"
+#define APP_VERSION         "120.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -118,7 +118,8 @@ enum MsgType : uint8_t {
   MSG_HEARTBEAT = 1,
   MSG_SCAN_REQ  = 2,
   MSG_SCAN_RESP = 3,
-  MSG_CONFIG    = 4
+  MSG_CONFIG    = 4,
+  MSG_ROSTER    = 5    // แม่ข่ายผลักบัญชีสิทธิ์ย่อมาให้เก็บไว้ตรวจเองตอนลิงก์ขาด
 };
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,40 @@ typedef struct __attribute__((packed)) {
   uint8_t screensaver;
   uint8_t modeSeq;
 } HostConfigPacket;
+
+// ---------------------------------------------------------------------------
+// บัญชีสิทธิ์ย่อ (roster) ที่แม่ข่ายผลักมาให้ — ต้องตรงกับฝั่งแม่ข่ายทุกไบต์
+//
+// เก็บเป็นค่าแฮช 32 บิตของเลขบัตรคู่กับสถานะใช้สิทธิ์ จึงกินแค่ 5 ไบต์ต่อคน
+// เครื่องนี้ไม่เคยได้รับเลขบัตรจริงหรือชื่อนิสิตเลย ถึงเครื่องหายก็ไม่มีข้อมูลส่วนบุคคลติดไป
+// ---------------------------------------------------------------------------
+#define ROSTER_ENTRIES_PER_PKT 38
+#define ROSTER_FLAG_FULL_BEGIN 0x01
+#define ROSTER_FLAG_FULL_END   0x02
+#define ROSTER_FLAG_DELTA      0x04
+
+typedef struct __attribute__((packed)) {
+  uint32_t hash;
+  uint8_t  state;   // 0 = ยังไม่ใช้สิทธิ์, 1 = ใช้สิทธิ์แล้ววันนี้
+} RosterEntry;
+
+typedef struct __attribute__((packed)) {
+  uint8_t  magic;
+  uint8_t  version;
+  uint8_t  msgType;
+  uint8_t  stationId;
+  uint16_t rosterVer;
+  uint16_t totalEntries;
+  uint32_t rosterDate;   // วันที่ของบัญชีแบบ YYYYMMDD ใช้กันข้อมูลข้ามวันค้างเครื่อง
+  uint8_t  chunkIndex;
+  uint8_t  chunkCount;
+  uint8_t  entryCount;
+  uint8_t  flags;
+  RosterEntry entries[ROSTER_ENTRIES_PER_PKT];
+} HostRosterPacket;
+
+static_assert(sizeof(RosterEntry) == 5, "RosterEntry size mismatch");
+static_assert(sizeof(HostRosterPacket) == 206, "HostRosterPacket size mismatch");
 
 static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
 static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
@@ -243,6 +278,33 @@ uint8_t syncRetry            = 0;
 uint16_t syncSeq             = 0;
 unsigned long syncSentAt     = 0;
 volatile bool syncAckReceived = false;
+
+// ---------------------------------------------------------------------------
+// บัญชีสิทธิ์ย่อที่แม่ข่ายผลักมาให้ ใช้ตรวจสิทธิ์เองตอนลิงก์ขาด
+//
+// เดิมตอนแม่ข่ายไม่ตอบ เครื่องนี้รับบัตร "ทุกใบ" เข้าคิวโดยไม่ตรวจอะไรเลย
+// บัตรที่ไม่ได้ลงทะเบียนหรือบัตรที่ใช้สิทธิ์ไปแล้วก็ได้อาหารไปก่อน แล้วค่อยไปตกตอนซิงค์
+// ซึ่งสายเกินกว่าจะเรียกคืนได้ ตอนนี้ตรวจกับบัญชีนี้ก่อนตั้งแต่ตอนแตะ
+//
+// หลักการสำคัญ: ถ้า "ไม่มั่นใจ" ให้ปล่อยผ่านเสมอ (fail open)
+// เพราะการปฏิเสธนิสิตที่มีสิทธิ์จริงเสียหายกว่าการปล่อยบัตรแปลกปลอมผ่านไปหนึ่งใบ
+// ซึ่งแม่ข่ายจะปัดตกตอนซิงค์อยู่ดี กรณีที่ถือว่าไม่มั่นใจคือ ยังไม่เคยได้รับบัญชี
+// กำลังรับชุดใหม่อยู่ หรือบัญชีใหญ่เกินที่เก็บไหว
+// ---------------------------------------------------------------------------
+#define ROSTER_MAX 600
+enum RosterVerdict { ROSTER_UNKNOWN, ROSTER_ELIGIBLE, ROSTER_CLAIMED, ROSTER_NOT_FOUND };
+
+RosterEntry stationRoster[ROSTER_MAX];
+volatile uint16_t rosterCount     = 0;
+volatile uint16_t rosterVer       = 0;    // 0 = ยังไม่มีบัญชีที่เชื่อถือได้
+volatile uint32_t rosterDate      = 0;    // วันที่ของบัญชีชุดที่ถืออยู่ (YYYYMMDD)
+volatile bool     rosterBuilding  = false;
+volatile bool     rosterTruncated = false;
+volatile uint16_t rosterFillNext  = 0;
+volatile uint8_t  rosterNextChunk = 0;
+volatile bool     rosterDirty     = false;
+unsigned long rosterSaveAt        = 0;
+const unsigned long ROSTER_SAVE_GAP_MS = 300000;   // เขียนลง NVS อย่างมาก 5 นาทีครั้ง
 unsigned long syncRetryNotBefore = 0;   // กันการวนลองซิงค์รัวเมื่อแม่ข่ายหายอีก
 
 // ภาพรวมทั้งโรงอาหารที่แม่ข่ายฝากมากับ heartbeat
@@ -336,6 +398,14 @@ void displayStatusScreen(bool fullRedraw);
 void displayScanningUID(String uid);
 void displayResult(String status, String name, String id, String refNo, String claimTime, String msg);
 void displayOfflineAlert();
+uint32_t uidHash32(const String &uid);
+RosterVerdict rosterLookup(const String &uid);
+void rosterMarkClaimedLocal(const String &uid);
+void loadRoster();
+void saveRosterIfDue(bool force);
+void stampRosterVer(StationPacket &pkt);
+uint32_t stationTodayYmd();
+void displayOfflineRejected(const String &uid, bool alreadyUsed);
 void playBootAnimation();
 void runStationIdConfigMode();
 void handlePhysicalButton();
@@ -707,6 +777,66 @@ void displaySyncDone(uint8_t ok, uint8_t rejected) {
   soundSuccess();
 }
 
+
+// จอปฏิเสธบัตรขณะลิงก์ขาด — ตัดสินจากบัญชีสิทธิ์ที่แม่ข่ายผลักมาเก็บไว้ล่วงหน้า
+// ต้องอ่านออกจากระยะที่แม่ค้ายืนอยู่ และต้องบอกชัดว่า "อย่าจ่ายอาหาร"
+// เพราะเคสนี้ต่างจากจอฟ้าที่แปลว่าบันทึกไว้แล้วให้จ่ายได้เลย
+void displayOfflineRejected(const String &uid, bool alreadyUsed) {
+  wakeScreenIfNeeded();
+  if (alreadyUsed) ledDuplicate(); else ledRejected();
+
+  const uint16_t screenBg = alreadyUsed ? 0x2960 : 0x3000;
+  const uint16_t cardBg   = alreadyUsed ? 0x4140 : 0x5000;
+  const uint16_t banner   = alreadyUsed ? ST77XX_ORANGE : 0xF800;
+  const uint16_t muted    = alreadyUsed ? 0xFDC0 : 0xFCAE;
+
+  tft.fillScreen(screenBg);
+  tft.fillRect(0, 0, 320, 34, banner);
+  drawFitCenteredText(0, 0, 320, 34,
+                      alreadyUsed ? "ALREADY USED TODAY" : "CARD NOT IN THE LIST",
+                      2, 0x0000, banner);
+
+  tft.fillRoundRect(8, 40, 304, 142, 8, cardBg);
+  tft.drawRoundRect(8, 40, 304, 142, 8, banner);
+  tft.drawRoundRect(9, 41, 302, 140, 7, banner);
+
+  tft.setTextSize(1);
+  tft.setTextColor(muted, cardBg);
+  tft.setCursor(20, 50);  tft.print("SERVICE STATION:");
+  tft.setCursor(156, 50); tft.print("CARD UID (ENCRYPTED):");
+
+  tft.setTextSize(2);
+  tft.setTextColor(0xFFFF, cardBg);
+  tft.setCursor(20, 62);  tft.printf("STATION 0%d", currentStationId);
+  tft.setCursor(156, 62); tft.print(maskUID(uid));
+
+  tft.drawFastHLine(20, 86, 280, banner);
+
+  tft.setTextSize(1);
+  tft.setTextColor(muted, cardBg);
+  tft.setCursor(20, 94);
+  tft.print("OFFLINE ELIGIBILITY CHECK:");
+
+  tft.setTextSize(3);
+  tft.setTextColor(0xFFFF, cardBg);
+  tft.setCursor(20, 108);
+  tft.print("REJECTED");
+
+  tft.setTextSize(1);
+  tft.setTextColor(muted, cardBg);
+  tft.setCursor(20, 146);
+  tft.print(alreadyUsed ? "THIS CARD ALREADY CLAIMED TODAY"
+                        : "THIS CARD IS NOT REGISTERED");
+  tft.setCursor(20, 162);
+  tft.print("NOTHING WAS RECORDED ON THIS DEVICE");
+
+  tft.fillRoundRect(16, 188, 288, 30, 6, banner);
+  drawFitCenteredText(16, 188, 288, 30, "DO NOT SERVE THE STUDENT", 1, 0x0000, banner);
+
+  drawStationBottomBar("OFFLINE MODE | CHECKED AGAINST SAVED LIST");
+  if (alreadyUsed) soundAlarm(); else soundError();
+}
+
 void displayOfflineAlert() {
   ledOffline();
   tft.fillScreen(0x8000);
@@ -795,6 +925,173 @@ void popOfflineTap() {
   for (int i = 1; i < offlineCount; i++) offlineQueue[i - 1] = offlineQueue[i];
   offlineCount--;
   saveOfflineQueue();
+}
+
+
+// ---------------------------------------------------------------------------
+// บัญชีสิทธิ์ย่อ
+// ---------------------------------------------------------------------------
+
+// FNV-1a 32 บิต ต้องให้ผลเท่ากันเป๊ะกับฝั่งแม่ข่าย ห้ามแก้ข้างเดียว
+uint32_t uidHash32(const String &uid) {
+  uint32_t h = 2166136261UL;
+  for (unsigned int i = 0; i < uid.length(); i++) {
+    h ^= (uint8_t)uid[i];
+    h *= 16777619UL;
+  }
+  return h;
+}
+
+// วันที่ของวันนี้ตามนาฬิกาที่ซิงค์มาจากแม่ข่าย คืน 0 เมื่อยังไม่เคยซิงค์
+uint32_t stationTodayYmd() {
+  struct tm timeinfo;
+  if (!isTimeSynced || !getLocalTime(&timeinfo)) return 0;
+  return (uint32_t)(timeinfo.tm_year + 1900) * 10000UL +
+         (uint32_t)(timeinfo.tm_mon + 1) * 100UL + (uint32_t)timeinfo.tm_mday;
+}
+
+RosterVerdict rosterLookup(const String &uid) {
+  // ไม่มั่นใจเมื่อไร ปล่อยผ่านเมื่อนั้น
+  if (rosterVer == 0 || rosterBuilding || rosterTruncated) return ROSTER_UNKNOWN;
+  if (uid.length() == 0) return ROSTER_UNKNOWN;
+
+  uint32_t h = uidHash32(uid);
+  uint16_t n = rosterCount;
+  for (uint16_t i = 0; i < n; i++) {
+    if (stationRoster[i].hash == h) {
+      if (!stationRoster[i].state) return ROSTER_ELIGIBLE;
+
+      // บัญชีที่ค้างมาจากเมื่อวาน (เช่น เปิดเครื่องตอนเช้าแล้วแม่ข่ายยังไม่ขึ้น)
+      // ยังบอกได้ว่าบัตรใบไหน "อยู่ในทะเบียน" เพราะทะเบียนไม่ได้เปลี่ยนรายวัน
+      // แต่สถานะ "ใช้สิทธิ์แล้ว" ของเมื่อวานใช้ตัดสินวันนี้ไม่ได้ ต้องถือว่ายังไม่ใช้
+      // ไม่งั้นนิสิตที่กินเมื่อวานจะถูกปฏิเสธทั้งหมดในเช้าวันถัดไป
+      uint32_t today = stationTodayYmd();
+      if (today == 0 || rosterDate == 0 || rosterDate != today) return ROSTER_ELIGIBLE;
+      return ROSTER_CLAIMED;
+    }
+  }
+  return ROSTER_NOT_FOUND;
+}
+
+// ทำเครื่องหมายว่าบัตรใบนี้ใช้สิทธิ์ไปแล้วในบัญชีของเครื่องนี้เอง
+// ใช้ตอนรับการแตะเข้าคิวออฟไลน์สำเร็จ เพื่อให้การแตะซ้ำถูกปัดตกทันที
+void rosterMarkClaimedLocal(const String &uid) {
+  if (rosterVer == 0 || rosterBuilding) return;
+  uint32_t h = uidHash32(uid);
+  uint16_t n = rosterCount;
+  for (uint16_t i = 0; i < n; i++) {
+    if (stationRoster[i].hash == h) {
+      if (stationRoster[i].state != 1) {
+        stationRoster[i].state = 1;
+        rosterDirty = true;
+      }
+      return;
+    }
+  }
+}
+
+void loadRoster() {
+  stationPrefs.begin("st_rost", true);
+  uint16_t ver = stationPrefs.getUShort("v", 0);
+  uint16_t n   = stationPrefs.getUShort("n", 0);
+  uint32_t dt  = stationPrefs.getULong("dt", 0);
+  if (ver != 0 && n > 0 && n <= ROSTER_MAX) {
+    size_t need = (size_t)n * sizeof(RosterEntry);
+    if (stationPrefs.getBytesLength("d") == need) {
+      stationPrefs.getBytes("d", stationRoster, need);
+      rosterCount = n;
+      rosterVer = ver;
+      rosterDate = dt;
+    }
+  }
+  stationPrefs.end();
+}
+
+// เขียนลง NVS แบบหน่วงเวลา บัญชีเปลี่ยนบ่อยมาก (ทุกครั้งที่มีคนใช้สิทธิ์)
+// ถ้าเขียนทุกครั้งจะกินอายุแฟลชโดยไม่จำเป็น เพราะข้อมูลนี้เป็นแค่สำเนาไว้กันรีบูต
+void saveRosterIfDue(bool force) {
+  if (!rosterDirty) return;
+  if (!force && (long)(millis() - rosterSaveAt) < 0) return;
+  if (rosterBuilding) return;
+
+  uint16_t n = rosterCount;
+  uint16_t v = rosterVer;
+  stationPrefs.begin("st_rost", false);
+  if (v == 0 || n == 0) {
+    stationPrefs.remove("d");
+    stationPrefs.putUShort("v", 0);
+    stationPrefs.putUShort("n", 0);
+  } else {
+    stationPrefs.putBytes("d", stationRoster, (size_t)n * sizeof(RosterEntry));
+    stationPrefs.putUShort("n", n);
+    stationPrefs.putUShort("v", v);
+    stationPrefs.putULong("dt", rosterDate);
+  }
+  stationPrefs.end();
+
+  rosterDirty = false;
+  rosterSaveAt = millis() + ROSTER_SAVE_GAP_MS;
+}
+
+// ฝากเลขรุ่นบัญชีที่เครื่องนี้ถืออยู่ไปกับ heartbeat ผ่านช่อง offlineTime ที่ว่างอยู่
+// แม่ข่ายเทียบกับเลขรุ่นของตัวเอง ถ้าไม่ตรงจะผลักบัญชีชุดเต็มมาให้ใหม่ภายในไม่กี่วินาที
+// เติม '!' ต่อท้ายเมื่อบัญชีใหญ่เกินที่เครื่องนี้เก็บไหว แม่ข่ายจะได้เอาไปขึ้นเตือนบนแดชบอร์ด
+// แทนที่จะรายงานรุ่น 0 ไปเรื่อย ๆ ซึ่งจะทำให้แม่ข่ายผลักบัญชีชุดเต็มมาใหม่ทุก heartbeat ไม่จบ
+void stampRosterVer(StationPacket &pkt) {
+  snprintf(pkt.offlineTime, sizeof(pkt.offlineTime), "R:%u%s",
+           (unsigned)rosterVer, rosterTruncated ? "!" : "");
+}
+
+// เรียกจากคอลแบ็ก ESP-NOW เท่านั้น งานทั้งหมดเป็น memcpy สั้น ๆ ไม่มีการเขียนแฟลช
+void rosterApplyPacket(const HostRosterPacket &r) {
+  if (r.flags & ROSTER_FLAG_DELTA) {
+    // รับก็ต่อเมื่อเลขรุ่นต่อกันพอดี ถ้าพลาดไปก้อนหนึ่งแปลว่าบัญชีที่ถืออยู่ไม่ครบแล้ว
+    // ทิ้งทั้งบัญชีแล้วกลับไปปล่อยผ่านชั่วคราว ดีกว่าตัดสินด้วยข้อมูลที่รู้ว่าผิด
+    // heartbeat รอบถัดไปจะรายงานรุ่น 0 แล้วแม่ข่ายจะผลักชุดเต็มมาทับให้เอง
+    if (rosterVer == 0 || r.rosterVer != (uint16_t)(rosterVer + 1)) {
+      if (rosterVer != 0) { rosterVer = 0; rosterDirty = true; }
+      return;
+    }
+    if (r.entryCount >= 1) {
+      uint32_t h = r.entries[0].hash;
+      uint16_t n = rosterCount;
+      for (uint16_t i = 0; i < n; i++) {
+        if (stationRoster[i].hash == h) { stationRoster[i].state = r.entries[0].state; break; }
+      }
+    }
+    rosterVer = r.rosterVer;
+    rosterDate = r.rosterDate;
+    rosterDirty = true;
+    return;
+  }
+
+  // ชุดเต็ม: ก้อนแรกตั้งต้นใหม่ ก้อนถัดไปต้องมาตามลำดับ ไม่งั้นทิ้งแล้วรอรอบใหม่
+  if (r.flags & ROSTER_FLAG_FULL_BEGIN) {
+    rosterBuilding  = true;
+    rosterFillNext  = 0;
+    rosterNextChunk = 0;
+    rosterTruncated = (r.totalEntries > ROSTER_MAX);
+  } else if (!rosterBuilding || r.chunkIndex != rosterNextChunk) {
+    return;
+  }
+
+  if (r.chunkIndex != rosterNextChunk) return;
+
+  uint8_t n = r.entryCount;
+  if (n > ROSTER_ENTRIES_PER_PKT) n = ROSTER_ENTRIES_PER_PKT;
+  for (uint8_t k = 0; k < n; k++) {
+    if (rosterFillNext >= ROSTER_MAX) { rosterTruncated = true; break; }
+    stationRoster[rosterFillNext++] = r.entries[k];
+  }
+  rosterNextChunk++;
+
+  if (r.flags & ROSTER_FLAG_FULL_END) {
+    rosterCount    = rosterFillNext;
+    rosterVer      = r.rosterVer;   // รับรุ่นไว้เสมอ ไม่งั้นแม่ข่ายจะผลักชุดเต็มมาซ้ำไม่จบ
+    rosterDate     = r.rosterDate;  // เก็บไม่ครบให้กันไว้ที่ rosterTruncated แทน
+    rosterBuilding = false;
+    rosterDirty    = true;
+  }
 }
 
 void pushStationTap(const char *studentId) {
@@ -1366,6 +1663,7 @@ void displayStatusScreen(bool fullRedraw) {
     tft.setCursor(16, 108); tft.println("BATTERY VOLTAGE  :");
     tft.setCursor(16, 130); tft.println("TODAY SERVED     :");
     tft.setCursor(16, 152); tft.println("STATION MAC      :");
+    tft.setCursor(16, 174); tft.println("OFFLINE CARD LIST:");
 
     tft.setTextColor(getStCyan(), getStCardBg());
     tft.setCursor(140, 64);  tft.printf("STATION 0%d (Active)", currentStationId);
@@ -1416,6 +1714,24 @@ void displayStatusScreen(bool fullRedraw) {
     tft.setCursor(140, 130);
     tft.setTextColor(getStTextMain(), getStCardBg());
     tft.printf("%u pax = %u THB", (unsigned)totalSuccessToday, (unsigned)(totalSuccessToday * 35));
+
+    // บัญชีสิทธิ์ที่แม่ข่ายผลักมาให้ เจ้าหน้าที่ต้องดูออกว่าเครื่องนี้ตรวจบัตรเองได้หรือยัง
+    // ถ้าไม่พร้อม แปลว่าตอนลิงก์ขาดเครื่องจะรับบัตรทุกใบไว้ก่อนเหมือนเฟิร์มแวร์รุ่นก่อน
+    tft.fillRect(140, 172, 166, 14, getStCardBg());
+    tft.setCursor(140, 174);
+    if (rosterTruncated) {
+      tft.setTextColor(getStRose(), getStCardBg());
+      tft.print("TOO BIG - ACCEPT ALL");
+    } else if (rosterBuilding) {
+      tft.setTextColor(getStYellow(), getStCardBg());
+      tft.print("RECEIVING...");
+    } else if (rosterVer == 0) {
+      tft.setTextColor(getStYellow(), getStCardBg());
+      tft.print("NOT LOADED YET");
+    } else {
+      tft.setTextColor(getStGreen(), getStCardBg());
+      tft.printf("READY (%u CARDS)", (unsigned)rosterCount);
+    }
 
     updateStationHeaderStatus(false);
   }
@@ -1722,6 +2038,16 @@ void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int l
     return;
   }
 
+  if (len == sizeof(HostRosterPacket)) {
+    HostRosterPacket r;
+    memcpy(&r, data, sizeof(r));
+    if (r.magic != ESPNOW_PROTO_MAGIC || r.version != ESPNOW_PROTO_VER) return;
+    if (r.msgType != MSG_ROSTER) return;
+    if (r.stationId != 0 && r.stationId != currentStationId) return;
+    rosterApplyPacket(r);
+    return;
+  }
+
   if (len != sizeof(HostResponsePacket)) return;
 
   HostResponsePacket pkt;
@@ -1788,6 +2114,16 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
     cfgModeSeq     = cfg.modeSeq;
     pendingConfigUpdate = true;
     portEXIT_CRITICAL_ISR(&espnowMux);
+    return;
+  }
+
+  if (len == sizeof(HostRosterPacket)) {
+    HostRosterPacket r;
+    memcpy(&r, data, sizeof(r));
+    if (r.magic != ESPNOW_PROTO_MAGIC || r.version != ESPNOW_PROTO_VER) return;
+    if (r.msgType != MSG_ROSTER) return;
+    if (r.stationId != 0 && r.stationId != currentStationId) return;
+    rosterApplyPacket(r);
     return;
   }
 
@@ -1879,6 +2215,7 @@ void saveStationId(uint8_t selectedId) {
   hbPkt.stationId = currentStationId;
   hbPkt.seq = 0;
   hbPkt.systemVoltage = readBatteryVoltage();
+  stampRosterVer(hbPkt);
   sendToHost((uint8_t *)&hbPkt, sizeof(StationPacket));
 }
 
@@ -2178,6 +2515,7 @@ void setup() {
   stationPrefs.end();
 
   loadOfflineQueue();
+  loadRoster();
 
   nextHeartbeatInterval = BASE_HEARTBEAT + (currentStationId * 350) + random(0, 200);
 
@@ -2221,6 +2559,7 @@ void setup() {
     hbPkt.stationId = currentStationId;
     hbPkt.seq = 0;
     hbPkt.systemVoltage = readBatteryVoltage();
+    stampRosterVer(hbPkt);
     sendToHost((uint8_t *)&hbPkt, sizeof(StationPacket));
     delay(30);
   }
@@ -2231,6 +2570,7 @@ void setup() {
 void loop() {
   handlePhysicalButton();
   calculateCpuLoad();
+  saveRosterIfDue(false);   // บันทึกบัญชีสิทธิ์ลง NVS แบบหน่วงเวลา กันเสียของตอนรีบูต
 
   if (currentState == STATE_STATUS && isScreenOn && (millis() - lastCpuDisplayUpdate >= 500)) {
     displayStatusScreen(false);
@@ -2312,9 +2652,22 @@ void loop() {
     // ตอนนี้บันทึกการแตะลงหน่วยความจำถาวรก่อน แล้วให้แม่ค้าจ่ายอาหารไปได้เลย
     String tappedUid = String(pendingScanPacket.uid);
     tappedUid.trim();
+
+    // ตรวจกับบัญชีสิทธิ์ที่แม่ข่ายผลักมาเก็บไว้ก่อนลิงก์ขาด
+    // ถ้าบัญชีใช้การไม่ได้ (ยังไม่เคยได้รับ กำลังรับชุดใหม่ หรือใหญ่เกินเก็บ)
+    // จะได้ ROSTER_UNKNOWN แล้วปล่อยผ่านเหมือนพฤติกรรมเดิมทุกประการ
+    RosterVerdict verdict = rosterLookup(tappedUid);
+
     if (findOfflineTap(tappedUid) >= 0) {
       displayOfflineSaved(tappedUid, true);
+    } else if (verdict == ROSTER_NOT_FOUND) {
+      totalRejectToday++;
+      displayOfflineRejected(tappedUid, false);
+    } else if (verdict == ROSTER_CLAIMED) {
+      totalRejectToday++;
+      displayOfflineRejected(tappedUid, true);
     } else if (enqueueOfflineTap(tappedUid)) {
+      rosterMarkClaimedLocal(tappedUid);
       displayOfflineSaved(tappedUid, false);
     } else {
       displayOfflineAlert();   // คิวเต็ม รับเพิ่มไม่ได้จริง ๆ
@@ -2387,6 +2740,7 @@ void loop() {
     hbPkt.stationId = currentStationId;
     hbPkt.seq = 0;
     hbPkt.systemVoltage = readBatteryVoltage(true);
+    stampRosterVer(hbPkt);
     sendToHost((uint8_t *)&hbPkt, sizeof(StationPacket));
   }
 

@@ -43,7 +43,7 @@
 #define PRINTER_TRANSPORT_UART 0
 #include "ThermalPrinter.h"
 
-#define APP_VERSION         "109.0.0"
+#define APP_VERSION         "110.0.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -144,7 +144,8 @@ struct ActiveSession {
 };
 ActiveSession activeSessions[3];
 
-enum MsgType : uint8_t { MSG_HEARTBEAT = 1, MSG_SCAN_REQ = 2, MSG_SCAN_RESP = 3, MSG_CONFIG = 4 };
+enum MsgType : uint8_t { MSG_HEARTBEAT = 1, MSG_SCAN_REQ = 2, MSG_SCAN_RESP = 3, MSG_CONFIG = 4,
+                        MSG_ROSTER = 5 };
 
 // ---------------------------------------------------------------------------
 // บังคับให้ ESP-NOW ใช้อัตราส่งแบบ Long Range (250 kbps) ซึ่งรับสัญญาณอ่อนได้ดีขึ้นมาก
@@ -203,6 +204,49 @@ typedef struct __attribute__((packed)) {
   uint8_t modeSeq;
 } HostConfigPacket;
 
+// ---------------------------------------------------------------------------
+// บัญชีสิทธิ์ย่อ (roster) ที่แม่ข่ายผลักไปเก็บไว้ที่สถานี
+//
+// เดิมตอนลิงก์ขาด สถานีรับบัตร "ทุกใบ" เข้าคิวออฟไลน์โดยไม่ตรวจอะไรเลย
+// บัตรที่ไม่ได้ลงทะเบียนหรือบัตรที่ใช้สิทธิ์ไปแล้วก็ได้รับอาหารไปก่อน
+// แล้วค่อยไปตกตอนซิงค์ ซึ่งสายเกินกว่าจะเรียกคืนได้
+//
+// แก้ด้วยการส่งบัญชีย่อไปเก็บไว้ที่สถานีล่วงหน้า เก็บเป็นค่าแฮช 32 บิตของเลขบัตร
+// คู่กับสถานะว่าใช้สิทธิ์ไปแล้วหรือยัง จึงใช้แค่ 5 ไบต์ต่อคน (นิสิต 600 คน = 3 KB)
+// สถานีไม่เคยได้รับเลขบัตรจริงหรือชื่อนิสิตเลย ถึงเครื่องหายก็ไม่มีข้อมูลส่วนบุคคลติดไป
+//
+// ค่าแฮชชนกันได้ตามทฤษฎี (FNV-1a 32 บิต นิสิต 600 คน โอกาสราว 0.004%)
+// ผลของการชนคือบัตรแปลกปลอมใบหนึ่งผ่านด่านออฟไลน์ไปได้ ซึ่งแม่ข่ายจะปัดตกตอนซิงค์
+// เท่ากับกลับไปเท่าพฤติกรรมเดิมเฉพาะบัตรใบนั้น ไม่ได้แย่ลงกว่าเดิม
+// ---------------------------------------------------------------------------
+#define ROSTER_ENTRIES_PER_PKT 38
+#define ROSTER_FLAG_FULL_BEGIN 0x01   // ชุดเต็ม เริ่มนับใหม่ทั้งบัญชี
+#define ROSTER_FLAG_FULL_END   0x02   // ชุดเต็ม ก้อนสุดท้ายแล้ว
+#define ROSTER_FLAG_DELTA      0x04   // อัปเดตทีละรายการ
+
+typedef struct __attribute__((packed)) {
+  uint32_t hash;    // FNV-1a 32 บิตของเลขบัตร
+  uint8_t  state;   // 0 = ยังไม่ใช้สิทธิ์, 1 = ใช้สิทธิ์แล้ววันนี้
+} RosterEntry;
+
+typedef struct __attribute__((packed)) {
+  uint8_t  magic;
+  uint8_t  version;
+  uint8_t  msgType;      // MSG_ROSTER
+  uint8_t  stationId;    // 0 = ทุกสถานี
+  uint16_t rosterVer;    // เลขรุ่นของบัญชี ใช้เทียบว่าสถานีตามทันหรือยัง
+  uint16_t totalEntries;
+  uint32_t rosterDate;   // วันที่ของบัญชีแบบ YYYYMMDD ใช้กันข้อมูลข้ามวันค้างเครื่อง
+  uint8_t  chunkIndex;
+  uint8_t  chunkCount;
+  uint8_t  entryCount;
+  uint8_t  flags;
+  RosterEntry entries[ROSTER_ENTRIES_PER_PKT];
+} HostRosterPacket;
+
+static_assert(sizeof(RosterEntry) == 5, "RosterEntry size mismatch");
+static_assert(sizeof(HostRosterPacket) == 206, "HostRosterPacket size mismatch");
+
 static_assert(sizeof(StationPacket) == 50, "StationPacket size mismatch");
 static_assert(sizeof(HostResponsePacket) == 200, "HostResponsePacket size mismatch");
 static_assert(sizeof(HostConfigPacket) == 8, "HostConfigPacket size mismatch");
@@ -227,6 +271,17 @@ unsigned long lastRespRetryAt = 0;
 
 uint16_t lastScanSeq[4] = {0, 0, 0, 0};
 bool hasLastScanSeq[4] = {false, false, false, false};
+
+// สถานะการผลักบัญชีสิทธิ์ไปยังแต่ละสถานี
+uint16_t rosterVer = 1;                       // 0 สงวนไว้แปลว่า "ยังไม่มีบัญชี"
+std::vector<RosterEntry> rosterSnapshot;      // ภาพนิ่งที่กำลังทยอยส่ง
+uint16_t rosterSnapshotVer = 0;
+uint16_t stationRosterVer[4] = {0, 0, 0, 0};  // เลขรุ่นที่แต่ละสถานีรายงานกลับมา
+bool stationRosterTooBig[4] = {false, false, false, false};  // สถานีบอกว่าบัญชีใหญ่เกินเก็บไหว
+bool     rosterPushActive[4] = {false, false, false, false};
+uint8_t  rosterPushChunk[4]  = {0, 0, 0, 0};
+unsigned long rosterPushNextAt = 0;
+const unsigned long ROSTER_CHUNK_GAP_MS = 30;
 HostResponsePacket lastScanResponse[4] = {};
 
 struct Student {
@@ -323,6 +378,15 @@ void broadcastStationConfig();
 void setHostScreenPower(bool on);
 void announceHostMode();
 void fillSystemSummary(HostResponsePacket &pkt);
+uint32_t uidHash32(const String &uid);
+void bumpRosterVer();
+void rebuildRosterSnapshot();
+void startRosterPush(uint8_t stationId);
+void serviceRosterPush();
+void sendRosterDelta(const String &uid, uint8_t state);
+void noteStationRosterVer(uint8_t stationId, const char *stamp);
+uint16_t countRosterEligible();
+uint32_t todayYmd();
 void applyEspNowRate(const uint8_t *peerAddr);
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status);
@@ -821,6 +885,172 @@ void broadcastStationConfig() {
   HostConfigPacket cfg = {};
   fillStationConfig(cfg, 0);
   esp_now_send(broadcastAddress, (uint8_t *)&cfg, sizeof(cfg));
+}
+
+
+// ---------------------------------------------------------------------------
+// บัญชีสิทธิ์ย่อที่ผลักไปเก็บที่สถานี เพื่อให้ตรวจสิทธิ์ได้เองตอนลิงก์ขาด
+// ---------------------------------------------------------------------------
+
+// FNV-1a 32 บิต ต้องให้ผลเท่ากันเป๊ะทั้งสองฝั่ง ห้ามแก้ข้างเดียว
+uint32_t uidHash32(const String &uid) {
+  uint32_t h = 2166136261UL;
+  for (unsigned int i = 0; i < uid.length(); i++) {
+    h ^= (uint8_t)uid[i];
+    h *= 16777619UL;
+  }
+  return h;
+}
+
+// เรียกทุกครั้งที่ "ชุดผู้มีสิทธิ์" หรือ "สถานะใช้สิทธิ์" เปลี่ยน
+// สถานีรายงานเลขรุ่นที่ตัวเองถืออยู่มากับ heartbeat ถ้าไม่ตรงแม่ข่ายจะผลักชุดเต็มให้ใหม่
+void bumpRosterVer() {
+  rosterVer++;
+  if (rosterVer == 0) rosterVer = 1;   // 0 สงวนไว้แปลว่ายังไม่มีบัญชี
+}
+
+// วันที่ของวันนี้แบบ YYYYMMDD ติดไปกับบัญชีทุกชุด
+uint32_t todayYmd() {
+  DateTime now = rtc.now();
+  return (uint32_t)now.year() * 10000UL + (uint32_t)now.month() * 100UL + (uint32_t)now.day();
+}
+
+uint16_t countRosterEligible() {
+  uint16_t n = 0;
+  for (const auto &st : db) {
+    if (st.uid.length() > 0) n++;
+  }
+  return n;
+}
+
+void rebuildRosterSnapshot() {
+  rosterSnapshot.clear();
+  rosterSnapshot.reserve(db.size());
+  for (const auto &st : db) {
+    if (st.uid.length() == 0) continue;   // ไม่มีบัตรผูกอยู่ ไม่ต้องส่งไปกินที่
+    RosterEntry e;
+    e.hash  = uidHash32(st.uid);
+    e.state = st.claimed ? 1 : 0;
+    rosterSnapshot.push_back(e);
+  }
+  rosterSnapshotVer = rosterVer;
+}
+
+void startRosterPush(uint8_t stationId) {
+  if (stationId < 1 || stationId > 4) return;
+  if (rosterSnapshotVer != rosterVer) rebuildRosterSnapshot();
+  rosterPushActive[stationId - 1] = true;
+  rosterPushChunk[stationId - 1]  = 0;
+}
+
+// ส่งทีละก้อน ก้อนละ 30 ms เพื่อไม่ให้คิวส่งของ ESP-NOW ล้นและไม่แย่งจังหวะการสแกนสด
+void serviceRosterPush() {
+  if ((long)(millis() - rosterPushNextAt) < 0) return;
+
+  int total = (int)rosterSnapshot.size();
+  int chunkCount = (total + ROSTER_ENTRIES_PER_PKT - 1) / ROSTER_ENTRIES_PER_PKT;
+  if (chunkCount == 0) chunkCount = 1;   // บัญชีว่างก็ยังต้องบอกสถานีว่าว่าง
+
+  for (int i = 0; i < 4; i++) {
+    if (!rosterPushActive[i]) continue;
+
+    // ระหว่างทยอยส่ง ถ้าบัญชีเปลี่ยนไปแล้วให้ตั้งต้นใหม่ ไม่งั้นสถานีจะได้ของปนรุ่น
+    if (rosterSnapshotVer != rosterVer) {
+      rebuildRosterSnapshot();
+      rosterPushChunk[i] = 0;
+      total = (int)rosterSnapshot.size();
+      chunkCount = (total + ROSTER_ENTRIES_PER_PKT - 1) / ROSTER_ENTRIES_PER_PKT;
+      if (chunkCount == 0) chunkCount = 1;
+    }
+
+    int idx = rosterPushChunk[i];
+    HostRosterPacket pkt = {};
+    pkt.magic        = ESPNOW_PROTO_MAGIC;
+    pkt.version      = ESPNOW_PROTO_VER;
+    pkt.msgType      = MSG_ROSTER;
+    pkt.stationId    = i + 1;
+    pkt.rosterVer    = rosterSnapshotVer;
+    pkt.totalEntries = (uint16_t)total;
+    pkt.rosterDate   = todayYmd();
+    pkt.chunkIndex   = (uint8_t)idx;
+    pkt.chunkCount   = (uint8_t)chunkCount;
+
+    int from = idx * ROSTER_ENTRIES_PER_PKT;
+    int n = total - from;
+    if (n < 0) n = 0;
+    if (n > ROSTER_ENTRIES_PER_PKT) n = ROSTER_ENTRIES_PER_PKT;
+    pkt.entryCount = (uint8_t)n;
+    for (int k = 0; k < n; k++) pkt.entries[k] = rosterSnapshot[from + k];
+
+    if (idx == 0) pkt.flags |= ROSTER_FLAG_FULL_BEGIN;
+    if (idx == chunkCount - 1) pkt.flags |= ROSTER_FLAG_FULL_END;
+
+    sendToStation(i + 1, (uint8_t *)&pkt, sizeof(pkt));
+
+    rosterPushChunk[i]++;
+    if (rosterPushChunk[i] >= chunkCount) rosterPushActive[i] = false;
+
+    rosterPushNextAt = millis() + ROSTER_CHUNK_GAP_MS;
+    return;   // ก้อนเดียวต่อรอบ วนไปสถานีถัดไปในรอบหน้า
+  }
+}
+
+// อัปเดตทีละรายการตอนมีคนใช้สิทธิ์ ถูกกว่าการผลักบัญชีทั้งชุดใหม่ 268 ครั้งต่อวัน
+// สถานีจะรับก็ต่อเมื่อเลขรุ่นที่ถืออยู่เป็น rosterVer - 1 พอดี ถ้าพลาดไปก้อนหนึ่ง
+// เลขรุ่นจะไม่ตรงกันและ heartbeat รอบถัดไปจะดึงชุดเต็มมาทับเอง
+void sendRosterDelta(const String &uid, uint8_t state) {
+  if (uid.length() == 0) return;
+
+  RosterEntry e;
+  e.hash = uidHash32(uid);
+  e.state = state;
+
+  // ให้ภาพนิ่งที่ค้างอยู่ตรงกับความจริงด้วย เผื่อกำลังทยอยส่งให้สถานีอื่นอยู่
+  if (rosterSnapshotVer == rosterVer - 1) {
+    for (auto &entry : rosterSnapshot) {
+      if (entry.hash == e.hash) { entry.state = state; break; }
+    }
+    rosterSnapshotVer = rosterVer;
+  }
+
+  for (int i = 0; i < 4; i++) {
+    if (!stationNodes[i].isOnline) continue;
+    HostRosterPacket pkt = {};
+    pkt.magic        = ESPNOW_PROTO_MAGIC;
+    pkt.version      = ESPNOW_PROTO_VER;
+    pkt.msgType      = MSG_ROSTER;
+    pkt.stationId    = i + 1;
+    pkt.rosterVer    = rosterVer;
+    pkt.totalEntries = 0;
+    pkt.rosterDate   = todayYmd();
+    pkt.chunkIndex   = 0;
+    pkt.chunkCount   = 1;
+    pkt.entryCount   = 1;
+    pkt.flags        = ROSTER_FLAG_DELTA;
+    pkt.entries[0]   = e;
+    sendToStation(i + 1, (uint8_t *)&pkt, sizeof(pkt));
+  }
+}
+
+// สถานีฝากเลขรุ่นบัญชีที่ตัวเองถืออยู่มากับช่อง offlineTime ของ heartbeat
+// (ช่องนั้นว่างอยู่แล้วในข้อความชนิดนี้ จึงไม่ต้องขยายขนาดแพ็กเก็ต
+//  และเฟิร์มแวร์สถานีรุ่นเก่าที่ไม่ได้ฝากอะไรมาจะถูกมองว่าเป็นรุ่น 0 = ยังไม่มีบัญชี)
+void noteStationRosterVer(uint8_t stationId, const char *stamp) {
+  if (stationId < 1 || stationId > 4) return;
+
+  uint16_t reported = 0;
+  bool tooBig = false;
+  if (stamp && stamp[0] == 'R' && stamp[1] == ':') {
+    long v = atol(stamp + 2);       // atol หยุดเองเมื่อเจอ '!' ที่ต่อท้าย
+    if (v > 0 && v <= 65535) reported = (uint16_t)v;
+    tooBig = (strchr(stamp, '!') != NULL);
+  }
+  stationRosterVer[stationId - 1] = reported;
+  stationRosterTooBig[stationId - 1] = tooBig;
+
+  if (reported != rosterVer && !rosterPushActive[stationId - 1]) {
+    startRosterPush(stationId);
+  }
 }
 
 void setHostScreenPower(bool on) {
@@ -1676,7 +1906,10 @@ void onDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   }
 
   if (pkt.msgType == MSG_HEARTBEAT) {
-    if (stId >= 1 && stId <= 4) hbAckPending[stId - 1] = true;
+    if (stId >= 1 && stId <= 4) {
+      hbAckPending[stId - 1] = true;
+      noteStationRosterVer(stId, pkt.offlineTime);
+    }
     return;
   }
 
@@ -1849,6 +2082,15 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
     if (printerAutoSlip && !isOfflineSync) {
       printClaimSlip(*matchedStudent);
     }
+
+    // บอกทุกสถานีว่าบัตรใบนี้ใช้สิทธิ์ไปแล้ว เพื่อให้ปัดตกได้เองถ้าลิงก์ขาดหลังจากนี้
+    // ส่งทีละรายการแทนการผลักบัญชีทั้งชุด ซึ่งถ้าทำทุกครั้งจะกินอากาศวันละ 268 รอบ
+    // กรณีบัตรสำรองไม่ส่ง เพราะอีกสองบรรทัดถัดไปเลขบัตรของนิสิตคนนี้กำลังจะเปลี่ยน
+    // แล้ว saveDatabaseToFS() จะผลักบัญชีชุดเต็มตามไปเองอยู่แล้ว
+    if (!matchedStudent->isTempCard) {
+      bumpRosterVer();
+      sendRosterDelta(matchedStudent->uid, 1);
+    }
     
     if (matchedStudent->isTempCard) {
       if (matchedStudent->originalUid != "") {
@@ -1904,6 +2146,9 @@ void handleDashboardAPI() {
   j += ",\"serviceOpen\":" + String(isWithinServiceTime() ? "true" : "false");
   j += ",\"window\":\"" + String(win) + "\"";
 
+  j += ",\"roster\":{\"ver\":" + String((unsigned)rosterVer);
+  j += ",\"entries\":" + String((unsigned)countRosterEligible()) + "}";
+
   j += ",\"printer\":{\"enabled\":" + String(ENABLE_THERMAL_PRINTER ? "true" : "false");
   j += ",\"ready\":" + String(printerIsConnected() ? "true" : "false");
   j += ",\"auto\":" + String(printerAutoSlip ? "true" : "false");
@@ -1931,6 +2176,9 @@ void handleDashboardAPI() {
     j += ",\"battPct\":" + String(on ? getHostBatteryPercentage(stationNodes[i].systemVoltage) : 0);
     j += ",\"volt\":" + String(on ? stationNodes[i].systemVoltage : 0.0f, 2);
     j += ",\"ageSec\":" + String(on ? (unsigned long)((millis() - stationNodes[i].lastSeen) / 1000UL) : 0UL);
+    j += ",\"rosterVer\":" + String((unsigned)stationRosterVer[i]);
+    j += ",\"rosterOk\":" + String((on && stationRosterVer[i] == rosterVer && !stationRosterTooBig[i]) ? "true" : "false");
+    j += ",\"rosterTooBig\":" + String(stationRosterTooBig[i] ? "true" : "false");
     j += "}";
   }
   j += "]";
@@ -2489,6 +2737,13 @@ void restoreDailyLogs() {
 }
 
 void saveDatabaseToFS() {
+  // ทุกเส้นทางที่แก้ "ชุดผู้มีสิทธิ์" (เพิ่ม ลบ แก้ไข ผูกบัตรสำรอง นำเข้า CSV ปิดยอด)
+  // ผ่านฟังก์ชันนี้ทั้งหมด จึงเป็นจุดเดียวที่ต้องเลื่อนเลขรุ่นบัญชีและผลักของใหม่ให้สถานี
+  bumpRosterVer();
+  for (int i = 0; i < 4; i++) {
+    if (stationNodes[i].isOnline) startRosterPush(i + 1);
+  }
+
   File file = LittleFS.open("/students.csv", "w");
   if (!file) return;
   file.println("studentId,fullName,uid");
@@ -3148,6 +3403,7 @@ void loop() {
   handleHostButton();
   calculateCpuLoad();
   printerLoop();      // ทยอยปล่อยข้อมูลสลิปออกทีละก้อน ไม่บล็อกลูปหลัก
+  serviceRosterPush();// ทยอยผลักบัญชีสิทธิ์ไปยังสถานีที่ยังตามไม่ทัน
 
   ScanQueueItem item;
   if (scanQueue != NULL && xQueueReceive(scanQueue, &item, 0) == pdTRUE) {
