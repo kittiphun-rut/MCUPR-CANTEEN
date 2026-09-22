@@ -1,14 +1,32 @@
 /**
- * ============================================================================
- * HostScreen.h — ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
+ * @file      HostScreen.h
+ * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
+ * @version   113.2.0
+ * @date      2026-09-22
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
+ * @par Organization
+ * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
+ *
+ * @par Description
  * แยกออกมาจาก Canteen_Host_Server.ino เพื่อให้ไฟล์หลักสั้นและอ่านง่าย
- * นิสิตที่มารับช่วงดูแลต่อจะได้หาของเจอเร็วขึ้น ไม่ต้องไล่อ่านไฟล์เดียวสามพันบรรทัด
+ * นิสิตที่มารับช่วงดูแลต่อจะได้หาของเจอเร็วขึ้น
  *
- * ไฟล์นี้ถูก #include ไว้ท้ายไฟล์หลักก่อน setup() เพราะโค้ดข้างในอ้างถึง
- * ตัวแปรส่วนกลางและฟังก์ชันช่วยเหลือที่ประกาศไว้ข้างบน
- * **อย่าย้าย #include ขึ้นไปไว้บนสุด**
- * ============================================================================
+ * มีสามหน้าหลักสลับด้วยปุ่มกด TODAY / SHOPS / SYSTEM
+ * พร้อมหน้าพักจอ หน้าแจ้งผลการแตะบัตร หน้าแจ้งสถานะ Wi-Fi ตอนบูต และหน้าเครดิต
+ *
+ * ข้อความบนจอเป็นภาษาอังกฤษอย่างเดียว เพราะฟอนต์ในตัวไลบรารี Adafruit GFX
+ * ไม่มีตัวอักษรไทย ส่วนหน้าเว็บเป็นสองภาษา
+ *
+ * @par Revision History
+ * | Version | Date | Change |
+ * |---|---|---|
+ * | 113.2.0 | 2026-09-22 | วาดซ้ำเฉพาะช่องที่ค่าเปลี่ยน ยอดรายร้านและยอดบนหน้าพักจออัปเดตเองแล้ว |
+ * | 113.0.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก แล้วออกแบบหน้าจอใหม่ให้เรียบง่าย ตัวอักษรน้อย แบ่งช่องชัดเจน และรองรับสองโหมดสี |
+ * | 107.0.1 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
+ *
+ * @warning  ถูก #include ท้ายไฟล์หลักก่อน setup() ห้ามย้ายขึ้นไปบนสุด
+ * @note     Arduino IDE แสดงไฟล์นี้เป็นแท็บของสเก็ตช์เดียวกัน เปิดคู่กันได้เลย
  */
 
 #pragma once
@@ -148,6 +166,8 @@ void playBootAnimation() {
 
 // หน้าบอกสถานะเครือข่ายตอนบูต ค้างไว้สามวินาที
 // มีไว้เพราะเคยเจอปัญหาชื่อ Wi-Fi ไม่โผล่มา แล้วไม่มีอะไรบนเครื่องบอกเลยว่าเกิดอะไรขึ้น
+// [113.0.0] เพิ่ม: บอกสถานะ Wi-Fi ตอนบูต ค้างไว้สามวินาที
+//           เคยเจอปัญหาชื่อ Wi-Fi ไม่โผล่มา แล้วไม่มีอะไรบนเครื่องบอกว่าเกิดอะไรขึ้น
 void showBootNetworkStatus() {
   tft.fillScreen(getTftBg());
   drawHostTopBar("NETWORK");
@@ -193,6 +213,7 @@ void showBootNetworkStatus() {
 
 // --- ชิ้นส่วนเพิ่มเติมสำหรับหน้าจอแบบใหม่ ---
 
+// [113.0.0] เพิ่ม: ชุดชิ้นส่วนสำหรับหน้าจอแบบใหม่
 // ตัดข้อความให้พอดีความกว้างที่ให้มา (ฟอนต์ในตัวกว้างตัวละ 6 พิกเซลต่อขนาด 1)
 String fitLabel(const String &raw, int maxChars) {
   if ((int)raw.length() <= maxChars) return raw;
@@ -226,6 +247,8 @@ void drawProgressBar(int x, int y, int w, int h, int pct) {
 // --- หน้าจอเต็ม: สามหน้าหลัก โหมดพักจอ ผลการสแกน และหน้าเครดิต ---
 // ออกแบบใหม่ให้คนที่ไม่ใช่ช่างอ่านออกในสายตาเดียว
 // หน้า 1 ยอดวันนี้ | หน้า 2 ร้านค้าและจุดบริการ | หน้า 3 ข้อมูลเครื่อง
+// [113.0.0] แก้: ออกแบบสามหน้าหลักใหม่ให้คนที่ไม่ใช่ช่างอ่านออกในสายตาเดียว
+//           หน้า 1 ยอดวันนี้ | หน้า 2 ร้านค้าและจุดบริการ | หน้า 3 ข้อมูลเครื่อง
 void renderHostPage(bool fullRedraw) {
   if (isLiveScanDisplaying) return;
   if (isCreditActive) { renderDeveloperCredit(); return; }
@@ -260,52 +283,77 @@ void renderHostPage(bool fullRedraw) {
       drawBentoBottomBar("Click: next page    Double click: sleep");
     }
 
+    // [113.2.0] แก้: วาดซ้ำเฉพาะช่องที่ค่าเปลี่ยนจริง ของเดิมล้างแล้ววาดใหม่ทุกวินาที
+    //           ทั้งที่ตัวเลขส่วนใหญ่ไม่ได้เปลี่ยน จอจึงกะพริบตลอดเวลา
+    static int lastUsed = -1, lastTotal = -1;
+    static String lastClock = "", lastDate = "";
+    static int lastOpen = -1;
+
     // ช่องซ้าย: จำนวนจานที่จ่ายไปแล้ว พร้อมแถบความคืบหน้า
-    tft.fillRect(12, 54, 140, 60, getTftCardBg());
-    tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.setTextSize(4);
-    tft.setCursor(14, 56);
-    tft.printf("%d", usedCount);
-    tft.setTextSize(1);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setCursor(14, 92);
-    tft.printf("of %d students", (int)db.size());
-    int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
-    drawProgressBar(14, 106, 134, 6, pct);
+    if (fullRedraw || usedCount != lastUsed || (int)db.size() != lastTotal) {
+      tft.fillRect(12, 54, 140, 60, getTftCardBg());
+      tft.setTextColor(getTftTextMain(), getTftCardBg());
+      tft.setTextSize(4);
+      tft.setCursor(14, 56);
+      tft.printf("%d", usedCount);
+      tft.setTextSize(1);
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(14, 92);
+      tft.printf("of %d students", (int)db.size());
+      int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
+      drawProgressBar(14, 106, 134, 6, pct);
 
-    // ช่องขวา: เป็นเงินเท่าไร
-    tft.fillRect(170, 54, 140, 60, getTftCardBg());
-    tft.setTextColor(getTftAccentGreen(), getTftCardBg());
-    tft.setTextSize(4);
-    tft.setCursor(172, 56);
-    tft.printf("%d", usedCount * 35);
-    tft.setTextSize(1);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setCursor(172, 92);
-    tft.print("35 baht per student");
+      // ช่องขวา: เป็นเงินเท่าไร เปลี่ยนพร้อมกันกับจำนวนจานเสมอ
+      tft.fillRect(170, 54, 140, 60, getTftCardBg());
+      tft.setTextColor(getTftAccentGreen(), getTftCardBg());
+      tft.setTextSize(4);
+      tft.setCursor(172, 56);
+      tft.printf("%d", usedCount * 35);
+      tft.setTextSize(1);
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(172, 92);
+      tft.print("35 baht per student");
 
-    // ช่องล่าง: นาฬิกา วันที่ และเปิด/ปิดบริการ
-    tft.fillRect(12, 148, 296, 56, getTftCardBg());
-    tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.setTextSize(4);
-    tft.setCursor(14, 150);
-    tft.print(getTimeOnlyStr());
-    tft.setTextSize(1);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setCursor(14, 186);
-    tft.print(getDateFormattedStr());
+      lastUsed = usedCount;
+      lastTotal = (int)db.size();
+    }
 
-    char hours[16];
-    snprintf(hours, sizeof(hours), "%02d:%02d-%02d:%02d",
-             serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+    // ช่องล่าง: นาฬิกาเดินทุกวินาที จึงล้างเฉพาะกรอบของนาฬิกา ไม่ล้างทั้งการ์ด
+    String nowClock = getTimeOnlyStr();
+    if (fullRedraw || nowClock != lastClock) {
+      tft.fillRect(12, 148, 196, 34, getTftCardBg());
+      tft.setTextColor(getTftTextMain(), getTftCardBg());
+      tft.setTextSize(4);
+      tft.setCursor(14, 150);
+      tft.print(nowClock);
+      lastClock = nowClock;
+    }
+
+    String nowDate = getDateFormattedStr();
+    if (fullRedraw || nowDate != lastDate) {
+      tft.fillRect(12, 184, 190, 12, getTftCardBg());
+      tft.setTextSize(1);
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(14, 186);
+      tft.print(nowDate);
+      lastDate = nowDate;
+    }
+
     bool isOpen = isWithinServiceTime();
-    drawBentoPillBadge(214, 152, 94, 22, isOpen ? "OPEN" : "CLOSED",
-                       isTftDarkMode ? 0x0000 : BENTO_WHITE,
-                       isOpen ? getTftAccentGreen() : getTftAccentRose());
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(214 + (94 - (int)strlen(hours) * 6) / 2, 182);
-    tft.print(hours);
+    if (fullRedraw || (int)isOpen != lastOpen) {
+      char hours[16];
+      snprintf(hours, sizeof(hours), "%02d:%02d-%02d:%02d",
+               serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+      tft.fillRect(210, 148, 100, 48, getTftCardBg());
+      drawBentoPillBadge(214, 152, 94, 22, isOpen ? "OPEN" : "CLOSED",
+                         isTftDarkMode ? 0x0000 : BENTO_WHITE,
+                         isOpen ? getTftAccentGreen() : getTftAccentRose());
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setTextSize(1);
+      tft.setCursor(214 + (94 - (int)strlen(hours) * 6) / 2, 182);
+      tft.print(hours);
+      lastOpen = (int)isOpen;
+    }
   }
   // ==========================================================================
   // หน้า 2 — ร้านค้าและจุดบริการ สี่ช่อง เจ้าของร้านดูยอดของตัวเองได้ทันที
@@ -328,10 +376,19 @@ void renderHostPage(bool fullRedraw) {
 
         // ชื่อร้านมาก่อน เพราะเจ้าของร้านมองหาชื่อตัวเอง ไม่ได้มองหาเลขจุดบริการ
         // เต็มความกว้างการ์ด ไม่มีอะไรมาวาดทับภายหลัง
+        // ชื่อร้านเปลี่ยนได้เฉพาะตอนบันทึกจากหน้าเว็บ ซึ่งสั่งวาดใหม่ทั้งจออยู่แล้ว
         tft.setTextColor(getTftTextMain(), getTftCardBg());
         tft.setTextSize(1);
         tft.setCursor(x + 8, y + 7);
         tft.print(fitLabel(shops[i].name, 22));
+      }
+
+      // [113.2.0] แก้: ยอดของร้านเคยวาดเฉพาะตอนวาดใหม่ทั้งจอ พอมีคนมารับอาหาร
+      //           ขณะเปิดหน้านี้ค้างไว้ ตัวเลขจึงไม่ขยับจนกว่าจะมีอะไรมาสั่งวาดใหม่
+      //           ย้ายออกมาข้างนอก แล้ววาดซ้ำเฉพาะตอนค่าเปลี่ยนจริง
+      static int lastShopCount[4] = {-1, -1, -1, -1};
+      if (fullRedraw || shopCounts[i] != lastShopCount[i]) {
+        tft.fillRect(x + 6, y + 34, w - 12, 30, getTftCardBg());
 
         // ยอดของร้าน ตัวเลขจานใหญ่สุดในการ์ด อ่านได้จากอีกฝั่งของโรงอาหาร
         tft.setTextColor(getTftTextMain(), getTftCardBg());
@@ -347,6 +404,8 @@ void renderHostPage(bool fullRedraw) {
         tft.setTextColor(getTftAccentGreen(), getTftCardBg());
         tft.setCursor(x + 14 + numW, y + 52);
         tft.printf("%d baht", shopCounts[i] * 35);
+
+        lastShopCount[i] = shopCounts[i];
       }
 
       // สองแถวนี้วาดซ้ำทุกรอบ จึงล้างพื้นที่ของตัวเองก่อน และต้องไม่ทับชื่อร้าน
@@ -400,51 +459,78 @@ void renderHostPage(bool fullRedraw) {
       drawBentoBottomBar("Click: next page    Double click: sleep");
     }
 
-    // ผลการแตะบัตรครั้งล่าสุด
-    tft.fillRect(12, 54, 296, 58, getTftCardBg());
-    if (lastScannedUID != "-" && lastScannedUID.length() > 0) {
-      tft.setTextColor(getTftTextMain(), getTftCardBg());
-      tft.setTextSize(3);
-      tft.setCursor(14, 56);
-      tft.print(lastScannedStudentId != "-" ? lastScannedStudentId : String("Unknown card"));
+    // [113.2.0] แก้: วาดผลการแตะบัตรซ้ำเฉพาะตอนมีการแตะใหม่จริง
+    static String lastShownRef = "\x01";
+    String stamp = lastScannedRef + "|" + lastScannedStatus + "|" + lastScannedUID;
+    bool scanChanged = (fullRedraw || stamp != lastShownRef);
+    if (scanChanged) lastShownRef = stamp;
 
-      tft.setTextSize(1);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(14, 86);
-      tft.printf("Point %d   card %s", lastScannedStation, maskUID(lastScannedUID).c_str());
+    if (scanChanged) {
+      tft.fillRect(12, 54, 296, 58, getTftCardBg());
+      if (lastScannedUID != "-" && lastScannedUID.length() > 0) {
+        tft.setTextColor(getTftTextMain(), getTftCardBg());
+        tft.setTextSize(3);
+        tft.setCursor(14, 56);
+        tft.print(lastScannedStudentId != "-" ? lastScannedStudentId : String("Unknown card"));
 
-      const char* word; uint16_t tone;
-      if (lastScannedStatus == "APPROVED")         { word = "SERVED";         tone = getTftAccentGreen(); }
-      else if (lastScannedStatus == "DUPLICATE")   { word = "ALREADY SERVED"; tone = getTftAccentYellow(); }
-      else if (lastScannedStatus == "TIME_CLOSED") { word = "CLOSED NOW";     tone = getTftAccentYellow(); }
-      else                                         { word = "NOT ON LIST";    tone = getTftAccentRose(); }
-      drawBentoPillBadge(14, 98, 130, 14, word,
-                         isTftDarkMode ? 0x0000 : BENTO_WHITE, tone);
+        tft.setTextSize(1);
+        tft.setTextColor(getTftTextMuted(), getTftCardBg());
+        tft.setCursor(14, 86);
+        tft.printf("Point %d   card %s", lastScannedStation, maskUID(lastScannedUID).c_str());
 
-      // เลขอ้างอิงยาวกว่าที่การ์ดรับไหว จึงโชว์ท้ายเลข ซึ่งเป็นส่วนที่ไม่ซ้ำกัน
-      String ref = lastScannedRef;
-      if (ref.length() > 24) ref = "." + ref.substring(ref.length() - 23);
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(152, 101);
-      tft.print(ref);
-    } else {
-      tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(14, 72);
-      tft.print("No card tapped yet");
+        const char* word; uint16_t tone;
+        if (lastScannedStatus == "APPROVED")         { word = "SERVED";         tone = getTftAccentGreen(); }
+        else if (lastScannedStatus == "DUPLICATE")   { word = "ALREADY SERVED"; tone = getTftAccentYellow(); }
+        else if (lastScannedStatus == "TIME_CLOSED") { word = "CLOSED NOW";     tone = getTftAccentYellow(); }
+        else                                         { word = "NOT ON LIST";    tone = getTftAccentRose(); }
+        drawBentoPillBadge(14, 98, 130, 14, word,
+                           isTftDarkMode ? 0x0000 : BENTO_WHITE, tone);
+
+        // เลขอ้างอิงยาวกว่าที่การ์ดรับไหว จึงโชว์ท้ายเลข ซึ่งเป็นส่วนที่ไม่ซ้ำกัน
+        String ref = lastScannedRef;
+        if (ref.length() > 24) ref = "." + ref.substring(ref.length() - 23);
+        tft.setTextColor(getTftTextMuted(), getTftCardBg());
+        tft.setCursor(152, 101);
+        tft.print(ref);
+      } else {
+        tft.setTextColor(getTftTextMuted(), getTftCardBg());
+        tft.setTextSize(2);
+        tft.setCursor(14, 72);
+        tft.print("No card tapped yet");
+      }
     }
 
-    // ตัวเลขของเครื่อง อัปเดตทุกรอบ
-    tft.fillRect(170, 142, 138, 62, getTftCardBg());
+    // [113.2.0] แก้: ตัวเลขของเครื่องวาดซ้ำเฉพาะตอนค่าเปลี่ยน
+    //           อุณหภูมิขยับตลอดเวลา ถ้าล้างแล้ววาดใหม่ทุกรอบจอจะกะพริบ
+    static int lastDbSize = -1, lastAdmins = -1, lastTempC = -999, lastHeapKB = -1;
     float cTemp = getChipTemperature();
-    tft.setTextSize(1);
-    tft.setTextColor(getTftTextMain(), getTftCardBg());
-    tft.setCursor(172, 148); tft.printf("Students %d", (int)db.size());
-    tft.setCursor(172, 164); tft.printf("Staff    %d of 3", (int)adminUsers.size());
-    tft.setTextColor((cTemp < 65.0f) ? getTftTextMain() : getTftAccentYellow(), getTftCardBg());
-    tft.setCursor(172, 180); tft.printf("Chip     %.0f C", cTemp);
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setCursor(172, 192); tft.printf("Free memory %d KB", ESP.getFreeHeap() / 1024);
+    int tempC = (int)(cTemp + 0.5f);
+    int heapKB = ESP.getFreeHeap() / 1024;
+
+    if (fullRedraw || (int)db.size() != lastDbSize || (int)adminUsers.size() != lastAdmins) {
+      tft.fillRect(170, 142, 138, 30, getTftCardBg());
+      tft.setTextSize(1);
+      tft.setTextColor(getTftTextMain(), getTftCardBg());
+      tft.setCursor(172, 148); tft.printf("Students %d", (int)db.size());
+      tft.setCursor(172, 164); tft.printf("Staff    %d of 3", (int)adminUsers.size());
+      lastDbSize = (int)db.size();
+      lastAdmins = (int)adminUsers.size();
+    }
+    if (fullRedraw || tempC != lastTempC) {
+      tft.fillRect(170, 176, 138, 12, getTftCardBg());
+      tft.setTextSize(1);
+      tft.setTextColor((cTemp < 65.0f) ? getTftTextMain() : getTftAccentYellow(), getTftCardBg());
+      tft.setCursor(172, 180); tft.printf("Chip     %d C", tempC);
+      lastTempC = tempC;
+    }
+    // หน่วยความจำว่างแกว่งเป็นไบต์ตลอด จึงถือว่าเปลี่ยนเมื่อขยับเกินสองกิโล
+    if (fullRedraw || abs(heapKB - lastHeapKB) >= 2) {
+      tft.fillRect(170, 188, 138, 12, getTftCardBg());
+      tft.setTextSize(1);
+      tft.setTextColor(getTftTextMuted(), getTftCardBg());
+      tft.setCursor(172, 192); tft.printf("Free memory %d KB", heapKB);
+      lastHeapKB = heapKB;
+    }
   }
 }
 
@@ -496,6 +582,23 @@ void renderScreensaver(bool fullRedraw) {
     tft.setTextSize(5);
     tft.setCursor(160 - (int)curTime.length() * 15, 68);
     tft.print(curTime);
+  }
+
+  // [113.2.0] แก้: ยอดวันนี้บนหน้าพักจอเคยวาดครั้งเดียวตอนเข้าโหมด
+  //           ถ้ามีคนมารับอาหารระหว่างพักจอ ตัวเลขจะค้างอยู่ที่ค่าเก่า
+  static int lastSaverUsed = -1;
+  if (fullRedraw || usedCount != lastSaverUsed) {
+    lastSaverUsed = usedCount;
+    char line[48];
+    snprintf(line, sizeof(line), "%d of %d served   %d baht",
+             usedCount, (int)db.size(), usedCount * 35);
+    tft.fillRect(24, 144, 272, 12, getTftCardBg());
+    tft.setTextColor(getTftAccentGreen(), getTftCardBg());
+    tft.setTextSize(1);
+    tft.setCursor(160 - (int)strlen(line) * 3, 146);
+    tft.print(line);
+    int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
+    drawProgressBar(60, 170, 200, 6, pct);
   }
 }
 

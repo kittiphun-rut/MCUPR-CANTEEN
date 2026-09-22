@@ -1,16 +1,41 @@
 /**
- * ============================================================================
- * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
- * System: Vendor Station Client & Dynamic Theme Suite
- * Version: 117.0.7 (Production Master: Stabilized Screensaver & Calibrated Alert)
- * Release Date: กันยายน 2569 (September 2026)
- * 
- * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
- * Role: นักวิชาการคอมพิวเตอร์ (Computer Technical Officer)
- * Organization: มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
- * 
- * Target Board: ESP32-S3 N16R8 + 2.8" ST7789V TFT (320x240) + RC522 + RGB LED
- * ============================================================================
+ * @file      Canteen_Station_Client.ino
+ * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
+ * @version   122.2.0
+ * @date      2026-09-22
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
+ *
+ * @par Organization
+ * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
+ *
+ * @par Description
+ * เครื่องนี้ไม่ได้ตัดสินสิทธิ์เอง หน้าที่คืออ่านหมายเลขบัตรแล้วส่งไปถามแม่ข่าย
+ * ผ่าน ESP-NOW ช่อง 1 แล้วแสดงคำตอบที่ได้กลับมา
+ *
+ * ไฟล์นี้เก็บเฉพาะตรรกะระบบ ส่วนที่วาดลงจอถูกแยกออกไปเป็น StationScreen.h
+ * ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup()
+ *
+ * @par Hardware
+ * ESP32-S3 DevKitC-1 (N16R8) · จอ ST7789V 2.8" 320x240 บนบัส HSPI ·
+ * เครื่องอ่านบัตร RC522 บนบัส FSPI · บัซเซอร์ GPIO 38 · ปุ่มกด GPIO 2 · WS2812 GPIO 48
+ *
+ * @par Dependencies
+ * Adafruit GFX · Adafruit ST7735/ST7789 · MFRC522 ·
+ * Arduino ESP32 core 2.x หรือ 3.x
+ *
+ * @par Revision History
+ * | Version | Date | Change |
+ * |---|---|---|
+ * | 122.2.0 | 2026-09-22 | เรียกการวาดซ้ำทุกหนึ่งวินาที และเลิกวาดยอดด้วยพิกัดของตัวเองใน loop() |
+ * | 122.1.0 | 2026-09-22 | แยกส่วนวาดจอออกไปเป็น StationScreen.h ตรรกะไม่เปลี่ยน |
+ * | 122.0.0 | 2026-09-22 | เริ่มใหม่จากต้นฉบับ ย้ายจอไปบัส HSPI แก้ปัญหาจอเพี้ยนหลัง PCD_Init() รับคำสั่งโหมดการแสดงผลจากแม่ข่าย และตัดการตั้งค่าธีมที่ตัวเครื่องออก |
+ * | 117.0.7 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
+ *
+ * @warning  จอต้องอยู่บนบัส HSPI เท่านั้น เพราะไลบรารี MFRC522 ยึดตัวแปร SPI
+ *           มาตรฐาน (FSPI) ไว้ ถ้าใช้บัสเดียวกันจอจะเพี้ยนทันทีหลัง PCD_Init()
+ * @warning  #include ของ StationScreen.h ต้องอยู่ท้ายไฟล์ก่อน setup()
+ * @note     โหมดมืด/สว่าง และการพักหน้าจอ ถูกกำหนดจากเครื่องแม่ข่ายฝ่ายเดียว
+ *           ปุ่มที่ตัวเครื่องจึงขึ้นข้อความแจ้งแทนการสลับเอง
  */
 
 #include <WiFi.h>
@@ -24,7 +49,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.1.0"
+#define APP_VERSION         "122.2.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -259,6 +284,7 @@ void drawFitCenteredText(int x, int y, int w, int h, const char* text,
 void showStationPage(int page, bool fullRedraw);
 void applyHostConfig();
 void showDisplayLockedNotice();
+void refreshStationLiveValues(bool force);
 void displayScanningUID(String uid);
 void displayResult(String status, String name, String id, String refNo, String claimTime, String msg);
 void displayOfflineAlert();
@@ -494,6 +520,8 @@ String getDateFormattedStr() {
 // สลับหน้าแบบรวมศูนย์ ของเดิมเขียนเงื่อนไขสามบรรทัดนี้ซ้ำอยู่สามที่
 // และลืมตั้ง currentState ให้ตรงกับหน้าที่แสดงอยู่ ทำให้หน้า 3 ค้างนิ่งไม่อัปเดต
 
+// [122.0.0] เพิ่ม: ทำตามคำสั่งโหมดการแสดงผลที่แม่ข่ายส่งมา
+//           ธีมบังคับเสมอ ส่วนไฟจอกับการพักจอสั่งเมื่อค่า modeSeq เปลี่ยน
 void applyHostConfig() {
   uint8_t wantDark, wantScreenOn, wantSaver, seq;
   portENTER_CRITICAL(&espnowMux);
@@ -1049,18 +1077,10 @@ void loop() {
     stationPrefs.putUInt("served", totalSuccessToday);
     stationPrefs.end();
 
-    if (currentState == STATE_STANDBY && currentStationPage == 2 && isScreenOn) {
-      tft.fillRect(12, 60, 90, 28, getStCardBg());
-      tft.setTextColor(getStGreen(), getStCardBg());
-      tft.setTextSize(3);
-      tft.setCursor(14, 62);
-      tft.printf("%d", totalSuccessToday);
-      tft.fillRect(12, 108, 130, 22, getStCardBg());
-      tft.setTextColor(getStYellow(), getStCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(14, 110);
-      tft.printf("%d B.", totalSuccessToday * 35);
-    }
+    // [122.2.0] แก้: ของเดิมวาดทับด้วยพิกัดและขนาดตัวอักษรของหน้าจอชุดเก่า
+    //           พอออกแบบหน้าจอใหม่ ตัวเลขจึงไปโผล่ผิดที่และทับของเดิมไม่มิด
+    //           ตอนนี้เรียกตัวที่อยู่ข้างเดียวกับโค้ดวาดหน้านั้นแทน
+    refreshStationLiveValues(false);
   }
 
   if (currentState == STATE_SCANNING_SENT &&
@@ -1131,9 +1151,13 @@ void loop() {
   // เครื่องแม่ข่ายเป็นผู้สั่งเข้า/ออกโหมดพักหน้าจอฝ่ายเดียว ผ่าน MSG_CONFIG
   if (pendingConfigUpdate) applyHostConfig();
 
-  if (currentState == STATE_SCREENSAVER && isScreenOn && (millis() - lastClockRefresh >= 1000)) {
+  // [122.2.0] เพิ่ม: เดิมหน้าแรกกับหน้าสองวาดครั้งเดียวตอนเข้าหน้านั้น
+  //           นาฬิกาจึงค้าง และสถานะออนไลน์/ออฟไลน์ไม่ขยับจนกว่าจะกดเปลี่ยนหน้า
+  //           ตอนนี้ตรวจทุกหนึ่งวินาที แล้ววาดซ้ำเฉพาะค่าที่เปลี่ยนจริง
+  if (isScreenOn && (millis() - lastClockRefresh >= 1000)) {
     lastClockRefresh = millis();
-    renderScreensaver(false);
+    if (currentState == STATE_SCREENSAVER) renderScreensaver(false);
+    refreshStationLiveValues(false);
   }
 
   checkRC522();

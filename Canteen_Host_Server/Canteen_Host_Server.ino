@@ -1,20 +1,47 @@
 /**
- * ============================================================================
- * Project: Meal Subsidy Management System (Tuesday 35-Baht Quota)
- * System: Central Host Server & Gateway Monitor
- * Version: 107.0.1 (Production Master: Stabilized Screensaver & Color Takeover)
- * Release Date: กันยายน 2569 (September 2026)
- * 
- * Developer: กิตติพันธ์ รัตนคร (Kittiphan Rattanakorn)
- * Role: นักวิชาการคอมพิวเตอร์ (Computer Technical Officer)
- * Organization: มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
- * 
- * Hardware Target: 
- *   - MCU: ESP32-S3 DevKitC-1 (N16R8: 16MB Flash, 8MB Octal PSRAM)
- *   - Display: 2.8 Inch ST7789V 14P SPI (320x240 Resolution)
- *   - Real-Time Clock: DS3231 Precision I2C RTC
- *   - LED: Built-in WS2812 RGB on GPIO 48
- * ============================================================================
+ * @file      Canteen_Host_Server.ino
+ * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
+ * @version   113.2.0
+ * @date      2026-09-22
+ * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
+ *
+ * @par Organization
+ * มหาวิทยาลัยมหาจุฬาลงกรณราชวิทยาลัย วิทยาเขตแพร่
+ *
+ * @par Description
+ * ถือฐานข้อมูลนิสิตทั้งหมด ตัดสินสิทธิ์ทุกครั้งที่มีคนแตะบัตรที่จุดบริการ
+ * บันทึกประวัติลง LittleFS และเปิดเว็บให้เจ้าหน้าที่จัดการข้อมูล
+ * คุยกับจุดบริการทั้งสี่จุดผ่าน ESP-NOW ช่อง 1
+ *
+ * ไฟล์นี้เก็บเฉพาะตรรกะระบบ ส่วนที่วาดลงจอและหน้าเว็บถูกแยกออกไปเป็น
+ * HostScreen.h กับ WebDashboard.h ซึ่ง #include ไว้ท้ายไฟล์ก่อน setup()
+ *
+ * @par Hardware
+ * ESP32-S3 DevKitC-1 (N16R8) · จอ ST7789V 2.8" 320x240 บนบัส FSPI ·
+ * นาฬิกา DS3231 บน I2C · บัซเซอร์ GPIO 6 · ปุ่มกด GPIO 2 · WS2812 GPIO 48
+ *
+ * @par Dependencies
+ * Adafruit GFX · Adafruit ST7735/ST7789 · ArduinoJson v6 · RTClib ·
+ * Arduino ESP32 core 2.x หรือ 3.x
+ *
+ * @par Build Settings (Arduino IDE)
+ * Board: ESP32S3 Dev Module · Flash: 16MB · PSRAM: OPI ·
+ * Partition: Huge APP (3MB No OTA/1MB SPIFFS)
+ *
+ * @par Revision History
+ * | Version | Date | Change |
+ * |---|---|---|
+ * | 113.2.0 | 2026-09-22 | รีเฟรชหน้าจอทุกหน้า ไม่ใช่แค่สองหน้าแรก หน้า SYSTEM จึงไม่ค้างอีกต่อไป |
+ * | 113.1.0 | 2026-09-22 | หน้าเว็บเป็นสองภาษา ไทย/อังกฤษ และเสิร์ฟสคริปต์พร้อม charset |
+ * | 113.0.0 | 2026-09-22 | เริ่มใหม่จากต้นฉบับ แยกไฟล์จอและเว็บออกมา คุมการแสดงผลของทุกจุดบริการ เพิ่ม /api/dashboard เปลี่ยนเส้นทางที่แก้ข้อมูลเป็น POST ซ่อม CSV โทเคนเซสชัน และเลขอ้างอิงบนจอ |
+ * | 107.0.1 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
+ *
+ * @warning  #include ของ HostScreen.h และ WebDashboard.h ต้องอยู่ท้ายไฟล์ก่อน setup()
+ *           เพราะโค้ดข้างในอ้างถึงตัวแปรส่วนกลางข้างบน ย้ายขึ้นไปบนสุดแล้วคอมไพล์ไม่ผ่าน
+ * @warning  Partition Scheme ต้องลงท้ายด้วย SPIFFS เท่านั้น ถ้าเลือกแบบ FATFS
+ *           LittleFS จะเมานต์ไม่ขึ้นและฐานข้อมูลนิสิตทั้งหมดหายไป
+ * @note     รหัสผ่านเจ้าหน้าที่เก็บเป็นข้อความธรรมดาใน /admins.json
+ *           เครื่องนี้จึงควรอยู่ในพื้นที่ควบคุม
  */
 
 #include <WiFi.h>
@@ -32,7 +59,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.1.0"
+#define APP_VERSION         "113.2.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -321,6 +348,8 @@ String lastScannedStudentId = "-";
 int lastScannedStation      = 0;
 String lastScannedStatus    = "READY";
 bool hostApReady            = false; // ปล่อยสัญญาณ Wi-Fi สำเร็จหรือไม่ ใช้บอกบนจอตอนบูต
+// [113.0.0] แก้: เก็บเลขอ้างอิงของการสแกนไว้ ของเดิมสร้างใหม่ทุกครั้งที่วาดจอ
+//           ทำให้ตัวนับเดินเรื่อย ๆ และเลขบนจอไม่ตรงกับที่บันทึกไว้
 String lastScannedRef       = "-";   // เลขอ้างอิงของการสแกนครั้งล่าสุด
                                      // เก็บไว้ ไม่สร้างใหม่ตอนวาดจอ ไม่งั้นเลขจะเดินทุกครั้งที่รีเฟรช
 
@@ -489,6 +518,7 @@ bool sendToStation(uint8_t stationId, const uint8_t *data, size_t len) {
 }
 
 // ประกอบคำสั่งการแสดงผลชุดเดียวใช้ร่วมกันทุกที่ จะได้ไม่มีทางส่งค่าไม่ตรงกัน
+// [113.0.0] เพิ่ม: เตรียมแพ็กเก็ตสั่งโหมดการแสดงผลไปยังจุดบริการ
 void fillStationConfig(HostConfigPacket &cfg, uint8_t stationId) {
   cfg.magic = ESPNOW_PROTO_MAGIC;
   cfg.version = ESPNOW_PROTO_VER;
@@ -508,6 +538,7 @@ void sendStationTheme(uint8_t stationId) {
 
 // เรียกทุกครั้งที่โหมดการแสดงผลเปลี่ยน ส่งสามรอบห่างกันเล็กน้อยเพราะ ESP-NOW
 // แบบ broadcast ไม่มีการยืนยันการรับ ถ้ารอบแรกหายไปยังมีรอบสองและสามตามไป
+// [113.0.0] เพิ่ม: ประกาศโหมดการแสดงผลใหม่ให้ทุกจุดบริการพร้อมกัน
 void announceDisplayMode() {
   hostModeSeq++;
   for (int i = 0; i < 3; i++) {
@@ -657,6 +688,8 @@ void loadAdminsFromFS() {
   }
 }
 
+// [113.0.0] แก้: ใช้ตัวสุ่มในตัวชิปแทน random() ของ Arduino ที่ให้ลำดับเดิม
+//           ทุกครั้งที่เปิดเครื่อง ซึ่งแปลว่าโทเคนของวันนี้เดาได้จากของเมื่อวาน
 String generateSessionToken() {
   // esp_random() เป็นตัวสุ่มในตัวชิป ไม่ใช่ random() ของ Arduino ที่ให้ลำดับเดิม
   // ทุกครั้งที่เปิดเครื่อง ซึ่งแปลว่าโทเคนของวันนี้เดาได้จากของเมื่อวาน
@@ -975,6 +1008,8 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
   }
 }
 
+// [113.0.0] แก้: ต่อ JSON เองแทนบัฟเฟอร์ขนาดคงที่ 8 กิโล ซึ่งพอดีเกินไป
+//           สำหรับยี่สิบรายชื่อ ถ้าล้นขึ้นมา JSON จะขาดกลางคันแบบเงียบ ๆ
 void handleGetStudentsAPI() {
   if (!isAuthenticated()) { redirectToLogin(); return; }
   int page = server.hasArg("page") ? server.arg("page").toInt() : 1;
@@ -1037,6 +1072,7 @@ void handleGetStudentsAPI() {
 
 // ครอบค่าด้วยเครื่องหมายคำพูดแบบที่โปรแกรมตารางเข้าใจ
 // ชื่อร้านอย่าง Rice "House", Drinks เคยทำให้คอลัมน์ในไฟล์เลื่อนทั้งแถว
+// [113.0.0] แก้: ชื่อที่มีเครื่องหมายคำพูดหรือลูกน้ำเคยทำให้คอลัมน์ในไฟล์เลื่อนทั้งแถว
 String csvField(const String &raw) {
   String out = "\"";
   for (unsigned int i = 0; i < raw.length(); i++) {
@@ -1452,6 +1488,7 @@ void handleFileUpload() {
 // ============================================================================
 
 // กันอักขระที่ทำให้ JSON พัง เช่นชื่อร้านที่มีเครื่องหมายคำพูด
+// [113.0.0] เพิ่ม: กันอักขระที่ทำให้ JSON พัง เช่นชื่อร้านที่มีเครื่องหมายคำพูด
 String jsonEscape(const String &raw) {
   String out;
   out.reserve(raw.length() + 8);
@@ -1467,6 +1504,8 @@ String jsonEscape(const String &raw) {
   return out;
 }
 
+// [113.0.0] เพิ่ม: ข้อมูลสดสำหรับแดชบอร์ด หน้าเว็บดึงชุดนี้ทุกสองวินาที
+//           แล้ววาดใหม่เฉพาะตัวเลขที่เปลี่ยน ไม่ต้องรีโหลดทั้งหน้า
 void handleDashboardAPI() {
   if (!isAuthenticated()) { server.send(401, "application/json", "{}"); return; }
 
@@ -1520,6 +1559,8 @@ void handleDashboardAPI() {
 
 // เครื่องแม่ข่ายสั่งโหมดการแสดงผลของทุกสถานีจากหน้าเว็บ
 // (เดิมสั่งได้จากปุ่มกดบนเครื่องเท่านั้น ซึ่งคนที่มารับช่วงดูแลต่อจะไม่มีทางรู้)
+// [113.0.0] เพิ่ม: สั่งโหมดการแสดงผลของทุกจุดบริการจากหน้าเว็บ
+//           ของเดิมสั่งได้จากปุ่มบนเครื่องเท่านั้น คนที่มารับช่วงต่อจะไม่มีทางรู้
 void handleSetDisplayMode() {
   if (!isAuthenticated()) { server.send(401, "application/json", "{}"); return; }
 
@@ -1869,7 +1910,10 @@ void loop() {
     renderScreensaver(true);
   }
 
-  if (!isLiveScanDisplaying && (isScreensaverActive || currentHostPage == 0 || currentHostPage == 1) && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
+  // [113.2.0] แก้: เดิมรีเฟรชเฉพาะหน้า 1 กับหน้า 2 หน้า SYSTEM จึงค้างอยู่กับที่
+  //           ทั้งที่มีอุณหภูมิชิปกับหน่วยความจำว่างที่ควรขยับ ตอนนี้รีเฟรชทุกหน้า
+  //           ฟังก์ชันวาดจะเทียบค่าเก่าเองแล้ววาดซ้ำเฉพาะช่องที่เปลี่ยน จอจึงไม่กะพริบ
+  if (!isLiveScanDisplaying && !isCreditActive && (millis() - lastClockRefresh >= 1000)) {
     lastClockRefresh = millis();
     if (isScreensaverActive) renderScreensaver(false);
     else renderHostPage(false);
@@ -1882,9 +1926,8 @@ void loop() {
         stationNodes[i].isOnline = false;
       }
     }
-    if (!isLiveScanDisplaying && !isScreensaverActive && !isCreditActive && currentHostPage == 1) {
-      renderHostPage(false);
-    }
+    // [113.2.0] ย้าย: การวาดซ้ำย้ายไปอยู่กับรอบหนึ่งวินาทีข้างบนแล้ว
+    //           ตรงนี้เหลือหน้าที่เดียวคือตัดสถานีที่เงียบหายไปออกจากสถานะออนไลน์
   }
 
   delay(2);
