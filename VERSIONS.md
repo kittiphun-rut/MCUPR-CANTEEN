@@ -68,6 +68,29 @@ git switch --detach origin/release-05-h108.0.0-s119.0.0
 git checkout origin/release-05-h108.0.0-s119.0.0 -- Canteen_Station_Client/
 ```
 
+### ล้าง branch ที่เหลือค้าง
+
+ระหว่างทางมี branch ชุดที่ขึ้นต้นด้วย `claude/release-...` ถูกสร้างไว้ก่อนจะเปลี่ยนมา
+ใช้ชื่อสั้น และมี `fervent-wozniak-66knt2` (ไม่มีคำนำหน้า) หลงเหลืออยู่หนึ่งอัน
+ทั้งหมดชี้คอมมิตเดียวกับของที่ใช้จริง จึงลบทิ้งได้โดยไม่เสียอะไรเลย
+บัญชีที่เซสชันนี้ใช้ **ลบ branch ไม่ได้** (เซิร์ฟเวอร์ตอบ 403 เช่นเดียวกับ tag)
+คัดลอกคำสั่งนี้ไปรันในเครื่องที่มีสิทธิ์เต็ม
+
+```sh
+git push origin --delete \
+  claude/release-00-h107.0.1-s117.0.7 \
+  claude/release-01-h107.0.1-s118.0.0 \
+  claude/release-02-h108.0.0-s118.0.0 \
+  claude/release-03-h108.0.0-s118.1.0 \
+  claude/release-04-h108.0.0-s118.2.0 \
+  claude/release-05-h108.0.0-s119.0.0 \
+  claude/release-06-h109.0.0-s119.0.0 \
+  claude/release-07-h110.0.1-s120.0.0 \
+  fervent-wozniak-66knt2
+```
+
+> อย่าลบ `claude/fervent-wozniak-66knt2` — นั่นคือ branch ที่งานพัฒนาเดินอยู่
+
 ### สร้างแท็กเอง
 
 คัดลอกทั้งก้อนนี้ไปวางในเครื่องที่มีสิทธิ์ push เต็ม แล้วรันครั้งเดียวจบ
