@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.8.0
+ * @version   122.9.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.9.0 | 2026-09-23 | ตามการแก้แถบบนของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.8.0 | 2026-09-23 | เปลี่ยนป้ายบนแถบบนและหน้าตั้งหมายเลขจาก POINT เป็น STATION |
  * | 122.7.0 | 2026-09-23 | สั่งเปลี่ยนธีมตอนสถานีพักหน้าจออยู่ ไม่เตะออกจากหน้าพักจออีกต่อไป วาดใหม่ตามหน้าที่แสดงอยู่จริงแทนการเรียก showStationPage() เสมอ |
  * | 122.6.2 | 2026-09-23 | ตามการแก้วิธีวาดคลื่นของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -57,7 +58,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.8.0"
+#define APP_VERSION         "122.9.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"

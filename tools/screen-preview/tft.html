@@ -116,7 +116,9 @@ function drawSignalBars(x,y,rssi,online,b){
   const hs=[3,6,9,12];
   for(let i=0;i<4;i++){ const bx=x+i*5, bh=hs[i], by=y+(12-bh);
     fillRect(bx,y,4,12,b);
-    if(i<n) fillRect(bx,by,3,bh,col); else drawRect(bx,by,3,bh,BORDER()); }
+    if(i<n) fillRect(bx,by,3,bh,col);
+    /* [122.9.0] ออฟไลน์วาดโครงขีดเป็นสีแดง ต้องตรงกับ drawSignalBars() ในเฟิร์มแวร์ */
+    else drawRect(bx,by,3,bh, online?BORDER():ROSE()); }
 }
 function drawMiniBattery(x,y,pct){
   fillRect(x,y,26,12,CARD()); drawRect(x,y,22,12,TEXT()); fillRect(x+22,y+4,2,4,TEXT());

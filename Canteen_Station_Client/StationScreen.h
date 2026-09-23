@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.8.0
+ * @version   122.9.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.9.0 | 2026-09-23 | ขีดสัญญาณมุมขวาบนหายหลังเปลี่ยนหน้า เพราะ drawStationTopBar() ล้างแถบแล้วไม่วาดคืน และตัดตัวเลข dBm กับคำว่า OFFLINE ออก เหลือแต่สัญลักษณ์ |
  * | 122.8.0 | 2026-09-23 | เปลี่ยนคำว่า Point บนหน้าจอเป็น Station ให้ตรงกับชื่อที่ใช้ทั้งระบบ ส่วนชื่อร้านยังใช้คำว่า Shop เหมือนเดิม |
  * | 122.6.2 | 2026-09-23 | คลื่นของสัญลักษณ์แตะบัตรไม่ขึ้นบนจอจริง เพราะ drawCircleHelper() ของไลบรารีไม่เปิดทรานแซกชัน SPI เอง เปลี่ยนมาวาดครึ่งวงกลมเองด้วย drawPixel() |
  * | 122.6.1 | 2026-09-23 | ย้าย drawStandbyReadyState() ขึ้นไปไว้ใต้ drawRfidTapIcon() เพราะเดิมถูกวางไว้ต่ำกว่า refreshStationLiveValues() ที่เรียกใช้ ทำให้คอมไพล์ไม่ผ่าน |
@@ -272,7 +273,12 @@ void drawStationTopBar(String title) {
   tft.setTextSize(1);
   tft.setCursor(8, 8);
   tft.println(title);
-  drawStationBatteryHUD(260, 3);
+  // [122.9.0] แก้: เดิมวาดแต่แบตเตอรี่ ขีดสัญญาณที่เพิ่งถูก fillRect ลบไปจึงไม่ถูกวาดคืน
+  //           และ updateTopRightHeaderSmooth() ก็ไม่วาดให้ เพราะจำนวนขีดยังเท่าเดิม
+  //           มันจึง return ทิ้งทันที ขีดสัญญาณหายถาวรหลังเปลี่ยนหน้าครั้งแรก
+  //           ตอนนี้เรียกตัวอัปเดตแบบบังคับวาด ซึ่งวาดทั้งขีดสัญญาณและแบตเตอรี่ให้ในตัว
+  //           และตั้งค่าที่จำไว้ให้ตรงกับของจริงไปพร้อมกัน
+  updateTopRightHeaderSmooth(lastHostRssi, isHostOnline, true);
 }
 
 void drawStationBottomBar(String instruction) {
@@ -347,15 +353,20 @@ void drawSignalBars(int x, int y, int rssi, bool isOnline, uint16_t bg) {
     if (b < activeBars) {
       tft.fillRect(barX, barY, 3, barH, barColor);
     } else {
-      tft.drawRect(barX, barY, 3, barH, getStCardBorder());
+      // [122.9.0] เพิ่ม: ตอนขาดการเชื่อมต่อ วาดโครงขีดทั้งสี่เป็นสีแดง
+      //           จะได้แยกออกจาก "สัญญาณอ่อน" ที่โครงขีดเป็นสีจางตามปกติ
+      //           เดิมมีคำว่า OFFLINE เป็นตัวหนังสือกำกับไว้ข้าง ๆ ซึ่งถูกตัดออกแล้ว
+      tft.drawRect(barX, barY, 3, barH, isOnline ? getStCardBorder() : getStRose());
     }
   }
 }
 
 // ค่าปริยายของ forceRedraw อยู่ที่การประกาศล่วงหน้าในไฟล์หลัก
 // เขียนซ้ำตรงนี้อีกครั้งไม่ได้ ภาษา C++ อนุญาตให้ระบุได้ครั้งเดียว
+// [122.9.0] แก้: ตัดตัวเลข dBm และคำว่า OFFLINE ออกจากแถบบน
+//           เหลือแต่สัญลักษณ์ขีดสัญญาณอย่างเดียวตามที่ต้องการ
+//           ค่า dBm ตัวเลขยังดูได้ที่หน้า SYSTEM แถว Host link เหมือนเดิม
 void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw) {
-  static int lastDrawnRssi = -999;
   static bool lastDrawnOnline = false;
   static int lastBars = -1;
 
@@ -371,27 +382,13 @@ void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw) {
   // [122.3.0] แก้: เดิมเทียบด้วยค่า dBm ดิบ ๆ ซึ่งแกว่งเกินสามหน่วยแทบทุกวินาที
   //           แถบบนจึงถูกล้างแล้ววาดใหม่ตลอดเวลา เห็นเป็นการกะพริบมุมขวาบน
   //           ตอนนี้เทียบด้วยจำนวนขีดกับสถานะออนไลน์ ซึ่งนาน ๆ เปลี่ยนที
-  if (!forceRedraw && online == lastDrawnOnline && currentBars == lastBars) {
-    // ตัวเลข dBm ยังอัปเดตได้ เพราะเขียนทับที่เดิมโดยไม่ล้างพื้น ไม่ทำให้กะพริบ
-    if (online && rssi != lastDrawnRssi) {
-      drawFixedText(194, 8, 1, getStTextMuted(), getStBg(), 6, "%ddB", rssi);
-      lastDrawnRssi = rssi;
-    }
-    return;
-  }
+  // ไม่มีตัวเลขให้ต้องตามแล้ว จึงวาดใหม่เฉพาะตอนจำนวนขีดหรือสถานะเปลี่ยนจริง
+  if (!forceRedraw && online == lastDrawnOnline && currentBars == lastBars) return;
 
-  lastDrawnRssi = rssi;
   lastDrawnOnline = online;
   lastBars = currentBars;
 
-  if (online) {
-    drawFixedText(194, 8, 1, getStTextMuted(), getStBg(), 6, "%ddB", rssi);
-    drawSignalBars(228, 6, rssi, true, getStBg());
-  } else {
-    drawFixedText(192, 8, 1, getStRose(), getStBg(), 7, "OFFLINE");
-    drawSignalBars(228, 6, -100, false, getStBg());
-  }
-
+  drawSignalBars(228, 6, online ? rssi : -100, online, getStBg());
   drawStationBatteryHUD(260, 3);
 }
 
