@@ -37,6 +37,7 @@ release/18-h113.4.0-s122.4.0
 release/19-h113.5.0-s122.5.0
 release/20-h113.6.0-s122.5.0
 release/21-h113.6.0-s122.6.0
+release/22-h113.6.0-s122.6.1
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -80,14 +81,20 @@ release/21-h113.6.0-s122.6.0
 
 | `release/20-h113.6.0-s122.5.0` | 113.6.0 | 122.5.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/20-h113.6.0-s122.5.0.zip) | [`9e19814`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/9e198141987be7143dbb6ff61b74772c98e93683) | **จอสาธารณะบนทีวีในโรงอาหาร** หน้า `/display` เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ · มี `/api/board` เป็นของตัวเองที่ปิดบังรหัสนิสิตเหลือห้าหลักแรก ไม่มีชื่อ ไม่มีหมายเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์ · เพิ่มตัวตรวจ `privacycheck.py` บังคับข้อกำหนดนี้<br><sub>23 ก.ย. 2026</sub> |
 
-| `release/21-h113.6.0-s122.6.0` | 113.6.0 | 122.6.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/21-h113.6.0-s122.6.0.zip) | [`9d86481`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/9d8648129de47011b51e201491fceee9b1dbcdd3) | **คืนสัญลักษณ์แตะบัตร RFID บนหน้าแรกของจุดบริการ** ที่หายไปตอนเริ่มใหม่ในรุ่น 122.0.0 · ต่อเข้ากับตัวตรวจสุขภาพ RC522 คลื่นเขียวคือเครื่องอ่านพร้อม แดงคือไม่ตอบพร้อมบรรทัดให้ตามเจ้าหน้าที่<br><sub>23 ก.ย. 2026</sub> |
+| `release/21-h113.6.0-s122.6.0` | 113.6.0 | 122.6.0 | ❌ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/21-h113.6.0-s122.6.0.zip) | [`9d86481`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/9d8648129de47011b51e201491fceee9b1dbcdd3) | **คืนสัญลักษณ์แตะบัตร RFID บนหน้าแรกของจุดบริการ** ที่หายไปตอนเริ่มใหม่ในรุ่น 122.0.0 · ต่อเข้ากับตัวตรวจสุขภาพ RC522 คลื่นเขียวคือเครื่องอ่านพร้อม แดงคือไม่ตอบพร้อมบรรทัดให้ตามเจ้าหน้าที่<br><sub>23 ก.ย. 2026</sub> |
 
-> ❔ **`release/12` ถึง `release/21` ยังไม่ผ่านการคอมไพล์จริง**
+| `release/22-h113.6.0-s122.6.1` | 113.6.0 | 122.6.1 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/22-h113.6.0-s122.6.1.zip) | [`f35e8b0`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/f35e8b0ff8f17d550c5f81b5c99a4fe589ac47bd) | **แก้ `release/21` ที่คอมไพล์ไม่ผ่าน** `drawStandbyReadyState()` ถูกวางไว้ต่ำกว่าจุดที่เรียก · เพิ่มตัวตรวจ `ordercheck.py` จับฟังก์ชันที่ถูกเรียกก่อนถูกประกาศ ซึ่งตัวตรวจเดิมทั้งหกตัวมองไม่เห็น<br><sub>23 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` ถึง `release/22` ยังไม่ผ่านการคอมไพล์จริง**
 > (`release/18` ท่านแฟลชแล้วและยืนยันว่าอักษรซ้อนหาย การกะพริบดีขึ้น แต่ยังไม่ได้แจ้งผลการคอมไพล์) เพราะเครื่องที่ใช้พัฒนาเข้า
 > `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
 > การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
 > และทุกหน้าจอถูกเรนเดอร์ดูแล้วว่าตัวอักษรไม่ล้นกรอบ
 > **รบกวนท่านคอมไพล์แล้วแจ้งผลกลับมา** ถ้าผ่านจะได้แก้ช่องนี้เป็น ✅
+
+> ⚠️ **`release/21` คอมไพล์ไม่ผ่าน** `drawStandbyReadyState()` ถูกวางไว้ต่ำกว่า
+> จุดที่เรียกใน `StationScreen.h` ขึ้นข้อความว่า `was not declared in this scope`
+> ใช้ **`release/22`** แทน ซึ่งมีฟีเจอร์เท่ากันทุกอย่าง
 
 > ⚠️ **`release/03` ถึง `release/07` คอมไพล์ไม่ผ่าน** ด้วย Arduino IDE
 > ติดปัญหา forward declaration ที่หายไป (`fillStationConfig` และ `rosterApplyPacket`)
