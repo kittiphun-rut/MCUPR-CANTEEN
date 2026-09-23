@@ -39,6 +39,7 @@ release/20-h113.6.0-s122.5.0
 release/21-h113.6.0-s122.6.0
 release/22-h113.6.0-s122.6.1
 release/23-h113.6.0-s122.6.2
+release/24-h113.7.0-s122.7.0
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -86,9 +87,11 @@ release/23-h113.6.0-s122.6.2
 
 | `release/22-h113.6.0-s122.6.1` | 113.6.0 | 122.6.1 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/22-h113.6.0-s122.6.1.zip) | [`f35e8b0`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/f35e8b0ff8f17d550c5f81b5c99a4fe589ac47bd) | **แก้ `release/21` ที่คอมไพล์ไม่ผ่าน** `drawStandbyReadyState()` ถูกวางไว้ต่ำกว่าจุดที่เรียก · เพิ่มตัวตรวจ `ordercheck.py` จับฟังก์ชันที่ถูกเรียกก่อนถูกประกาศ ซึ่งตัวตรวจเดิมทั้งหกตัวมองไม่เห็น<br><sub>23 ก.ย. 2026</sub> |
 
-| `release/23-h113.6.0-s122.6.2` | 113.6.0 | 122.6.2 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/23-h113.6.0-s122.6.2.zip) | [`51bb316`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/51bb31635c3761aab7b672d4b4348804ca87b7c9) | **แก้คลื่นของสัญลักษณ์แตะบัตรที่ไม่ขึ้นบนจอจริง** `drawCircleHelper()` ไม่เปิดทรานแซกชัน SPI เอง · เปลี่ยนมาวาดครึ่งวงกลมเองด้วย `drawPixel()` · เพิ่มตัวตรวจ `gfxcheck.py` และแก้โปรแกรมจำลองที่ปิดบังบั๊กนี้<br><sub>23 ก.ย. 2026</sub> |
+| `release/23-h113.6.0-s122.6.2` | 113.6.0 | 122.6.2 | ✅ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/23-h113.6.0-s122.6.2.zip) | [`51bb316`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/51bb31635c3761aab7b672d4b4348804ca87b7c9) | **แก้คลื่นของสัญลักษณ์แตะบัตรที่ไม่ขึ้นบนจอจริง** `drawCircleHelper()` ไม่เปิดทรานแซกชัน SPI เอง · เปลี่ยนมาวาดครึ่งวงกลมเองด้วย `drawPixel()` · เพิ่มตัวตรวจ `gfxcheck.py` และแก้โปรแกรมจำลองที่ปิดบังบั๊กนี้<br><sub>23 ก.ย. 2026</sub> |
 
-> ❔ **`release/12` ถึง `release/23` ยังไม่ผ่านการคอมไพล์จริง**
+| `release/24-h113.7.0-s122.7.0` | 113.7.0 | 122.7.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/24-h113.7.0-s122.7.0.zip) | [`7fc1ebf`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/7fc1ebf19da60b6e5d1401faa4aa56c8d14b3b85) | **คำสั่งเปลี่ยนโหมดการแสดงผลไปถึงจุดบริการทันที** เดิมต้องรอรอบ heartbeat ราวห้าวินาที · ส่งยูนิแคสต์ก่อนแล้วค่อยกระจายเสียง · แก้แพ็กเก็ตกระจายเสียงที่ใส่ฟิลด์ไม่ครบ · สั่งเปลี่ยนธีมตอนพักหน้าจอไม่เตะออกจากหน้าพักจออีก<br><sub>23 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` ถึง `release/24` ยังไม่ผ่านการคอมไพล์จริง**
 > (`release/18` ท่านแฟลชแล้วและยืนยันว่าอักษรซ้อนหาย การกะพริบดีขึ้น แต่ยังไม่ได้แจ้งผลการคอมไพล์) เพราะเครื่องที่ใช้พัฒนาเข้า
 > `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
 > การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
