@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.9.0
+ * @version   122.10.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.10.0 | 2026-09-23 | ปิดโหมดประหยัดพลังงานของวิทยุด้วย WiFi.setSleep(false) ของเดิมใช้ esp_wifi_set_ps() ซึ่งถูกอีเวนต์ STA_START ของ Arduino core ทับกลับเป็น WIFI_PS_MIN_MODEM วิทยุจึงหลับและรับคำสั่งจากแม่ข่ายได้เฉพาะตอนเพิ่งส่ง heartbeat |
  * | 122.9.0 | 2026-09-23 | ตามการแก้แถบบนของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.8.0 | 2026-09-23 | เปลี่ยนป้ายบนแถบบนและหน้าตั้งหมายเลขจาก POINT เป็น STATION |
  * | 122.7.0 | 2026-09-23 | สั่งเปลี่ยนธีมตอนสถานีพักหน้าจออยู่ ไม่เตะออกจากหน้าพักจออีกต่อไป วาดใหม่ตามหน้าที่แสดงอยู่จริงแทนการเรียก showStationPage() เสมอ |
@@ -58,7 +59,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.9.0"
+#define APP_VERSION         "122.10.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -1051,6 +1052,25 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+
+  // [122.10.0] แก้: ต้นเหตุที่คำสั่งจากแม่ข่ายมาถึงช้าราวห้าวินาที
+  //           ต้องเรียก WiFi.setSleep(false) ไม่ใช่ esp_wifi_set_ps() เดี่ยว ๆ
+  //
+  //           Arduino core เก็บค่าโหมดประหยัดพลังงานที่ต้องการไว้ในตัวแปรของตัวเอง
+  //           ค่าเริ่มต้นบน ESP32-S3 คือ WIFI_PS_MIN_MODEM และเมื่ออีเวนต์
+  //           ARDUINO_EVENT_WIFI_STA_START มาถึง core จะสั่ง
+  //           esp_wifi_set_ps(WiFi.getSleep()) ทับค่าที่เราตั้งไว้
+  //           อีเวนต์นั้นเป็นแบบอะซิงโครนัส มักมาถึงหลังบรรทัดนี้ไปแล้ว
+  //           ค่าที่เราตั้งจึงถูกเปลี่ยนกลับเป็นโหมดประหยัดพลังงานเงียบ ๆ
+  //
+  //           ผลคือวิทยุของสถานีหลับเป็นช่วง ๆ รับแพ็กเก็ตที่ส่งมาแบบไม่ได้นัดหมาย
+  //           ไม่ค่อยได้ จะได้แน่ ๆ ก็ตอนที่เพิ่งส่ง heartbeat ออกไปเองเท่านั้น
+  //           ซึ่งเกิดทุก 6000 + หมายเลขสถานี x 350 มิลลิวินาที ตรงกับที่พบ
+  //
+  //           WiFi.setSleep(false) เปลี่ยนทั้งค่าที่ core จำไว้และค่าที่ใช้งานจริง
+  //           อีเวนต์ที่ตามมาภายหลังจึงสั่งค่าเดิมซ้ำ ไม่ได้ทับให้กลับไปหลับอีก
+  WiFi.setSleep(false);
+
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
   esp_wifi_set_promiscuous(false);
