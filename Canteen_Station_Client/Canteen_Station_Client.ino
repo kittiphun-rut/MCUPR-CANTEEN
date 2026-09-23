@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.5.0
+ * @version   122.6.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.6.0 | 2026-09-23 | บันทึกผลการตรวจสุขภาพ RC522 ไว้ใน isReaderReady ให้สัญลักษณ์แตะบัตรบนหน้าแรกบอกความพร้อมได้จริง และตรวจทะเบียนรุ่นซ้ำหลังสั่งเริ่มใหม่ |
  * | 122.5.0 | 2026-09-23 | ตามการจัดตำแหน่งตัวอักษรของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.4.0 | 2026-09-23 | ตามการแก้ของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.3.0 | 2026-09-22 | ตามการแก้เรื่องกะพริบของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -52,7 +53,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.5.0"
+#define APP_VERSION         "122.6.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -230,6 +231,10 @@ unsigned long lastClockRefresh      = 0;
 unsigned long lastHeartbeatTime     = 0;
 unsigned long stateHoldUntil        = 0;
 unsigned long lastRc522HealthCheck  = 0;
+
+// [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรบนหน้าแรกใช้ค่านี้บอกว่าเครื่องอ่านยังตอบอยู่ไหม
+//           ค่าถูกปรับทุกสิบวินาทีโดย checkRC522() ที่อ่าน VersionReg อยู่แล้ว
+bool isReaderReady                  = true;
 unsigned long nextHeartbeatInterval = 6000;
 
 uint32_t totalScansToday            = 0;
@@ -952,8 +957,12 @@ void checkRC522() {
     lastRc522HealthCheck = millis();
     byte v = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
     if (v == 0x00 || v == 0xFF) {
+      // [122.6.0] แก้: ของเดิมสั่งเริ่มใหม่แล้วจบ ไม่มีใครรู้ว่าสำเร็จหรือไม่
+      //           อ่านซ้ำหลังเริ่มใหม่ แล้วบันทึกผลไว้ให้สัญลักษณ์บนหน้าแรกใช้
       mfrc522.PCD_Init();
+      v = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
     }
+    isReaderReady = (v != 0x00 && v != 0xFF);
   }
 
   if (!mfrc522.PICC_IsNewCardPresent()) return;
@@ -1008,6 +1017,12 @@ void setup() {
   tft.invertDisplay(false);
 
   mfrc522.PCD_Init();
+  // [122.6.0] เพิ่ม: อ่านทะเบียนรุ่นทันทีหลังเริ่มต้น เพื่อให้สัญลักษณ์บนหน้าแรก
+  //           บอกความพร้อมได้ถูกต้องตั้งแต่วินาทีแรก ไม่ต้องรอรอบตรวจรอบแรก
+  {
+    byte v = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
+    isReaderReady = (v != 0x00 && v != 0xFF);
+  }
 
   stationPrefs.begin("st_cfg", false);
   currentStationId = stationPrefs.getUChar("id", 1);
