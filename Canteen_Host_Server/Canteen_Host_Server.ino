@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.7.0
+ * @version   113.8.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.8.0 | 2026-09-23 | ตามการเปลี่ยนคำของ HostScreen.h และ WebDashboard.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.7.0 | 2026-09-23 | คำสั่งเปลี่ยนโหมดการแสดงผลไปถึงจุดบริการทันที ส่งยูนิแคสต์ถึงทุกจุดก่อนแล้วค่อยกระจายเสียง และแก้ broadcastStationTheme() ที่ประกอบแพ็กเก็ตเองจนฟิลด์ screenOn, screensaver, modeSeq เป็นศูนย์ติดไปทุกครั้ง |
  * | 113.6.0 | 2026-09-23 | เพิ่มจอสาธารณะสำหรับทีวีในโรงอาหาร /display กับ /api/board เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ ปิดบังรหัสนิสิตเหลือห้าหลักแรก ไม่มีชื่อ ไม่มีหมายเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์ |
  * | 113.5.0 | 2026-09-23 | ตามการจัดตำแหน่งตัวอักษรของ HostScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -64,7 +65,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.7.0"
+#define APP_VERSION         "113.8.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"

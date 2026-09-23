@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.6.2
+ * @version   122.8.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.8.0 | 2026-09-23 | เปลี่ยนคำว่า Point บนหน้าจอเป็น Station ให้ตรงกับชื่อที่ใช้ทั้งระบบ ส่วนชื่อร้านยังใช้คำว่า Shop เหมือนเดิม |
  * | 122.6.2 | 2026-09-23 | คลื่นของสัญลักษณ์แตะบัตรไม่ขึ้นบนจอจริง เพราะ drawCircleHelper() ของไลบรารีไม่เปิดทรานแซกชัน SPI เอง เปลี่ยนมาวาดครึ่งวงกลมเองด้วย drawPixel() |
  * | 122.6.1 | 2026-09-23 | ย้าย drawStandbyReadyState() ขึ้นไปไว้ใต้ drawRfidTapIcon() เพราะเดิมถูกวางไว้ต่ำกว่า refreshStationLiveValues() ที่เรียกใช้ ทำให้คอมไพล์ไม่ผ่าน |
  * | 122.6.0 | 2026-09-23 | คืนสัญลักษณ์แตะบัตร RFID กลับมาบนหน้าแรก คลื่นเป็นสีเขียวเมื่อเครื่องอ่านพร้อม และเป็นสีแดงพร้อมข้อความเตือนเมื่อไม่ตอบ |
@@ -512,13 +513,14 @@ void playBootAnimation() {
   tft.setTextColor(getStTextMain(), getStBg());
   tft.setTextSize(1);
   tft.setCursor(44, 60);
-  tft.println("Service point");
+  tft.println("Canteen station");
 
   drawStationCard(50, 95, 220, 48, getStGreen(), getStCardBg());
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(2);
-  tft.setCursor(85, 110);
-  tft.printf("Point %d", currentStationId);
+  // [122.8.0] แก้: "Station N" กว้างกว่า "Point N" จึงเลื่อนจุดเริ่มให้กลับมาอยู่กลางการ์ด
+  tft.setCursor(106, 110);
+  tft.printf("Station %d", currentStationId);
 
   tft.setTextColor(getStGreen(), getStBg());
   tft.setTextSize(1);
@@ -597,7 +599,7 @@ void displayStatsDashboard() {
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(172, 40);
-  tft.print("THIS POINT");
+  tft.print("THIS STATION");
 
   tft.setTextColor(getStTextMain(), getStCardBg());
   tft.setTextSize(4);
@@ -626,14 +628,14 @@ void displayStatusScreen(bool fullRedraw) {
     tft.setTextSize(1);
     // [122.5.0] แก้: กระจายหกแถวให้เต็มการ์ด ของเดิมกองอยู่ครึ่งบน เหลือที่ว่างข้างล่างเยอะ
     tft.setCursor(16, 46);  tft.print("Host link");
-    tft.setCursor(16, 72);  tft.print("Service point");
+    tft.setCursor(16, 72);  tft.print("Station");
     tft.setCursor(16, 98);  tft.print("Chip");
     tft.setCursor(16, 124); tft.print("Battery");
     tft.setCursor(16, 150); tft.print("Served today");
     tft.setCursor(16, 176); tft.print("Address");
 
     tft.setTextColor(getStTextMain(), getStCardBg());
-    tft.setCursor(140, 72);  tft.printf("Point %d", currentStationId);
+    tft.setCursor(140, 72);  tft.printf("No. %d", currentStationId);
     tft.setCursor(140, 176); tft.print(WiFi.macAddress());
 
     drawStationBottomBar("Page 3/3    Press the button for the next page");
@@ -852,7 +854,7 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
   tft.setCursor(20, 150);
-  tft.printf("Point %d", currentStationId);
+  tft.printf("Station %d", currentStationId);
   tft.setCursor(20, 164);
   tft.printf("Card %s", maskUID(lastProcessedUID).c_str());
 
@@ -964,7 +966,7 @@ void drawStationIdConfigProgress(unsigned long elapsedMs, bool holdToEnter) {
   tft.setCursor(46, 190);
   if (holdToEnter) {
     if (remain > 0) tft.printf("KEEP HOLDING... %lu SEC", sec);
-    else tft.print("Release to change the point number");
+    else tft.print("Release to change the station number");
   } else {
     if (remain > 0) tft.printf("AUTO SAVE IN %lu SEC", sec);
     else tft.print("SAVING...");

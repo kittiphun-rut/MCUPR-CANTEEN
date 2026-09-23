@@ -1,7 +1,7 @@
 /**
  * @file      HostScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
- * @version   113.5.0
+ * @version   113.8.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -21,6 +21,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.8.0 | 2026-09-23 | เปลี่ยนคำว่า Point บนหน้าจอและหน้าเว็บเป็น Station ให้ตรงกับชื่อที่ใช้ทั้งระบบ ส่วนชื่อร้านยังใช้คำว่า Shop เหมือนเดิม |
  * | 113.5.0 | 2026-09-23 | จัดกึ่งกลางทุกบรรทัดบนหน้าพักจอ และให้วันที่กับช่วงเวลาอยู่บรรทัดฐานเดียวกัน |
  * | 113.4.0 | 2026-09-23 | กรองทุกข้อความให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่องไม่ให้ล้นไปทับกัน |
  * | 113.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร ใช้การเขียนทับที่เดิมแทน จอไม่กะพริบทุกวินาทีแล้ว |
@@ -507,10 +508,11 @@ void renderHostPage(bool fullRedraw) {
       bool stateChanged = (fullRedraw || (int)online != lastOnlineState[i]);
 
       if (stateChanged) {
-        // ชื่อ "Point N" ไม่เคยเปลี่ยน วาดตอนเริ่มกับตอนสลับสถานะก็พอ
+        // [113.8.0] แก้: เปลี่ยนคำว่า Point เป็น Station ให้ตรงกับชื่อที่ใช้ทั้งระบบ
+        // ชื่อ "Station N" ไม่เคยเปลี่ยน วาดตอนเริ่มกับตอนสลับสถานะก็พอ
         drawStatusDot(x + 12, y + 25, online);
         drawFixedText(x + 22, y + 22, 1, getTftTextMuted(), getTftCardBg(), 9,
-                      "Point %d", i + 1);
+                      "Station %d", i + 1);
         lastOnlineState[i] = (int)online;
         lastBars[i] = -1;   // บังคับให้แถวล่างวาดใหม่ เพราะเพิ่งเปลี่ยนรูปแบบ
         lastBatt[i] = -1;
@@ -557,7 +559,7 @@ void renderHostPage(bool fullRedraw) {
       tft.setCursor(14, 164); tft.print("Page   192.168.4.1");
       tft.setCursor(14, 180); tft.print("Radio  channel 1");
       tft.setTextColor(getTftTextMuted(), getTftCardBg());
-      tft.setCursor(14, 192); tft.print("4 service points linked");
+      tft.setCursor(14, 192); tft.print("4 stations linked");
 
       drawBentoBottomBar("Click: next page    Double click: sleep");
     }
@@ -582,7 +584,7 @@ void renderHostPage(bool fullRedraw) {
         tft.setTextSize(1);
         tft.setTextColor(getTftTextMuted(), getTftCardBg());
         tft.setCursor(14, 86);
-        tft.printf("Point %d   card %s", lastScannedStation, maskUID(lastScannedUID).c_str());
+        tft.printf("Station %d   card %s", lastScannedStation, maskUID(lastScannedUID).c_str());
 
         const char* word; uint16_t tone;
         if (lastScannedStatus == "APPROVED")         { word = "SERVED";         tone = getTftAccentGreen(); }
@@ -767,12 +769,12 @@ void displayHostLiveScan(String uid, String studentId, String status, int stId) 
   tft.setTextSize(1);
   tft.setTextColor(textMuted, cardBg);
   tft.setCursor(20, 54);
-  tft.print("SERVICE POINT");
+  tft.print("STATION");
   
   tft.setTextSize(2);
   tft.setTextColor(textColor, cardBg);
   tft.setCursor(20, 66);
-  tft.printf("Point %d", stId);
+  tft.printf("Station %d", stId);
 
   tft.drawFastHLine(20, 88, 280, accentColor);
 
