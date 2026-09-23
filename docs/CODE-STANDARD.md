@@ -119,9 +119,10 @@ python3 tools/proto-check/headercheck.py   # หัวไฟล์และป�
 python3 tools/proto-check/asciicheck.py    # ข้อความที่ฟอนต์ของจอวาดไม่ได้
 python3 tools/proto-check/bracecheck.py    # วงเล็บและเครื่องหมายคำพูด
 python3 tools/proto-check/splitcheck.py    # ปัญหาจากการแยกโค้ดไปไว้ในไฟล์ .h
+python3 tools/proto-check/ordercheck.py    # ฟังก์ชันที่ถูกเรียกก่อนถูกประกาศ
 python3 tools/proto-check/protoscan.py Canteen_Host_Server/Canteen_Host_Server.ino \
                                        Canteen_Station_Client/Canteen_Station_Client.ino
 ```
 
-ทั้งสี่ตัวไม่ได้แทนการคอมไพล์ เป็นแค่ตัวกันความผิดพลาดที่เคยเกิดขึ้นจริงมาแล้ว
+ทุกตัวไม่ได้แทนการคอมไพล์ เป็นแค่ตัวกันความผิดพลาดที่เคยเกิดขึ้นจริงมาแล้ว
 **การคอมไพล์และทดสอบบนเครื่องจริงยังจำเป็นเสมอ**

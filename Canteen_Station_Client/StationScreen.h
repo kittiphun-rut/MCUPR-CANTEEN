@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.6.0
+ * @version   122.6.1
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.6.1 | 2026-09-23 | ย้าย drawStandbyReadyState() ขึ้นไปไว้ใต้ drawRfidTapIcon() เพราะเดิมถูกวางไว้ต่ำกว่า refreshStationLiveValues() ที่เรียกใช้ ทำให้คอมไพล์ไม่ผ่าน |
  * | 122.6.0 | 2026-09-23 | คืนสัญลักษณ์แตะบัตร RFID กลับมาบนหน้าแรก คลื่นเป็นสีเขียวเมื่อเครื่องอ่านพร้อม และเป็นสีแดงพร้อมข้อความเตือนเมื่อไม่ตอบ |
  * | 122.5.0 | 2026-09-23 | จัดกึ่งกลางหน้าพักจอ ย้ายหน่วยเงินลงใต้ตัวเลข และกระจายแถวหน้า SYSTEM ให้เต็มการ์ด |
  * | 122.4.0 | 2026-09-23 | กรองชื่อและรหัสนิสิตให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่อง |
@@ -174,6 +175,31 @@ void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uin
     int r = 9 + i * 6;
     tft.drawCircleHelper(cx + 14, cy, r, 0x6, waveColor);
     tft.drawCircleHelper(cx + 14, cy, r + 1, 0x6, waveColor);
+  }
+}
+
+// [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรพร้อมบรรทัดคำอธิบาย บนหน้าแรกของจุดบริการ
+//           แยกออกมาเป็นฟังก์ชันของตัวเองเพราะถูกเรียกจากสองที่
+//           คือตอนวาดหน้าใหม่ทั้งหน้า และตอนที่เครื่องอ่านบัตรเปลี่ยนสถานะ
+//           ทั้งสองที่จึงใช้พิกัดชุดเดียวกันเสมอ ไม่มีทางเลื่อนออกจากกันได้
+//
+// สีคลื่นบอกความพร้อม เขียวคือเครื่องอ่านตอบอยู่ แดงคือไม่ตอบ
+// ล้างพื้นก่อนวาดเพราะเส้นโค้งวาดทับเส้นโค้งเดิมไม่มิด สีเก่าจะค้างตามขอบ
+// จุดนี้วาดเฉพาะตอนสถานะเปลี่ยนซึ่งนาน ๆ ครั้ง จึงไม่ทำให้กลับไปกะพริบทุกวินาที
+void drawStandbyReadyState(bool ready) {
+  uint16_t bg = getStCardBg();
+  tft.fillRect(RFID_ICON_X(160), RFID_ICON_Y(72), RFID_ICON_W, RFID_ICON_H, bg);
+  drawRfidTapIcon(160, 72, getStTextMain(), ready ? getStGreen() : getStRose(), bg);
+
+  // ความกว้าง 44 ตัวอักษรที่ขนาด 1 คือ 264 พิกเซล พอดีกับช่องในการ์ด
+  // ข้อความยาวไม่เท่ากัน จึงต้องเป็น drawCenteredText ที่เติมช่องว่างทั้งสองข้าง
+  // ไม่ใช่ drawFitCenteredText ที่ไม่ลบของเดิม
+  if (ready) {
+    drawCenteredText(160, 139, 1, getStTextMuted(), bg, 44,
+                     "Free meal  35 baht  once a day");
+  } else {
+    drawCenteredText(160, 139, 1, getStRose(), bg, 44,
+                     "Card reader not responding - call staff");
   }
 }
 
@@ -492,31 +518,6 @@ void showStationPage(int page, bool fullRedraw) {
 }
 
 // [122.0.0] แก้: หน้าที่นิสิตเห็นมากที่สุด จึงเหลือประโยคเดียวที่ต้องอ่าน
-// [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรพร้อมบรรทัดคำอธิบาย บนหน้าแรกของจุดบริการ
-//           แยกออกมาเป็นฟังก์ชันของตัวเองเพราะถูกเรียกจากสองที่
-//           คือตอนวาดหน้าใหม่ทั้งหน้า และตอนที่เครื่องอ่านบัตรเปลี่ยนสถานะ
-//           ทั้งสองที่จึงใช้พิกัดชุดเดียวกันเสมอ ไม่มีทางเลื่อนออกจากกันได้
-//
-// สีคลื่นบอกความพร้อม เขียวคือเครื่องอ่านตอบอยู่ แดงคือไม่ตอบ
-// ล้างพื้นก่อนวาดเพราะเส้นโค้งวาดทับเส้นโค้งเดิมไม่มิด สีเก่าจะค้างตามขอบ
-// จุดนี้วาดเฉพาะตอนสถานะเปลี่ยนซึ่งนาน ๆ ครั้ง จึงไม่ทำให้กลับไปกะพริบทุกวินาที
-void drawStandbyReadyState(bool ready) {
-  uint16_t bg = getStCardBg();
-  tft.fillRect(RFID_ICON_X(160), RFID_ICON_Y(72), RFID_ICON_W, RFID_ICON_H, bg);
-  drawRfidTapIcon(160, 72, getStTextMain(), ready ? getStGreen() : getStRose(), bg);
-
-  // ความกว้าง 44 ตัวอักษรที่ขนาด 1 คือ 264 พิกเซล พอดีกับช่องในการ์ด
-  // ข้อความยาวไม่เท่ากัน จึงต้องเป็น drawCenteredText ที่เติมช่องว่างทั้งสองข้าง
-  // ไม่ใช่ drawFitCenteredText ที่ไม่ลบของเดิม
-  if (ready) {
-    drawCenteredText(160, 139, 1, getStTextMuted(), bg, 44,
-                     "Free meal  35 baht  once a day");
-  } else {
-    drawCenteredText(160, 139, 1, getStRose(), bg, 44,
-                     "Card reader not responding - call staff");
-  }
-}
-
 void displayTapCardStandby() {
   ledStandby();
   tft.fillScreen(getStBg());

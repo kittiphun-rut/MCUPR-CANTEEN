@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.6.0
+ * @version   122.6.1
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.6.1 | 2026-09-23 | ตามการย้ายตำแหน่งฟังก์ชันของ StationScreen.h ที่ทำให้คอมไพล์ไม่ผ่าน ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.6.0 | 2026-09-23 | บันทึกผลการตรวจสุขภาพ RC522 ไว้ใน isReaderReady ให้สัญลักษณ์แตะบัตรบนหน้าแรกบอกความพร้อมได้จริง และตรวจทะเบียนรุ่นซ้ำหลังสั่งเริ่มใหม่ |
  * | 122.5.0 | 2026-09-23 | ตามการจัดตำแหน่งตัวอักษรของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.4.0 | 2026-09-23 | ตามการแก้ของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -53,7 +54,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.6.0"
+#define APP_VERSION         "122.6.1"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
