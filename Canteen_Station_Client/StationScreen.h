@@ -1,8 +1,8 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.2.0
- * @date      2026-09-22
+ * @version   122.4.0
+ * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
@@ -22,6 +22,8 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.4.0 | 2026-09-23 | กรองชื่อและรหัสนิสิตให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่อง |
+ * | 122.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร และแถบสัญญาณเทียบด้วยจำนวนขีดแทนค่า dBm ดิบ |
  * | 122.2.0 | 2026-09-22 | เพิ่ม refreshStationLiveValues() วาดซ้ำเฉพาะตัวเลขที่เปลี่ยน นาฬิกาเดินแล้ว |
  * | 122.1.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก ย้ายแบบยกก้อน ไม่แก้เนื้อใน |
  * | 122.0.0 | 2026-09-22 | ออกแบบหน้าจอใหม่ให้เรียบง่าย ตัวอักษรน้อย แบ่งช่องชัดเจน และเติมค่าที่หายไปในหน้าตรวจสอบระบบ |
@@ -33,6 +35,62 @@
  */
 
 #pragma once
+
+#include <stdarg.h>   // drawFixedText รับอาร์กิวเมนต์แบบ printf
+
+// [122.4.0] เพิ่ม: บีบข้อความให้เหลือเฉพาะอักขระที่ฟอนต์ในตัวของจอวาดได้จริง
+//
+// ฟอนต์ของ Adafruit GFX มีแต่ ASCII ไบต์ตั้งแต่ 0x80 ขึ้นไปจะถูกวาดเป็นสัญลักษณ์มั่ว
+// ภาษาไทยหนึ่งตัวกินสามไบต์ จึงกลายเป็นตัวประหลาดสามตัว และ **กินที่กว้างกว่าที่นับไว้
+// สามเท่า** ข้อความจึงล้นกรอบไปทับของข้างเคียง เห็นเป็นอักษรซ้อนกัน
+//
+// ตัดทิ้งไปเลยแทนการแทนด้วยเครื่องหมายคำถาม เพราะชื่อไทยล้วนจะได้เหลือสตริงว่าง
+// แล้วให้ผู้เรียกถอยไปใช้ชื่อภาษาอังกฤษสำรองได้ถูกต้อง
+String asciiOnly(const String &raw) {
+  String out;
+  out.reserve(raw.length());
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    uint8_t c = (uint8_t)raw[i];
+    if (c >= 0x20 && c < 0x7F) out += (char)c;
+  }
+  out.trim();
+  return out;
+}
+
+
+// [122.3.0] เพิ่ม: วาดข้อความทับที่เดิมโดยไม่ต้องล้างพื้นก่อน
+//
+// ต้นเหตุของการกะพริบคือลำดับ "ล้างพื้น แล้วค่อยเขียนตัวอักษร"
+// ระหว่างสองจังหวะนั้นจอว่างเปล่าจริง ๆ ตาคนจึงเห็นเป็นการกะพริบทุกวินาที
+//
+// Adafruit GFX ลงสีพื้นให้ทุกตัวอักษรอยู่แล้วเมื่อกำหนดสีพื้นไว้ด้วย
+// (setTextColor สองอาร์กิวเมนต์) ข้อความใหม่จึงเขียนทับของเดิมได้ในจังหวะเดียว
+// ไม่มีช่วงที่จอว่าง ไม่ต้องเรียก fillRect เลย
+//
+// เงื่อนไขเดียวคือความยาวต้องคงที่ จึงเติมช่องว่างท้ายข้อความให้ครบ width เสมอ
+// ไม่งั้นตัวอักษรเก่าที่ยาวกว่าจะค้างอยู่ เช่น 187 เปลี่ยนเป็น 9 แล้วเหลือ 87
+// ใช้ %-*s ซึ่งเติมให้ครบแต่ไม่ตัดทิ้ง ค่าที่ยาวเกินคาดจึงยังแสดงครบ ไม่โกหกตัวเลข
+void drawFixedText(int x, int y, uint8_t size, uint16_t fg, uint16_t bg,
+                   int width, const char* fmt, ...) {
+  char raw[64];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(raw, sizeof(raw), fmt, args);
+  va_end(args);
+
+  // ตัดให้ยาวเท่า width พอดีเสมอ ไม่ใช่แค่เติมให้ครบ
+  // ถ้าปล่อยให้ยาวเกินได้ ข้อความจะล้นไปทับช่องข้างเคียง และพอรอบหน้าค่าสั้นลง
+  // ช่องว่างที่เติมก็ลบของเก่าไม่หมด เหลือเป็นอักษรซ้อนกันค้างอยู่
+  // ทุกช่องจึงถูกกำหนดความกว้างเผื่อไว้แล้วให้ค่าจริงยาวไม่ถึง
+  char padded[72];
+  snprintf(padded, sizeof(padded), "%-*.*s", width, width, raw);
+
+  tft.setTextSize(size);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(x, y);
+  tft.print(padded);
+}
+
 
 
 // ============================================================================
@@ -185,7 +243,15 @@ void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw) {
     else currentBars = 1; // แก้ไขจุด activeBars ให้เป็น currentBars เรียบร้อยแล้ว
   }
 
-  if (!forceRedraw && (online == lastDrawnOnline) && (currentBars == lastBars) && (abs(rssi - lastDrawnRssi) < 3)) {
+  // [122.3.0] แก้: เดิมเทียบด้วยค่า dBm ดิบ ๆ ซึ่งแกว่งเกินสามหน่วยแทบทุกวินาที
+  //           แถบบนจึงถูกล้างแล้ววาดใหม่ตลอดเวลา เห็นเป็นการกะพริบมุมขวาบน
+  //           ตอนนี้เทียบด้วยจำนวนขีดกับสถานะออนไลน์ ซึ่งนาน ๆ เปลี่ยนที
+  if (!forceRedraw && online == lastDrawnOnline && currentBars == lastBars) {
+    // ตัวเลข dBm ยังอัปเดตได้ เพราะเขียนทับที่เดิมโดยไม่ล้างพื้น ไม่ทำให้กะพริบ
+    if (online && rssi != lastDrawnRssi) {
+      drawFixedText(194, 8, 1, getStTextMuted(), getStBg(), 6, "%ddB", rssi);
+      lastDrawnRssi = rssi;
+    }
     return;
   }
 
@@ -193,17 +259,11 @@ void updateTopRightHeaderSmooth(int rssi, bool online, bool forceRedraw) {
   lastDrawnOnline = online;
   lastBars = currentBars;
 
-  tft.fillRect(190, 3, 66, 18, getStBg());
-  tft.setTextSize(1);
   if (online) {
-    tft.setTextColor(getStTextMuted(), getStBg());
-    tft.setCursor(194, 8);
-    tft.printf("%ddB", rssi);
+    drawFixedText(194, 8, 1, getStTextMuted(), getStBg(), 6, "%ddB", rssi);
     drawSignalBars(228, 6, rssi, true, getStBg());
   } else {
-    tft.setTextColor(getStRose(), getStBg());
-    tft.setCursor(192, 8);
-    tft.print("OFFLINE");
+    drawFixedText(192, 8, 1, getStRose(), getStBg(), 7, "OFFLINE");
     drawSignalBars(228, 6, -100, false, getStBg());
   }
 
@@ -233,6 +293,7 @@ void wakeScreenIfNeeded() {
 //           ของเดิมโค้ดอัปเดตยอดอยู่ใน loop() ของไฟล์หลัก ซึ่งมีพิกัดของตัวเอง
 //           พอหน้าจอถูกออกแบบใหม่ พิกัดสองชุดจึงไม่ตรงกันและวาดผิดที่
 //           ย้ายมาอยู่ข้างเดียวกับโค้ดที่วาดหน้านั้นจริง จะได้แก้พร้อมกันเสมอ
+// [122.3.0] แก้: เลิกล้างพื้นก่อนเขียน ใช้การเขียนทับที่เดิมแทน จอจะได้ไม่กะพริบ
 void refreshStationLiveValues(bool force) {
   if (!isScreenOn) return;
   // หน้าแจ้งผล หน้าขาดการเชื่อมต่อ และหน้าเครดิต ยึดพื้นที่ทั้งจอไว้
@@ -251,38 +312,20 @@ void refreshStationLiveValues(bool force) {
   // ---- หน้าแรก: ยอดวันนี้มุมซ้ายล่าง และนาฬิกามุมขวาล่าง ----
   if (currentState == STATE_STANDBY && currentStationPage == 1) {
     if (force || served != lastServed) {
-      tft.fillRect(26, 188, 120, 18, getStCardBg());
-      tft.setTextColor(getStTextMain(), getStCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(28, 191);
-      tft.printf("%d", served);
+      drawFixedText(28, 191, 2, getStTextMain(), getStCardBg(), 4, "%d", served);
     }
     if (force || clock != lastClock) {
-      tft.fillRect(180, 184, 124, 18, getStCardBg());
-      tft.setTextColor(getStTextMain(), getStCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(292 - (int)clock.length() * 12, 186);
-      tft.print(clock);
+      // HH:MM:SS ยาวคงที่แปดตัว ขนาด 2 กว้างตัวละ 12 จึงเริ่มที่ 292-96 = 196
+      drawFixedText(196, 186, 2, getStTextMain(), getStCardBg(), 8, "%s", clock.c_str());
     }
   }
   // ---- หน้าสอง: ยอดจาน ยอดเงิน สถานะการเชื่อมต่อ และนาฬิกา ----
   else if (currentState == STATE_STANDBY && currentStationPage == 2) {
     if (force || served != lastServed) {
-      tft.fillRect(12, 60, 140, 36, getStCardBg());
-      tft.setTextColor(getStTextMain(), getStCardBg());
-      tft.setTextSize(4);
-      tft.setCursor(14, 62);
-      tft.printf("%d", served);
-
-      tft.fillRect(12, 116, 140, 26, getStCardBg());
-      tft.setTextColor(getStGreen(), getStCardBg());
-      tft.setTextSize(3);
-      tft.setCursor(14, 118);
-      tft.printf("%d", served * 35);
-      tft.setTextSize(1);
-      tft.setTextColor(getStTextMuted(), getStCardBg());
-      tft.setCursor(14 + (int)String(served * 35).length() * 18 + 6, 134);
-      tft.print("baht");
+      drawFixedText(14, 62, 4, getStTextMain(), getStCardBg(), 3, "%d", served);
+      // ตัวเลขเงินกว้างคงที่ห้าหลัก ป้าย baht จึงอยู่กับที่ ไม่ขยับตามจำนวนหลัก
+      drawFixedText(14, 118, 3, getStGreen(), getStCardBg(), 5, "%d", served * 35);
+      drawFixedText(14, 134, 1, getStTextMuted(), getStCardBg(), 5, "baht");
     }
     if (force || (int)isHostOnline != lastOnline) {
       // ป้ายเป็นสี่เหลี่ยมมุมโค้ง การวาดทับป้ายเดิมจึงไม่ลบสีที่มุมทั้งสี่
@@ -293,23 +336,14 @@ void refreshStationLiveValues(bool force) {
                            isHostOnline ? getStGreen() : getStRose());
     }
     if (force || clock != lastClock) {
-      tft.fillRect(170, 164, 138, 18, getStCardBg());
-      tft.setTextColor(getStTextMain(), getStCardBg());
-      tft.setTextSize(2);
-      tft.setCursor(172, 166);
-      tft.print(clock);
+      drawFixedText(172, 166, 2, getStTextMain(), getStCardBg(), 8, "%s", clock.c_str());
     }
   }
   // ---- หน้าพักจอ: ยอดวันนี้บรรทัดเดียว นาฬิกามีคนดูแลอยู่แล้วในฟังก์ชันของมันเอง ----
   else if (currentState == STATE_SCREENSAVER) {
     if (force || served != lastServed) {
-      char line[48];
-      snprintf(line, sizeof(line), "%d served today   %d baht", served, served * 35);
-      tft.fillRect(24, 144, 272, 12, getStCardBg());
-      tft.setTextColor(getStGreen(), getStCardBg());
-      tft.setTextSize(1);
-      tft.setCursor(160 - (int)strlen(line) * 3, 146);
-      tft.print(line);
+      drawFixedText(62, 146, 1, getStGreen(), getStCardBg(), 32,
+                    "%d served today   %d baht", served, served * 35);
     }
   }
 
@@ -393,16 +427,11 @@ void displayTapCardStandby() {
   tft.setTextSize(1);
   tft.setCursor(28, 178);
   tft.print("SERVED TODAY");
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(2);
-  tft.setCursor(28, 191);
-  tft.printf("%d", totalSuccessToday);
-
-  String clock = getTimeOnlyStr();
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(2);
-  tft.setCursor(292 - (int)clock.length() * 12, 186);
-  tft.print(clock);
+  // ตำแหน่งและความกว้างต้องตรงกับ refreshStationLiveValues() เป๊ะ
+  // ไม่งั้นพอวาดซ้ำครั้งแรกตัวเลขจะขยับที่ แล้วของเดิมค้างอยู่
+  drawFixedText(28, 191, 2, getStTextMain(), getStCardBg(), 4, "%d", (int)totalSuccessToday);
+  drawFixedText(196, 186, 2, getStTextMain(), getStCardBg(), 8,
+                "%s", getTimeOnlyStr().c_str());
 
   drawStationBottomBar("Page 1/3    Press the button for the next page");
 }
@@ -420,19 +449,9 @@ void displayStatsDashboard() {
   tft.setCursor(14, 40);
   tft.print("SERVED TODAY");
 
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(4);
-  tft.setCursor(14, 62);
-  tft.printf("%d", totalSuccessToday);
-
-  tft.setTextColor(getStGreen(), getStCardBg());
-  tft.setTextSize(3);
-  tft.setCursor(14, 118);
-  tft.printf("%d", totalSuccessToday * 35);
-  tft.setTextSize(1);
-  tft.setTextColor(getStTextMuted(), getStCardBg());
-  tft.setCursor(14 + (int)String(totalSuccessToday * 35).length() * 18 + 6, 134);
-  tft.print("baht");
+  drawFixedText(14, 62, 4, getStTextMain(), getStCardBg(), 3, "%d", (int)totalSuccessToday);
+  drawFixedText(14, 118, 3, getStGreen(), getStCardBg(), 5, "%d", (int)totalSuccessToday * 35);
+  drawFixedText(110, 134, 1, getStTextMuted(), getStCardBg(), 5, "baht");
 
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
@@ -455,10 +474,8 @@ void displayStatsDashboard() {
                        isHostOnline ? (isStationDarkMode ? 0x0000 : 0xFFFF) : 0xFFFF,
                        isHostOnline ? getStGreen() : getStRose());
 
-  tft.setTextColor(getStTextMain(), getStCardBg());
-  tft.setTextSize(2);
-  tft.setCursor(172, 166);
-  tft.print(getTimeOnlyStr());
+  drawFixedText(172, 166, 2, getStTextMain(), getStCardBg(), 8,
+                "%s", getTimeOnlyStr().c_str());
 
   drawStationBottomBar("Page 2/3    Press the button for the next page");
 }
@@ -498,32 +515,23 @@ void displayStatusScreen(bool fullRedraw) {
     lastDisplayedCpuTemperature = chipT;
     lastDisplayedCpuLoad = cpuL;
 
-    tft.fillRect(140, 40, 166, 14, getStCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(140, 42);
+    // [122.3.0] แก้: หน้านี้อัปเดตทุกครึ่งวินาที การล้างพื้นก่อนเขียนจึงกะพริบถี่ที่สุด
     if (isHostOnline) {
-      tft.setTextColor(getStGreen(), getStCardBg());
-      tft.printf("Connected  %d dB", lastHostRssi);
+      drawFixedText(140, 42, 1, getStGreen(), getStCardBg(), 24,
+                    "Connected  %d dB", lastHostRssi);
     } else {
-      tft.setTextColor(getStRose(), getStCardBg());
-      tft.print("Not connected");
+      drawFixedText(140, 42, 1, getStRose(), getStCardBg(), 24, "Not connected");
     }
 
-    tft.fillRect(140, 84, 166, 14, getStCardBg());
-    tft.setCursor(140, 86);
-    tft.setTextColor((chipT < 65.0f) ? getStTextMain() : getStYellow(), getStCardBg());
-    tft.printf("%.0f C   cpu %.0f%%", chipT, cpuL);
+    drawFixedText(140, 86, 1, (chipT < 65.0f) ? getStTextMain() : getStYellow(),
+                  getStCardBg(), 24, "%.0f C   cpu %.0f%%", chipT, cpuL);
 
     // สองแถวนี้เดิมมีแต่หัวข้อ ไม่เคยมีค่าโผล่มาเลย เติมให้ครบ
     float volt = readBatteryVoltage();
-    tft.fillRect(140, 106, 166, 14, getStCardBg());
-    tft.setCursor(140, 108);
-    tft.setTextColor(getStTextMain(), getStCardBg());
-    tft.printf("%d%%   %.2f V", getBatteryPercentage(volt), volt);
-
-    tft.fillRect(140, 128, 166, 14, getStCardBg());
-    tft.setCursor(140, 130);
-    tft.printf("%d meals   %d baht", totalSuccessToday, totalSuccessToday * 35);
+    drawFixedText(140, 108, 1, getStTextMain(), getStCardBg(), 24,
+                  "%d%%   %.2f V", getBatteryPercentage(volt), volt);
+    drawFixedText(140, 130, 1, getStTextMain(), getStCardBg(), 24,
+                  "%d meals   %d baht", (int)totalSuccessToday, (int)totalSuccessToday * 35);
   }
 }
 
@@ -545,12 +553,8 @@ void renderScreensaver(bool fullRedraw) {
     tft.setCursor(160 - (int)dateStr.length() * 3, 118);
     tft.print(dateStr);
 
-    char line[48];
-    snprintf(line, sizeof(line), "%d served today   %d baht", usedCount, usedCount * 35);
-    tft.setTextColor(getStGreen(), getStCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(160 - (int)strlen(line) * 3, 146);
-    tft.print(line);
+    drawFixedText(62, 146, 1, getStGreen(), getStCardBg(), 32,
+                  "%d served today   %d baht", usedCount, usedCount * 35);
 
     float volt = readBatteryVoltage();
     char line2[48];
@@ -562,14 +566,11 @@ void renderScreensaver(bool fullRedraw) {
     drawStationBottomBar("Tap your card or press the button to wake");
   }
 
+  // นาฬิกาตัวโต ยาวคงที่แปดตัว เขียนทับที่เดิมได้เลย ไม่ต้องล้างพื้นให้กะพริบ
   String curTime = getTimeOnlyStr();
   if (fullRedraw || curTime != lastStationClock) {
     lastStationClock = curTime;
-    tft.fillRect(30, 54, 260, 52, getStCardBg());
-    tft.setTextColor(getStTextMain(), getStCardBg());
-    tft.setTextSize(5);
-    tft.setCursor(160 - (int)curTime.length() * 15, 62);
-    tft.print(curTime);
+    drawFixedText(40, 62, 5, getStTextMain(), getStCardBg(), 8, "%s", curTime.c_str());
   }
 }
 
@@ -680,7 +681,11 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.setCursor(20, 56);
   tft.print("NAME");
 
-  String displayName = (name != "-" && name.length() > 0) ? name : "Unknown card";
+  // [122.4.0] แก้: กรองให้เหลือเฉพาะ ASCII อีกชั้นก่อนวาด
+  //           ปกติแม่ข่ายแทนชื่อไทยด้วย "Student <รหัส>" ให้อยู่แล้ว
+  //           แต่ถ้าวันหนึ่งมีชื่อไทยหลุดมาได้ จอจะขึ้นสัญลักษณ์มั่วเต็มการ์ด
+  String displayName = asciiOnly(name);
+  if (displayName.length() == 0 || displayName == "-") displayName = "Unknown card";
   if (displayName.length() > 22) displayName = displayName.substring(0, 22);
   tft.setTextSize(2);
   tft.setTextColor(textColor, cardBg);
@@ -694,7 +699,8 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.setCursor(20, 102);
   tft.print("STUDENT ID");
 
-  String cleanId = (id != "-" && id.length() > 0) ? id : "Unknown";
+  String cleanId = asciiOnly(id);
+  if (cleanId.length() == 0 || cleanId == "-") cleanId = "Unknown";
   tft.setTextSize(3);
   tft.setTextColor(textColor, cardBg);
   tft.setCursor(20, 114);

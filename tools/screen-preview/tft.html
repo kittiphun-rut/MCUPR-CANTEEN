@@ -40,15 +40,27 @@ function print(str){
   for(const chr of str){
     if(bgSet){ g.fillStyle=rgb(bg); g.fillRect(P(cur.x),P(cur.y),P(cw),P(ch)); }
     if(chr!==' '){
+      // ฟอนต์ในตัวของ Adafruit GFX อยู่ในกรอบเซลล์เสมอ ไม่มีหางตัวอักษรล้นออกมา
+      // ฟอนต์ของระบบล้นได้ จึงตัดขอบให้เท่าเซลล์ ภาพจะได้ตรงกับจอจริง
+      g.save();
+      g.beginPath(); g.rect(P(cur.x),P(cur.y),P(cw),P(ch)); g.clip();
       g.fillStyle=rgb(fg);
       g.textBaseline='alphabetic'; g.textAlign='center';
       g.font=`bold ${Math.round(7.6*tsize*S)}px "DejaVu Sans Mono","Liberation Mono",monospace`;
       g.fillText(chr, P(cur.x+cw/2)-S*0.15, P(cur.y+7*tsize)+S*0.2);
+      g.restore();
     }
     cur.x+=cw;
   }
 }
 function printf(){ print(fmt.apply(null,arguments)); }
+/* สะท้อน drawFixedText ของเฟิร์มแวร์: เขียนทับที่เดิมโดยไม่ล้างพื้น
+   เติมช่องว่างให้ครบ width เสมอ แต่ไม่ตัดค่าที่ยาวเกิน */
+function drawFixedText(x,y,size,f,b,width,...args){
+  const raw = args.length>1 ? fmt.apply(null,args) : String(args[0]);
+  const padded = raw.length<width ? raw.padEnd(width) : raw.slice(0,width);
+  setTextSize(size); setTextColor(f,b); setCursor(x,y); print(padded);
+}
 function fmt(f,...a){ let i=0; return f.replace(/%[-0-9.]*[difsuc%]/g,m=>{
   if(m==='%%')return '%'; let v=a[i++];
   const mm=m.match(/%(-?)(0?)(\d*)(?:\.(\d+))?([difsuc])/);

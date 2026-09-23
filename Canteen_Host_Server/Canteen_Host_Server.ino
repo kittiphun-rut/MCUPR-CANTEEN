@@ -1,8 +1,8 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.2.0
- * @date      2026-09-22
+ * @version   113.4.0
+ * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
@@ -31,6 +31,8 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.4.0 | 2026-09-23 | เพิ่มชื่อร้านสำหรับขึ้นจอ (ภาษาอังกฤษ) แยกจากชื่อจริงที่ใช้บนเว็บ |
+ * | 113.3.0 | 2026-09-22 | ตามการแก้เรื่องกะพริบของ HostScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.2.0 | 2026-09-22 | รีเฟรชหน้าจอทุกหน้า ไม่ใช่แค่สองหน้าแรก หน้า SYSTEM จึงไม่ค้างอีกต่อไป |
  * | 113.1.0 | 2026-09-22 | หน้าเว็บเป็นสองภาษา ไทย/อังกฤษ และเสิร์ฟสคริปต์พร้อม charset |
  * | 113.0.0 | 2026-09-22 | เริ่มใหม่จากต้นฉบับ แยกไฟล์จอและเว็บออกมา คุมการแสดงผลของทุกจุดบริการ เพิ่ม /api/dashboard เปลี่ยนเส้นทางที่แก้ข้อมูลเป็น POST ซ่อม CSV โทเคนเซสชัน และเลขอ้างอิงบนจอ |
@@ -59,7 +61,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.2.0"
+#define APP_VERSION         "113.4.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -235,17 +237,23 @@ struct Student {
   bool isTempCard;
 };
 
+// [113.4.0] เพิ่ม: screen คือชื่อสั้น ๆ ภาษาอังกฤษสำหรับขึ้นบนจอ TFT
+//           เพราะฟอนต์ในตัวของจอไม่มีตัวอักษรไทย ชื่อไทยจะกลายเป็นสัญลักษณ์มั่ว
+//           ส่วน name ยังเป็นชื่อจริงภาษาไทยที่ใช้บนหน้าเว็บและในไฟล์รายงาน
 struct Shop {
   String name;
   String vendor;
+  String screen;
 };
 
 std::vector<Student> db;
+// ช่องที่สามคือชื่อสำหรับขึ้นจอ TFT ต้องเป็นภาษาอังกฤษเท่านั้น
+// ค่าเริ่มต้นเดิมมีแต่ชื่อไทย พอขึ้นจอจึงกลายเป็นสัญลักษณ์มั่วตั้งแต่ยังไม่ได้ตั้งค่าอะไร
 Shop shops[4] = {
-  {"ร้านที่ 1", "นางสาวณัฐกฤตา สุพิทิพย์"},
-  {"ร้านที่ 2", "นางสาวปียาวัน เหมืองหม้อ"},
-  {"ร้านที่ 3", "นางฉวีวรรณ วงศ์นาม"},
-  {"ร้านที่ 4", "น.ส.พัชรินทร์ ชำนาญใช้"}
+  {"ร้านที่ 1", "นางสาวณัฐกฤตา สุพิทิพย์", "Shop 1"},
+  {"ร้านที่ 2", "นางสาวปียาวัน เหมืองหม้อ", "Shop 2"},
+  {"ร้านที่ 3", "นางฉวีวรรณ วงศ์นาม",       "Shop 3"},
+  {"ร้านที่ 4", "น.ส.พัชรินทร์ ชำนาญใช้",   "Shop 4"}
 };
 
 // ============================================================================
@@ -937,7 +945,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
       if (isNameAscii && s.fullName.length() > 0) {
         strncpy(resp.name, s.fullName.c_str(), sizeof(resp.name) - 1);
       } else {
-        String safeName = "STUDENT " + s.studentId;
+        String safeName = "Student " + s.studentId;
         strncpy(resp.name, safeName.c_str(), sizeof(resp.name) - 1);
       }
 
@@ -1299,6 +1307,7 @@ void saveShopsToFS() {
   for (int i = 0; i < 4; i++) {
     JsonObject obj = array.createNestedObject();
     obj["name"] = shops[i].name; obj["vendor"] = shops[i].vendor;
+    obj["screen"] = shops[i].screen;
   }
   serializeJson(doc, file); file.close();
 }
@@ -1313,6 +1322,9 @@ void loadShopsFromFS() {
   for (int i = 0; i < 4 && i < array.size(); i++) {
     shops[i].name = array[i]["name"].as<String>();
     shops[i].vendor = array[i]["vendor"].as<String>();
+    // ไฟล์ที่บันทึกไว้ก่อนรุ่น 113.4.0 ยังไม่มีช่องนี้ ปล่อยว่างไว้ได้
+    // ฝั่งจอจะถอยไปใช้ชื่อร้านที่เป็น ASCII หรือ "Shop N" ให้เอง
+    if (array[i]["screen"].is<const char*>()) shops[i].screen = array[i]["screen"].as<String>();
   }
   file.close();
 }
@@ -1539,6 +1551,7 @@ void handleDashboardAPI() {
     if (i) j += ",";
     j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
     j += ",\"owner\":\"" + jsonEscape(shops[i].vendor) + "\"";
+    j += ",\"screen\":\"" + jsonEscape(shops[i].screen) + "\"";
     j += ",\"meals\":" + String(shopMeals[i]);
     j += ",\"amount\":" + String(shopMeals[i] * 35) + "}";
   }
@@ -1772,6 +1785,7 @@ void setup() {
     for (int i = 0; i < 4; i++) {
       shops[i].name = server.arg("sname" + String(i));
       shops[i].vendor = server.arg("vname" + String(i));
+      shops[i].screen = server.arg("dname" + String(i));
     }
     saveShopsToFS(); renderHostPage(true); sendAlert("Vendors Saved Successfully!", "/");
   });
