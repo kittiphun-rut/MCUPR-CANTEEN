@@ -1,8 +1,8 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.3.0
- * @date      2026-09-22
+ * @version   122.4.0
+ * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.4.0 | 2026-09-23 | กรองชื่อและรหัสนิสิตให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่อง |
  * | 122.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร และแถบสัญญาณเทียบด้วยจำนวนขีดแทนค่า dBm ดิบ |
  * | 122.2.0 | 2026-09-22 | เพิ่ม refreshStationLiveValues() วาดซ้ำเฉพาะตัวเลขที่เปลี่ยน นาฬิกาเดินแล้ว |
  * | 122.1.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก ย้ายแบบยกก้อน ไม่แก้เนื้อใน |
@@ -36,6 +37,26 @@
 #pragma once
 
 #include <stdarg.h>   // drawFixedText รับอาร์กิวเมนต์แบบ printf
+
+// [122.4.0] เพิ่ม: บีบข้อความให้เหลือเฉพาะอักขระที่ฟอนต์ในตัวของจอวาดได้จริง
+//
+// ฟอนต์ของ Adafruit GFX มีแต่ ASCII ไบต์ตั้งแต่ 0x80 ขึ้นไปจะถูกวาดเป็นสัญลักษณ์มั่ว
+// ภาษาไทยหนึ่งตัวกินสามไบต์ จึงกลายเป็นตัวประหลาดสามตัว และ **กินที่กว้างกว่าที่นับไว้
+// สามเท่า** ข้อความจึงล้นกรอบไปทับของข้างเคียง เห็นเป็นอักษรซ้อนกัน
+//
+// ตัดทิ้งไปเลยแทนการแทนด้วยเครื่องหมายคำถาม เพราะชื่อไทยล้วนจะได้เหลือสตริงว่าง
+// แล้วให้ผู้เรียกถอยไปใช้ชื่อภาษาอังกฤษสำรองได้ถูกต้อง
+String asciiOnly(const String &raw) {
+  String out;
+  out.reserve(raw.length());
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    uint8_t c = (uint8_t)raw[i];
+    if (c >= 0x20 && c < 0x7F) out += (char)c;
+  }
+  out.trim();
+  return out;
+}
+
 
 // [122.3.0] เพิ่ม: วาดข้อความทับที่เดิมโดยไม่ต้องล้างพื้นก่อน
 //
@@ -57,8 +78,12 @@ void drawFixedText(int x, int y, uint8_t size, uint16_t fg, uint16_t bg,
   vsnprintf(raw, sizeof(raw), fmt, args);
   va_end(args);
 
+  // ตัดให้ยาวเท่า width พอดีเสมอ ไม่ใช่แค่เติมให้ครบ
+  // ถ้าปล่อยให้ยาวเกินได้ ข้อความจะล้นไปทับช่องข้างเคียง และพอรอบหน้าค่าสั้นลง
+  // ช่องว่างที่เติมก็ลบของเก่าไม่หมด เหลือเป็นอักษรซ้อนกันค้างอยู่
+  // ทุกช่องจึงถูกกำหนดความกว้างเผื่อไว้แล้วให้ค่าจริงยาวไม่ถึง
   char padded[72];
-  snprintf(padded, sizeof(padded), "%-*s", width, raw);
+  snprintf(padded, sizeof(padded), "%-*.*s", width, width, raw);
 
   tft.setTextSize(size);
   tft.setTextColor(fg, bg);
@@ -656,7 +681,11 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.setCursor(20, 56);
   tft.print("NAME");
 
-  String displayName = (name != "-" && name.length() > 0) ? name : "Unknown card";
+  // [122.4.0] แก้: กรองให้เหลือเฉพาะ ASCII อีกชั้นก่อนวาด
+  //           ปกติแม่ข่ายแทนชื่อไทยด้วย "Student <รหัส>" ให้อยู่แล้ว
+  //           แต่ถ้าวันหนึ่งมีชื่อไทยหลุดมาได้ จอจะขึ้นสัญลักษณ์มั่วเต็มการ์ด
+  String displayName = asciiOnly(name);
+  if (displayName.length() == 0 || displayName == "-") displayName = "Unknown card";
   if (displayName.length() > 22) displayName = displayName.substring(0, 22);
   tft.setTextSize(2);
   tft.setTextColor(textColor, cardBg);
@@ -670,7 +699,8 @@ void displayResult(String status, String name, String id, String refNo, String c
   tft.setCursor(20, 102);
   tft.print("STUDENT ID");
 
-  String cleanId = (id != "-" && id.length() > 0) ? id : "Unknown";
+  String cleanId = asciiOnly(id);
+  if (cleanId.length() == 0 || cleanId == "-") cleanId = "Unknown";
   tft.setTextSize(3);
   tft.setTextColor(textColor, cardBg);
   tft.setCursor(20, 114);

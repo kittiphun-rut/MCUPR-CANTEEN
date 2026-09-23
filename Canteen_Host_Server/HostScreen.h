@@ -1,8 +1,8 @@
 /**
  * @file      HostScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
- * @version   113.3.0
- * @date      2026-09-22
+ * @version   113.4.0
+ * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
@@ -21,6 +21,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.4.0 | 2026-09-23 | กรองทุกข้อความให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่องไม่ให้ล้นไปทับกัน |
  * | 113.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร ใช้การเขียนทับที่เดิมแทน จอไม่กะพริบทุกวินาทีแล้ว |
  * | 113.2.0 | 2026-09-22 | วาดซ้ำเฉพาะช่องที่ค่าเปลี่ยน ยอดรายร้านและยอดบนหน้าพักจออัปเดตเองแล้ว |
  * | 113.0.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก แล้วออกแบบหน้าจอใหม่ให้เรียบง่าย ตัวอักษรน้อย แบ่งช่องชัดเจน และรองรับสองโหมดสี |
@@ -33,6 +34,26 @@
 #pragma once
 
 #include <stdarg.h>   // drawFixedText รับอาร์กิวเมนต์แบบ printf
+
+// [113.4.0] เพิ่ม: บีบข้อความให้เหลือเฉพาะอักขระที่ฟอนต์ในตัวของจอวาดได้จริง
+//
+// ฟอนต์ของ Adafruit GFX มีแต่ ASCII ไบต์ตั้งแต่ 0x80 ขึ้นไปจะถูกวาดเป็นสัญลักษณ์มั่ว
+// ภาษาไทยหนึ่งตัวกินสามไบต์ จึงกลายเป็นตัวประหลาดสามตัว และ **กินที่กว้างกว่าที่นับไว้
+// สามเท่า** ข้อความจึงล้นกรอบไปทับของข้างเคียง เห็นเป็นอักษรซ้อนกัน
+//
+// ตัดทิ้งไปเลยแทนการแทนด้วยเครื่องหมายคำถาม เพราะชื่อไทยล้วนจะได้เหลือสตริงว่าง
+// แล้วให้ผู้เรียกถอยไปใช้ชื่อภาษาอังกฤษสำรองได้ถูกต้อง
+String asciiOnly(const String &raw) {
+  String out;
+  out.reserve(raw.length());
+  for (unsigned int i = 0; i < raw.length(); i++) {
+    uint8_t c = (uint8_t)raw[i];
+    if (c >= 0x20 && c < 0x7F) out += (char)c;
+  }
+  out.trim();
+  return out;
+}
+
 
 // [113.3.0] เพิ่ม: วาดข้อความทับที่เดิมโดยไม่ต้องล้างพื้นก่อน
 //
@@ -54,8 +75,12 @@ void drawFixedText(int x, int y, uint8_t size, uint16_t fg, uint16_t bg,
   vsnprintf(raw, sizeof(raw), fmt, args);
   va_end(args);
 
+  // ตัดให้ยาวเท่า width พอดีเสมอ ไม่ใช่แค่เติมให้ครบ
+  // ถ้าปล่อยให้ยาวเกินได้ ข้อความจะล้นไปทับช่องข้างเคียง และพอรอบหน้าค่าสั้นลง
+  // ช่องว่างที่เติมก็ลบของเก่าไม่หมด เหลือเป็นอักษรซ้อนกันค้างอยู่
+  // ทุกช่องจึงถูกกำหนดความกว้างเผื่อไว้แล้วให้ค่าจริงยาวไม่ถึง
   char padded[72];
-  snprintf(padded, sizeof(padded), "%-*s", width, raw);
+  snprintf(padded, sizeof(padded), "%-*.*s", width, width, raw);
 
   tft.setTextSize(size);
   tft.setTextColor(fg, bg);
@@ -248,6 +273,15 @@ void showBootNetworkStatus() {
 
 // [113.0.0] เพิ่ม: ชุดชิ้นส่วนสำหรับหน้าจอแบบใหม่
 // ตัดข้อความให้พอดีความกว้างที่ให้มา (ฟอนต์ในตัวกว้างตัวละ 6 พิกเซลต่อขนาด 1)
+// [113.4.0] เพิ่ม: ชื่อร้านสำหรับขึ้นจอ ลำดับการถอย ชื่ออังกฤษ > ส่วน ASCII ของชื่อจริง > Shop N
+//           ประกันว่าจอจะไม่มีวันได้รับข้อความที่ฟอนต์วาดไม่ได้
+String shopScreenName(int i) {
+  String s = asciiOnly(shops[i].screen);
+  if (s.length() == 0) s = asciiOnly(shops[i].name);
+  if (s.length() == 0) s = "Shop " + String(i + 1);
+  return s;
+}
+
 String fitLabel(const String &raw, int maxChars) {
   if ((int)raw.length() <= maxChars) return raw;
   if (maxChars <= 1) return raw.substring(0, maxChars);
@@ -396,8 +430,10 @@ void renderHostPage(bool fullRedraw) {
         // ชื่อร้านเปลี่ยนได้เฉพาะตอนบันทึกจากหน้าเว็บ ซึ่งสั่งวาดใหม่ทั้งจออยู่แล้ว
         tft.setTextColor(getTftTextMain(), getTftCardBg());
         tft.setTextSize(1);
-        tft.setCursor(x + 8, y + 7);
-        tft.print(fitLabel(shops[i].name, 22));
+        // [113.4.0] แก้: เดิมเอาชื่อร้านภาษาไทยมาวาดตรง ๆ จอจึงขึ้นสัญลักษณ์มั่ว
+        //           และกว้างกว่าที่นับไว้จนล้นไปทับของข้างเคียง
+        drawFixedText(x + 8, y + 7, 1, getTftTextMain(), getTftCardBg(), 22,
+                      "%s", shopScreenName(i).c_str());
       }
 
       // [113.2.0] แก้: ยอดของร้านเคยวาดเฉพาะตอนวาดใหม่ทั้งจอ พอมีคนมารับอาหาร
@@ -499,7 +535,10 @@ void renderHostPage(bool fullRedraw) {
         tft.setTextColor(getTftTextMain(), getTftCardBg());
         tft.setTextSize(3);
         tft.setCursor(14, 56);
-        tft.print(lastScannedStudentId != "-" ? lastScannedStudentId : String("Unknown card"));
+        // รหัสนิสิตมาจากไฟล์ที่นำเข้า จึงกรองก่อนวาดเผื่อมีอักขระที่ฟอนต์ไม่มี
+        String sid = asciiOnly(lastScannedStudentId);
+        if (sid.length() == 0 || sid == "-") sid = "Unknown card";
+        tft.print(sid);
 
         tft.setTextSize(1);
         tft.setTextColor(getTftTextMuted(), getTftCardBg());

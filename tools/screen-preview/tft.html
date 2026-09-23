@@ -58,7 +58,7 @@ function printf(){ print(fmt.apply(null,arguments)); }
    เติมช่องว่างให้ครบ width เสมอ แต่ไม่ตัดค่าที่ยาวเกิน */
 function drawFixedText(x,y,size,f,b,width,...args){
   const raw = args.length>1 ? fmt.apply(null,args) : String(args[0]);
-  const padded = raw.length<width ? raw.padEnd(width) : raw;
+  const padded = raw.length<width ? raw.padEnd(width) : raw.slice(0,width);
   setTextSize(size); setTextColor(f,b); setCursor(x,y); print(padded);
 }
 function fmt(f,...a){ let i=0; return f.replace(/%[-0-9.]*[difsuc%]/g,m=>{

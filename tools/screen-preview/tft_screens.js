@@ -149,8 +149,7 @@ function hostPage1() {
     const x = coords[i][0], y = coords[i][1], w = 150, h = 86;
     drawBentoCard(x, y, w, h, BORDER(), CARD());
 
-    setTextColor(TEXT(), CARD()); setTextSize(1);
-    setCursor(x + 8, y + 7); print(fitLabel(names[i], 22));
+    drawFixedText(x + 8, y + 7, 1, TEXT(), CARD(), 22, names[i]);
 
     drawFixedText(x + 8, y + 36, 3, TEXT(), CARD(), 3, String(SHOP[i]));
     drawFixedText(x + 68, y + 38, 1, MUTED(), CARD(), 6, 'meals');

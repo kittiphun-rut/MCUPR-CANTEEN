@@ -1,8 +1,8 @@
 /**
  * @file      WebDashboard.h
  * @brief     หน้าเว็บทั้งหมดของเครื่องแม่ข่าย: หน้าเข้าสู่ระบบและแดชบอร์ดเจ้าหน้าที่
- * @version   113.1.0
- * @date      2026-09-22
+ * @version   113.4.0
+ * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
  * @par Organization
@@ -23,6 +23,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.4.0 | 2026-09-23 | เพิ่มช่องตั้งชื่อร้านที่จะขึ้นบนจอ พร้อมคำอธิบายว่าต้องเป็นภาษาอังกฤษ |
  * | 113.1.0 | 2026-09-22 | เพิ่มระบบสองภาษา ไทย/อังกฤษ ทั้งแดชบอร์ดและหน้าเข้าสู่ระบบ |
  * | 113.0.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก แล้วเขียนหน้าเว็บใหม่ทั้งหมด สี่แท็บ สองโหมดสี และย้าย CSS/JS ไปอยู่ใน PROGMEM |
  * | 107.0.1 | 2026-09-21 | ต้นฉบับที่ใช้เป็นจุดเริ่ม เก็บสำเนาไว้ที่ original/ |
@@ -161,7 +162,9 @@ var TH = {
   sNone:'ไม่พบนิสิตที่ค้นหา', sLoad:'กำลังโหลด...', page:'หน้า',
   prev:'ก่อนหน้า', next:'ถัดไป',
   shTitle:'ชื่อร้านและผู้ประกอบการ', shName:'ชื่อร้านที่', shOwner:'ผู้ประกอบการ',
-  shSave:'บันทึกร้านค้า',
+  shScreen:'ชื่อที่ขึ้นบนจอ', shSave:'บันทึกร้านค้า',
+  shHint:'ช่องขวาสุดคือชื่อที่ขึ้นบนจอของเครื่องแม่ข่าย ต้องเป็นภาษาอังกฤษหรือตัวเลขเท่านั้น '
+    + 'เพราะฟอนต์ในตัวของจอไม่มีตัวอักษรไทย ถ้าเว้นว่างไว้จอจะขึ้นว่า Shop 1 ถึง Shop 4',
   dTitle:'การแสดงผลของทุกจุดบริการ',
   dNote:'เครื่องแม่ข่ายเป็นผู้กำหนดธีมและการพักหน้าจอให้ทุกจุดบริการ',
   dTheme:'ธีม', dDark:'มืด', dLight:'สว่าง',
@@ -298,7 +301,10 @@ function refresh(){
          + '<div><label>'+t('shName','Shop')+' '+(i+1)+(lang==='th'?'':' name')+'</label>'
          + '<input name="sname'+i+'" value="'+esc(s.name)+'" required></div>'
          + '<div><label>'+t('shOwner','Owner')+'</label>'
-         + '<input name="vname'+i+'" value="'+esc(s.owner)+'"></div></div>';
+         + '<input name="vname'+i+'" value="'+esc(s.owner)+'"></div>'
+         + '<div><label>'+t('shScreen','Name on the screen')+'</label>'
+         + '<input name="dname'+i+'" value="'+esc(s.screen||'')+'" maxlength="22" '
+         + 'placeholder="Shop '+(i+1)+'"></div></div>';
       }).join('');
     }
   }).catch(function(){});
@@ -609,6 +615,9 @@ String getHTML() {
     <form class="panel" method="POST" action="/save-shops" data-ajax="1">
       <div class="ptitle" data-i="shTitle">Shop names and owners</div>
       <div id="shopForm"></div>
+      <p class="hint" data-i="shHint">The last box is the name shown on the host screen. Use English
+        letters and numbers only &mdash; the screen font has no Thai characters. Leave it empty and
+        the screen falls back to Shop 1 to Shop 4.</p>
       <button class="btn main" type="submit" style="margin-top:14px" data-i="shSave">Save shops</button>
     </form>
   </section>

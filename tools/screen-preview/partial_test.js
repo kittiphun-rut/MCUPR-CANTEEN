@@ -122,6 +122,13 @@ function stnStatsClock(clock) {
   drawFixedText(172, 166, 2, TEXT(), CARD(), 8, clock);
 }
 
+/* ชื่อร้านบนจอ ตัดที่ 22 ตัวอักษรเสมอ และต้องไม่ล้นออกนอกการ์ด */
+function hostShopName(i, name) {
+  const coords = [[6,32],[164,32],[6,122],[164,122]];
+  const x = coords[i][0], y = coords[i][1];
+  drawFixedText(x + 8, y + 7, 1, TEXT(), CARD(), 22, name);
+}
+
 window.CASES = [
   { id: 'host-today-served', full: () => hostTodayFull(9, 420, '11:47:05', 'Tue, 22 Sep 2026', true),
     start: () => hostTodayFull(187, 420, '11:47:05', 'Tue, 22 Sep 2026', true),
@@ -147,6 +154,10 @@ window.CASES = [
   { id: 'stn-stats-offline', full: () => stnStatsFull(72, '11:47:05', false),
     start: () => stnStatsFull(72, '11:47:05', true),
     patch: () => stnStatsPill(false) },
+  { id: 'host-shop-name', full: () => { hostShopsFull([84, 72, 63, 49]); hostShopName(0, 'Noodle'); },
+    start: () => { hostShopsFull([84, 72, 63, 49]);
+                   hostShopName(0, 'Chicken Rice and Drinks Corner'); },
+    patch: () => hostShopName(0, 'Noodle') },
   { id: 'stn-stats-clock', perSecond: true, full: () => stnStatsFull(72, '9:05:01', true),
     start: () => stnStatsFull(72, '11:47:05', true),
     patch: () => stnStatsClock('9:05:01') },
