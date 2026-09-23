@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.5.0
+ * @version   122.6.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.6.0 | 2026-09-23 | คืนสัญลักษณ์แตะบัตร RFID กลับมาบนหน้าแรก คลื่นเป็นสีเขียวเมื่อเครื่องอ่านพร้อม และเป็นสีแดงพร้อมข้อความเตือนเมื่อไม่ตอบ |
  * | 122.5.0 | 2026-09-23 | จัดกึ่งกลางหน้าพักจอ ย้ายหน่วยเงินลงใต้ตัวเลข และกระจายแถวหน้า SYSTEM ให้เต็มการ์ด |
  * | 122.4.0 | 2026-09-23 | กรองชื่อและรหัสนิสิตให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่อง |
  * | 122.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร และแถบสัญญาณเทียบด้วยจำนวนขีดแทนค่า dBm ดิบ |
@@ -138,6 +139,42 @@ void drawFixedText(int x, int y, uint8_t size, uint16_t fg, uint16_t bg,
 void drawStationCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t bgColor) {
   tft.fillRoundRect(x, y, w, h, 6, bgColor);
   tft.drawRoundRect(x, y, w, h, 6, borderColor);
+}
+
+// ============================================================================
+// สัญลักษณ์แตะบัตร RFID
+// ============================================================================
+// [122.6.0] เพิ่ม: เอาสัญลักษณ์กลับมา เคยมีตั้งแต่รุ่น 118.1.0 แล้วหายไปตอนเริ่มใหม่
+//           จากต้นฉบับในรุ่น 122.0.0 นิสิตที่เดินมาถึงจึงไม่มีอะไรบอกว่าเครื่องพร้อม
+//           วาดด้วยพรีมิทีฟของ Adafruit GFX ล้วน ๆ จึงไม่กินแฟลชเพิ่มเหมือนการฝังบิตแมป
+//           drawCircleHelper ใช้บิต 0x2 (เสี้ยวบนขวา) กับ 0x4 (เสี้ยวล่างขวา)
+//           รวมกันเป็น 0x6 คือครึ่งขวาของวงกลม
+//
+// กรอบที่สัญลักษณ์นี้กิน เทียบกับจุดกึ่งกลางที่ส่งเข้ามา
+//   แนวนอน  cx-33 ถึง cx+36   (70 พิกเซล)
+//   แนวตั้ง  cy-22 ถึง cy+22   (45 พิกเซล)
+// ตัวเลขชุดนี้ต้องตรงกับ RFID_ICON_* ข้างล่าง ซึ่งใช้ตอนล้างพื้นก่อนวาดทับ
+#define RFID_ICON_X(cx)  ((cx) - 34)
+#define RFID_ICON_Y(cy)  ((cy) - 23)
+#define RFID_ICON_W      72
+#define RFID_ICON_H      47
+
+void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uint16_t bgColor) {
+  // ตัวบัตร วาดสองชั้นให้เส้นหนาขึ้น เพื่อให้เห็นชัดจากอีกฝั่งของเคาน์เตอร์
+  tft.drawRoundRect(cx - 33, cy - 15, 42, 30, 5, cardColor);
+  tft.drawRoundRect(cx - 32, cy - 14, 40, 28, 4, cardColor);
+
+  // ชิปสัมผัสบนหน้าบัตร เส้นสีพื้นสองเส้นตัดให้เป็นลายชิป
+  tft.fillRoundRect(cx - 27, cy - 8, 12, 10, 2, cardColor);
+  tft.drawFastHLine(cx - 27, cy - 4, 12, bgColor);
+  tft.drawFastVLine(cx - 21, cy - 8, 10, bgColor);
+
+  // คลื่นสัญญาณสามชั้น ไล่รัศมีออกไปทางขวา
+  for (int i = 0; i < 3; i++) {
+    int r = 9 + i * 6;
+    tft.drawCircleHelper(cx + 14, cy, r, 0x6, waveColor);
+    tft.drawCircleHelper(cx + 14, cy, r + 1, 0x6, waveColor);
+  }
 }
 
 void drawStationPillBadge(int x, int y, int w, int h, const char* text, uint16_t fgColor, uint16_t bgColor) {
@@ -343,12 +380,18 @@ void refreshStationLiveValues(bool force) {
   static int  lastServed = -1;
   static String lastClock = "";
   static int  lastOnline = -1;
+  static int  lastReady  = -1;
 
   int served = (int)totalSuccessToday;
   String clock = getTimeOnlyStr();
 
   // ---- หน้าแรก: ยอดวันนี้มุมซ้ายล่าง และนาฬิกามุมขวาล่าง ----
   if (currentState == STATE_STANDBY && currentStationPage == 1) {
+    // [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรเปลี่ยนสีตามความพร้อมของเครื่องอ่านบัตร
+    //           วาดเฉพาะตอนสถานะเปลี่ยน ไม่ได้วาดทุกวินาที
+    if (force || (int)isReaderReady != lastReady) {
+      drawStandbyReadyState(isReaderReady);
+    }
     if (force || served != lastServed) {
       drawFixedText(28, 191, 2, getStTextMain(), getStCardBg(), 4, "%d", served);
     }
@@ -389,6 +432,7 @@ void refreshStationLiveValues(bool force) {
   lastServed = served;
   lastClock  = clock;
   lastOnline = (int)isHostOnline;
+  lastReady  = (int)isReaderReady;
 
   // แถบสัญญาณและแบตเตอรี่มุมขวาบน วาดเองเมื่อค่าเปลี่ยนพอสมควร
   updateTopRightHeaderSmooth(lastHostRssi, isHostOnline, force);
@@ -448,17 +492,41 @@ void showStationPage(int page, bool fullRedraw) {
 }
 
 // [122.0.0] แก้: หน้าที่นิสิตเห็นมากที่สุด จึงเหลือประโยคเดียวที่ต้องอ่าน
+// [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรพร้อมบรรทัดคำอธิบาย บนหน้าแรกของจุดบริการ
+//           แยกออกมาเป็นฟังก์ชันของตัวเองเพราะถูกเรียกจากสองที่
+//           คือตอนวาดหน้าใหม่ทั้งหน้า และตอนที่เครื่องอ่านบัตรเปลี่ยนสถานะ
+//           ทั้งสองที่จึงใช้พิกัดชุดเดียวกันเสมอ ไม่มีทางเลื่อนออกจากกันได้
+//
+// สีคลื่นบอกความพร้อม เขียวคือเครื่องอ่านตอบอยู่ แดงคือไม่ตอบ
+// ล้างพื้นก่อนวาดเพราะเส้นโค้งวาดทับเส้นโค้งเดิมไม่มิด สีเก่าจะค้างตามขอบ
+// จุดนี้วาดเฉพาะตอนสถานะเปลี่ยนซึ่งนาน ๆ ครั้ง จึงไม่ทำให้กลับไปกะพริบทุกวินาที
+void drawStandbyReadyState(bool ready) {
+  uint16_t bg = getStCardBg();
+  tft.fillRect(RFID_ICON_X(160), RFID_ICON_Y(72), RFID_ICON_W, RFID_ICON_H, bg);
+  drawRfidTapIcon(160, 72, getStTextMain(), ready ? getStGreen() : getStRose(), bg);
+
+  // ความกว้าง 44 ตัวอักษรที่ขนาด 1 คือ 264 พิกเซล พอดีกับช่องในการ์ด
+  // ข้อความยาวไม่เท่ากัน จึงต้องเป็น drawCenteredText ที่เติมช่องว่างทั้งสองข้าง
+  // ไม่ใช่ drawFitCenteredText ที่ไม่ลบของเดิม
+  if (ready) {
+    drawCenteredText(160, 139, 1, getStTextMuted(), bg, 44,
+                     "Free meal  35 baht  once a day");
+  } else {
+    drawCenteredText(160, 139, 1, getStRose(), bg, 44,
+                     "Card reader not responding - call staff");
+  }
+}
+
 void displayTapCardStandby() {
   ledStandby();
   tft.fillScreen(getStBg());
 
   drawStationTopBar(String(dynamicShopLabel));
 
-  // ช่องใหญ่ช่องเดียว มีประโยคเดียวที่นิสิตต้องอ่าน
+  // ช่องใหญ่ช่องเดียว มีสัญลักษณ์แตะบัตรกับประโยคเดียวที่นิสิตต้องอ่าน
   drawStationCard(16, 34, 288, 130, getStCardBorder(), getStCardBg());
-  drawFitCenteredText(24, 62, 272, 40, "TAP YOUR CARD", 4, getStTextMain(), getStCardBg());
-  drawFitCenteredText(24, 112, 272, 16, "Free meal  35 baht  once a day", 1,
-                      getStTextMuted(), getStCardBg());
+  drawStandbyReadyState(isReaderReady);
+  drawFitCenteredText(24, 100, 272, 32, "TAP YOUR CARD", 4, getStTextMain(), getStCardBg());
 
   // ช่องล่าง: ยอดของจุดบริการนี้วันนี้ และเวลา
   drawStationCard(16, 172, 288, 40, getStCardBorder(), getStCardBg());

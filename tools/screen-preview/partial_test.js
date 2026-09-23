@@ -74,17 +74,26 @@ function hostShopValue(i, n) {
 }
 
 /* ---------- station หน้าแรก ---------- */
-function stnStandbyFull(served, clock) {
+function stnStandbyFull(served, clock, ready) {
+  if (ready === undefined) ready = true;
   fillScreen(BG());
   drawStationTopBar('POINT ' + ST_ID);
   drawStationCard(16, 34, 288, 130, BORDER(), CARD());
-  drawFitCenteredText(24, 62, 272, 40, 'TAP YOUR CARD', 4, TEXT(), CARD());
-  drawFitCenteredText(24, 112, 272, 16, 'Free meal  35 baht  once a day', 1, MUTED(), CARD());
+  stnStandbyReady(ready);
+  drawFitCenteredText(24, 100, 272, 32, 'TAP YOUR CARD', 4, TEXT(), CARD());
   drawStationCard(16, 172, 288, 40, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(28, 178); print('SERVED TODAY');
   stnStandbyServed(served);
   stnStandbyClock(clock);
   drawStationBottomBar('Page 1/3    Press the button for the next page');
+}
+// [122.6.0] ต้องตรงกับ drawStandbyReadyState() ใน StationScreen.h ทุกพิกัด
+function stnStandbyReady(ready) {
+  const bg = CARD();
+  fillRect(160 - 34, 72 - 23, 72, 47, bg);
+  drawRfidTapIcon(160, 72, TEXT(), ready ? GREEN() : ROSE(), bg);
+  drawCenteredText(160, 139, 1, ready ? MUTED() : ROSE(), bg, 44,
+    ready ? 'Free meal  35 baht  once a day' : 'Card reader not responding - call staff');
 }
 function stnStandbyServed(served) {
   drawFixedText(28, 191, 2, TEXT(), CARD(), 4, String(served));
@@ -148,6 +157,12 @@ window.CASES = [
   { id: 'stn-standby-clock', perSecond: true, full: () => stnStandbyFull(72, '9:05:01'),
     start: () => stnStandbyFull(72, '11:47:05'),
     patch: () => stnStandbyClock('9:05:01') },
+  { id: 'stn-reader-down', full: () => stnStandbyFull(72, '11:47:05', false),
+    start: () => stnStandbyFull(72, '11:47:05', true),
+    patch: () => stnStandbyReady(false) },
+  { id: 'stn-reader-back', full: () => stnStandbyFull(72, '11:47:05', true),
+    start: () => stnStandbyFull(72, '11:47:05', false),
+    patch: () => stnStandbyReady(true) },
   { id: 'stn-stats-served', full: () => stnStatsFull(5, '11:47:05', true),
     start: () => stnStatsFull(72, '11:47:05', true),
     patch: () => stnStatsServed(5) },
