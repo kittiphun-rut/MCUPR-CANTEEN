@@ -229,12 +229,15 @@ python3 tools/proto-check/protoscan.py \
 และตรวจวงเล็บของทุกไฟล์ (รวมไฟล์ `.h` ที่ถูก include) ด้วย
 
 ```sh
+python3 tools/proto-check/runall.py        # รันทุกตัวข้างล่างนี้รวดเดียว
+
 python3 tools/proto-check/headercheck.py   # หัวไฟล์และป้ายเวอร์ชัน
 python3 tools/proto-check/asciicheck.py    # ข้อความที่ฟอนต์ของจอ TFT วาดไม่ได้
 python3 tools/proto-check/bracecheck.py    # วงเล็บและเครื่องหมายคำพูดของทุกไฟล์
 python3 tools/proto-check/splitcheck.py    # ปัญหาจากการแยกโค้ดไปไว้ในไฟล์ .h
 python3 tools/proto-check/ordercheck.py    # ฟังก์ชันที่ถูกเรียกก่อนถูกประกาศ
 python3 tools/proto-check/gfxcheck.py      # ฟังก์ชัน GFX ที่ต้องมี startWrite() ก่อน
+python3 tools/proto-check/packetcheck.py   # แพ็กเก็ตคำสั่งที่ใส่ฟิลด์ไม่ครบ
 ```
 
 ### มาตรฐานคอมเมนต์

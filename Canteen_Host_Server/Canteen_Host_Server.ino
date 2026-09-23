@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.6.0
+ * @version   113.7.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.7.0 | 2026-09-23 | คำสั่งเปลี่ยนโหมดการแสดงผลไปถึงจุดบริการทันที ส่งยูนิแคสต์ถึงทุกจุดก่อนแล้วค่อยกระจายเสียง และแก้ broadcastStationTheme() ที่ประกอบแพ็กเก็ตเองจนฟิลด์ screenOn, screensaver, modeSeq เป็นศูนย์ติดไปทุกครั้ง |
  * | 113.6.0 | 2026-09-23 | เพิ่มจอสาธารณะสำหรับทีวีในโรงอาหาร /display กับ /api/board เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ ปิดบังรหัสนิสิตเหลือห้าหลักแรก ไม่มีชื่อ ไม่มีหมายเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์ |
  * | 113.5.0 | 2026-09-23 | ตามการจัดตำแหน่งตัวอักษรของ HostScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.4.0 | 2026-09-23 | เพิ่มชื่อร้านสำหรับขึ้นจอ (ภาษาอังกฤษ) แยกจากชื่อจริงที่ใช้บนเว็บ |
@@ -63,7 +64,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.6.0"
+#define APP_VERSION         "113.7.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -563,23 +564,33 @@ void sendStationTheme(uint8_t stationId) {
 }
 
 // เรียกทุกครั้งที่โหมดการแสดงผลเปลี่ยน ส่งสามรอบห่างกันเล็กน้อยเพราะ ESP-NOW
-// แบบ broadcast ไม่มีการยืนยันการรับ ถ้ารอบแรกหายไปยังมีรอบสองและสามตามไป
+// ไม่มีการยืนยันการรับในชั้น broadcast ถ้ารอบแรกหายไปยังมีรอบสองและสามตามไป
 // [113.0.0] เพิ่ม: ประกาศโหมดการแสดงผลใหม่ให้ทุกจุดบริการพร้อมกัน
+//
+// [113.7.0] แก้: ของเดิมส่งแต่ broadcast อย่างเดียว คำสั่งจึงไปถึงช้าเป็นหลักวินาที
+//           เพิ่ม **ยูนิแคสต์ถึงทุกจุดบริการที่แม่ข่ายรู้จัก MAC แล้ว** ลงไปก่อน
+//           ชั้นยูนิแคสต์ของ ESP-NOW มีการตอบรับและส่งซ้ำให้ในตัว จึงเชื่อถือได้กว่ามาก
+//           และเป็นเส้นทางเดียวกับที่ใช้ตอบ heartbeat ซึ่งพิสูจน์แล้วว่าถึงแน่นอน
+//           ส่วน broadcast ยังส่งต่อไว้เผื่อจุดบริการที่ยังไม่เคยส่งอะไรมา
+//           แม่ข่ายจึงยังไม่รู้ MAC ของมัน
 void announceDisplayMode() {
   hostModeSeq++;
   for (int i = 0; i < 3; i++) {
+    for (uint8_t id = 1; id <= 4; id++) sendStationTheme(id);
     broadcastStationTheme();
     delay(30);
   }
 }
 
+// [113.7.0] แก้: ของเดิมประกอบแพ็กเก็ตเองทีละฟิลด์ แล้วตั้งแต่ darkMode ลงไปก็หยุด
+//           screenOn, screensaver และ modeSeq จึงเป็นศูนย์ติดไปทุกครั้ง
+//           ผลคือคำสั่งพักหน้าจอไม่เคยเดินทางมากับ broadcast เลย
+//           เพราะจุดบริการกันคำสั่งซ้ำด้วย modeSeq ที่ค้างอยู่ที่ศูนย์
+//           ต้องรอให้ heartbeat รอบถัดไปดึงค่าจริงมาให้ จึงช้าไปหลายวินาที
+//           ตอนนี้เรียก fillStationConfig() เหมือนทุกที่ ค่าครบและตรงกันเสมอ
 void broadcastStationTheme() {
   HostConfigPacket cfg = {};
-  cfg.magic = ESPNOW_PROTO_MAGIC;
-  cfg.version = ESPNOW_PROTO_VER;
-  cfg.msgType = MSG_CONFIG;
-  cfg.stationId = 0;
-  cfg.darkMode = isTftDarkMode ? 1 : 0;
+  fillStationConfig(cfg, 0);   // 0 = ถึงทุกจุดบริการ
   esp_now_send(broadcastAddress, (uint8_t *)&cfg, sizeof(cfg));
 }
 
