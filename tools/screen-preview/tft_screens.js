@@ -309,8 +309,8 @@ function drawRfidTapIcon(cx, cy, cardColor, waveColor, bgColor) {
   drawFastVLine(cx - 21, cy - 8, 10, bgColor);
   for (let i = 0; i < 3; i++) {
     const r = 9 + i * 6;
-    drawCircleHelper(cx + 14, cy, r, 0x6, waveColor);
-    drawCircleHelper(cx + 14, cy, r + 1, 0x6, waveColor);
+    drawRightArc(cx + 14, cy, r, waveColor);
+    drawRightArc(cx + 14, cy, r + 1, waveColor);
   }
 }
 

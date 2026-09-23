@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.6.1
+ * @version   122.6.2
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.6.2 | 2026-09-23 | คลื่นของสัญลักษณ์แตะบัตรไม่ขึ้นบนจอจริง เพราะ drawCircleHelper() ของไลบรารีไม่เปิดทรานแซกชัน SPI เอง เปลี่ยนมาวาดครึ่งวงกลมเองด้วย drawPixel() |
  * | 122.6.1 | 2026-09-23 | ย้าย drawStandbyReadyState() ขึ้นไปไว้ใต้ drawRfidTapIcon() เพราะเดิมถูกวางไว้ต่ำกว่า refreshStationLiveValues() ที่เรียกใช้ ทำให้คอมไพล์ไม่ผ่าน |
  * | 122.6.0 | 2026-09-23 | คืนสัญลักษณ์แตะบัตร RFID กลับมาบนหน้าแรก คลื่นเป็นสีเขียวเมื่อเครื่องอ่านพร้อม และเป็นสีแดงพร้อมข้อความเตือนเมื่อไม่ตอบ |
  * | 122.5.0 | 2026-09-23 | จัดกึ่งกลางหน้าพักจอ ย้ายหน่วยเงินลงใต้ตัวเลข และกระจายแถวหน้า SYSTEM ให้เต็มการ์ด |
@@ -148,8 +149,13 @@ void drawStationCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t 
 // [122.6.0] เพิ่ม: เอาสัญลักษณ์กลับมา เคยมีตั้งแต่รุ่น 118.1.0 แล้วหายไปตอนเริ่มใหม่
 //           จากต้นฉบับในรุ่น 122.0.0 นิสิตที่เดินมาถึงจึงไม่มีอะไรบอกว่าเครื่องพร้อม
 //           วาดด้วยพรีมิทีฟของ Adafruit GFX ล้วน ๆ จึงไม่กินแฟลชเพิ่มเหมือนการฝังบิตแมป
-//           drawCircleHelper ใช้บิต 0x2 (เสี้ยวบนขวา) กับ 0x4 (เสี้ยวล่างขวา)
-//           รวมกันเป็น 0x6 คือครึ่งขวาของวงกลม
+//
+// [122.6.2] แก้: เดิมวาดคลื่นด้วย tft.drawCircleHelper() แล้วเส้นไม่ขึ้นบนจอจริง
+//           ทั้งที่ตัวบัตรขึ้นครบ ต้นเหตุคือฟังก์ชันนั้นของไลบรารีเรียก writePixel()
+//           ตรง ๆ ซึ่ง "ไม่เปิดทรานแซกชัน SPI เอง" มันถูกออกแบบมาให้ถูกเรียก
+//           จากข้างใน drawRoundRect() ที่ startWrite() ไว้แล้วเท่านั้น
+//           เรียกเดี่ยว ๆ แบบเรา ขา CS ไม่ถูกดึงลง จอจึงไม่ได้รับข้อมูลเลย
+//           จึงเขียนวงกลมครึ่งขวาเองด้วย tft.drawPixel() ซึ่งเปิดปิดทรานแซกชันให้ในตัว
 //
 // กรอบที่สัญลักษณ์นี้กิน เทียบกับจุดกึ่งกลางที่ส่งเข้ามา
 //   แนวนอน  cx-33 ถึง cx+36   (70 พิกเซล)
@@ -159,6 +165,23 @@ void drawStationCard(int x, int y, int w, int h, uint16_t borderColor, uint16_t 
 #define RFID_ICON_Y(cy)  ((cy) - 23)
 #define RFID_ICON_W      72
 #define RFID_ICON_H      47
+
+// วาดครึ่งขวาของวงกลมด้วยอัลกอริทึมของ Bresenham ชุดเดียวกับที่ไลบรารีใช้
+// แต่ลงจุดด้วย tft.drawPixel() ซึ่งเปิดและปิดทรานแซกชัน SPI ให้เองทุกจุด
+// จึงวาดเดี่ยว ๆ ได้โดยไม่ต้องมี startWrite() ครอบไว้ข้างนอก
+// เพิ่มจุดขวาสุดให้ด้วย เพราะลูปของไลบรารีข้ามจุดนั้นไป ทำให้ปลายโค้งขาดหนึ่งพิกเซล
+void drawRightArc(int cx, int cy, int r, uint16_t color) {
+  int f = 1 - r, ddF_x = 1, ddF_y = -2 * r, x = 0, y = r;
+  tft.drawPixel(cx + r, cy, color);
+  while (x < y) {
+    if (f >= 0) { y--; ddF_y += 2; f += ddF_y; }
+    x++; ddF_x += 2; f += ddF_x;
+    tft.drawPixel(cx + x, cy + y, color);
+    tft.drawPixel(cx + y, cy + x, color);
+    tft.drawPixel(cx + x, cy - y, color);
+    tft.drawPixel(cx + y, cy - x, color);
+  }
+}
 
 void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uint16_t bgColor) {
   // ตัวบัตร วาดสองชั้นให้เส้นหนาขึ้น เพื่อให้เห็นชัดจากอีกฝั่งของเคาน์เตอร์
@@ -173,8 +196,8 @@ void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uin
   // คลื่นสัญญาณสามชั้น ไล่รัศมีออกไปทางขวา
   for (int i = 0; i < 3; i++) {
     int r = 9 + i * 6;
-    tft.drawCircleHelper(cx + 14, cy, r, 0x6, waveColor);
-    tft.drawCircleHelper(cx + 14, cy, r + 1, 0x6, waveColor);
+    drawRightArc(cx + 14, cy, r, waveColor);
+    drawRightArc(cx + 14, cy, r + 1, waveColor);
   }
 }
 
