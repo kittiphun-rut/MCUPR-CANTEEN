@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.5.0
+ * @version   113.6.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.6.0 | 2026-09-23 | เพิ่มจอสาธารณะสำหรับทีวีในโรงอาหาร /display กับ /api/board เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ ปิดบังรหัสนิสิตเหลือห้าหลักแรก ไม่มีชื่อ ไม่มีหมายเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์ |
  * | 113.5.0 | 2026-09-23 | ตามการจัดตำแหน่งตัวอักษรของ HostScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.4.0 | 2026-09-23 | เพิ่มชื่อร้านสำหรับขึ้นจอ (ภาษาอังกฤษ) แยกจากชื่อจริงที่ใช้บนเว็บ |
  * | 113.3.0 | 2026-09-22 | ตามการแก้เรื่องกะพริบของ HostScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -62,7 +63,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.5.0"
+#define APP_VERSION         "113.6.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -313,6 +314,7 @@ void broadcastStationTheme();
 void announceDisplayMode();
 String jsonEscape(const String &raw);
 void handleDashboardAPI();
+void handlePublicBoard();
 void handleSetDisplayMode();
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
 void ledStandby();
@@ -341,6 +343,7 @@ void handleRemoveTempCard();
 void handleDeleteStudent();
 void handleSaveAdmin();
 void handleDeleteAdmin();
+void pushPublicFeed(const String &studentId, const String &claimTime, int shop);
 void showBootNetworkStatus();
 void handleHostButton();
 
@@ -356,6 +359,20 @@ String lastScannedUID       = "-";
 String lastScannedStudentId = "-";
 int lastScannedStation      = 0;
 String lastScannedStatus    = "READY";
+// [113.6.0] เพิ่ม: รายการล่าสุดสำหรับจอสาธารณะบนทีวี
+// เก็บแค่แปดรายการล่าสุดแบบวงแหวน ไม่ต้องไปไล่เรียงฐานข้อมูลทุกครั้งที่ทีวีขอข้อมูล
+// **เก็บเฉพาะรหัสที่ปิดบังแล้ว** ไม่เก็บชื่อ ไม่เก็บหมายเลขบัตร ไม่เก็บเลขอ้างอิง
+// ข้อมูลที่ไม่ได้เก็บ ย่อมหลุดออกไปทางหน้าเว็บสาธารณะไม่ได้
+#define PUBLIC_FEED_SIZE 8
+struct PublicFeedItem {
+  char maskedId[16];   // ห้าหลักแรกของรหัสนิสิต ที่เหลือเป็นดอกจัน
+  char atTime[12];     // เวลาที่รับสิทธิ์ รูปแบบ HH:MM:SS
+  uint8_t shop;        // ร้านที่ 1 ถึง 4
+};
+PublicFeedItem publicFeed[PUBLIC_FEED_SIZE] = {};
+int publicFeedCount = 0;   // จำนวนรายการที่มีจริง สูงสุดเท่าขนาดวงแหวน
+int publicFeedHead  = 0;   // ตำแหน่งที่จะเขียนรายการถัดไป
+
 bool hostApReady            = false; // ปล่อยสัญญาณ Wi-Fi สำเร็จหรือไม่ ใช้บอกบนจอตอนบูต
 // [113.0.0] แก้: เก็บเลขอ้างอิงของการสแกนไว้ ของเดิมสร้างใหม่ทุกครั้งที่วาดจอ
 //           ทำให้ตัวนับเดินเรื่อย ๆ และเลขบนจอไม่ตรงกับที่บันทึกไว้
@@ -640,6 +657,27 @@ void sendAlert(String message, String redirectUrl) {
   html += "</script>";
   html += "</body></html>";
   server.send(200, "text/html; charset=utf-8", html);
+}
+
+// [113.6.0] เพิ่ม: บันทึกหนึ่งรายการลงวงแหวนของจอสาธารณะ
+// ปิดบังรหัสนิสิตตั้งแต่ตอนเก็บ ไม่ใช่ตอนแสดงผล จะได้ไม่มีทางลืมปิดบัง
+void pushPublicFeed(const String &studentId, const String &claimTime, int shop) {
+  PublicFeedItem item = {};
+
+  String masked = studentId;
+  if (masked.length() > 5) masked = masked.substring(0, 5) + "*****";
+  strncpy(item.maskedId, masked.c_str(), sizeof(item.maskedId) - 1);
+
+  // claimTime เก็บเป็น "วว/ดด/ปปปป ชช:นน:วว" เอาเฉพาะส่วนเวลามาแสดง
+  int sp = claimTime.lastIndexOf(' ');
+  String t = (sp >= 0) ? claimTime.substring(sp + 1) : claimTime;
+  strncpy(item.atTime, t.c_str(), sizeof(item.atTime) - 1);
+
+  item.shop = (shop >= 1 && shop <= 4) ? (uint8_t)shop : 0;
+
+  publicFeed[publicFeedHead] = item;
+  publicFeedHead = (publicFeedHead + 1) % PUBLIC_FEED_SIZE;
+  if (publicFeedCount < PUBLIC_FEED_SIZE) publicFeedCount++;
 }
 
 String generateRefNo(int stationId) {
@@ -968,6 +1006,7 @@ void processScanRequest(const uint8_t* mac, StationPacket pkt, int rssi) {
         s.refNo = currentRefNo;
         lastScannedStatus = "APPROVED";
         lastScannedRef = currentRefNo;
+        pushPublicFeed(s.studentId, currentTimestamp, pkt.stationId);
 
         strncpy(resp.status, "SUCCESS", sizeof(resp.status) - 1);
         strncpy(resp.refNo, currentRefNo.c_str(), sizeof(resp.refNo) - 1);
@@ -1571,6 +1610,61 @@ void handleDashboardAPI() {
   server.send(200, "application/json; charset=utf-8", j);
 }
 
+// [113.6.0] เพิ่ม: ข้อมูลสำหรับจอสาธารณะบนทีวี **เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ**
+//
+// ทุกสิ่งที่ตอบออกไปจากตรงนี้ ถือว่าใครก็อ่านได้ จึงมีแค่ตัวเลขรวมกับรายการที่ปิดบังแล้ว
+// สิ่งที่ห้ามมีเด็ดขาด: ชื่อนิสิต หมายเลขบัตร เลขอ้างอิง และข้อมูลฮาร์ดแวร์ของเครื่อง
+// รายการล่าสุดถูกปิดบังตั้งแต่ตอนเก็บลงวงแหวนแล้ว ตรงนี้จึงไม่ต้องปิดบังซ้ำ
+// และไม่มีทางเผลอหลุดของที่ไม่ได้เก็บไว้ตั้งแต่แรก
+void handlePublicBoard() {
+  int served = 0;
+  int shopMeals[4] = {0, 0, 0, 0};
+  for (const auto &st : db) {
+    if (!st.claimed) continue;
+    served++;
+    if (st.station >= 1 && st.station <= 4) shopMeals[st.station - 1]++;
+  }
+  int total = (int)db.size();
+
+  char win[16];
+  snprintf(win, sizeof(win), "%02d:%02d-%02d:%02d",
+           serviceStartHour, serviceStartMin, serviceEndHour, serviceEndMin);
+
+  String j = "{";
+  j += "\"clock\":\"" + jsonEscape(getTimeOnlyStr()) + "\"";
+  j += ",\"date\":\"" + jsonEscape(getDateFormattedStr()) + "\"";
+  j += ",\"open\":" + String(isWithinServiceTime() ? "true" : "false");
+  j += ",\"window\":\"" + String(win) + "\"";
+  j += ",\"served\":" + String(served);
+  j += ",\"total\":" + String(total);
+  j += ",\"left\":" + String(total - served);
+  j += ",\"amount\":" + String(served * 35);
+  j += ",\"dark\":" + String(isTftDarkMode ? "true" : "false");
+
+  // ชื่อร้านกับยอดขาย ไม่มีชื่อผู้ประกอบการ เพราะเป็นชื่อคนจริงที่ไม่จำเป็นต้องขึ้นจอใหญ่
+  j += ",\"shops\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i) j += ",";
+    j += "{\"name\":\"" + jsonEscape(shops[i].name) + "\"";
+    j += ",\"meals\":" + String(shopMeals[i]);
+    j += ",\"amount\":" + String(shopMeals[i] * 35) + "}";
+  }
+  j += "]";
+
+  // รายการล่าสุด เรียงจากใหม่ไปเก่า
+  j += ",\"feed\":[";
+  for (int n = 0; n < publicFeedCount; n++) {
+    int idx = (publicFeedHead - 1 - n + PUBLIC_FEED_SIZE * 2) % PUBLIC_FEED_SIZE;
+    if (n) j += ",";
+    j += "{\"id\":\"" + String(publicFeed[idx].maskedId) + "\"";
+    j += ",\"at\":\"" + String(publicFeed[idx].atTime) + "\"";
+    j += ",\"shop\":" + String(publicFeed[idx].shop) + "}";
+  }
+  j += "]}";
+
+  server.send(200, "application/json; charset=utf-8", j);
+}
+
 // เครื่องแม่ข่ายสั่งโหมดการแสดงผลของทุกสถานีจากหน้าเว็บ
 // (เดิมสั่งได้จากปุ่มกดบนเครื่องเท่านั้น ซึ่งคนที่มารับช่วงดูแลต่อจะไม่มีทางรู้)
 // [113.0.0] เพิ่ม: สั่งโหมดการแสดงผลของทุกจุดบริการจากหน้าเว็บ
@@ -1736,6 +1830,14 @@ void setup() {
     // ต้องระบุ charset เพราะในไฟล์นี้มีคำแปลภาษาไทยอยู่ด้วย
     server.send_P(200, "application/javascript; charset=utf-8", DASH_JS);
   });
+  // [113.6.0] เพิ่ม: จอสาธารณะสำหรับทีวีในโรงอาหาร **ไม่ต้องเข้าสู่ระบบ**
+  //           หน้าเว็บเป็นไฟล์นิ่งในแฟลช ส่งตรงไม่ต้องสร้างสตริงในแรม
+  server.on("/display", HTTP_GET, []() {
+    server.sendHeader("Cache-Control", "max-age=3600");
+    server.send_P(200, "text/html; charset=utf-8", DISPLAY_HTML);
+  });
+  server.on("/api/board", HTTP_GET, handlePublicBoard);
+
   server.on("/api/students", HTTP_GET, handleGetStudentsAPI);
   server.on("/api/dashboard", HTTP_GET, handleDashboardAPI);
   server.on("/api/display", HTTP_POST, handleSetDisplayMode);
@@ -1814,6 +1916,7 @@ void setup() {
         lastScannedUID = s.uid; lastScannedStudentId = s.studentId;
         lastScannedStation = station; lastScannedStatus = "APPROVED";
         lastScannedRef = s.refNo;
+        pushPublicFeed(s.studentId, s.claimTime, station);
         appendLogToFS(s.studentId, s.fullName, s.uid, s.refNo, s.claimTime, station, s.isTempCard ? "Temp Card" : "Normal");
         
         if (s.isTempCard) {
@@ -1853,6 +1956,7 @@ void setup() {
     }
     saveDatabaseToFS();
     lastScannedUID = "-"; lastScannedStudentId = "-"; lastScannedStation = 0; lastScannedStatus = "RESET"; lastScannedRef = "-";
+    publicFeedCount = 0; publicFeedHead = 0;   // ปิดยอดแล้ว จอทีวีต้องเริ่มนับใหม่ด้วย
     renderHostPage(true); sendAlert("Daily Reset & Archived Successfully!", "/");
   });
 

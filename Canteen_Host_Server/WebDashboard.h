@@ -1,7 +1,7 @@
 /**
  * @file      WebDashboard.h
- * @brief     หน้าเว็บทั้งหมดของเครื่องแม่ข่าย: หน้าเข้าสู่ระบบและแดชบอร์ดเจ้าหน้าที่
- * @version   113.4.0
+ * @brief     หน้าเว็บทั้งหมดของเครื่องแม่ข่าย: หน้าเข้าสู่ระบบ แดชบอร์ดเจ้าหน้าที่ และจอสาธารณะบนทีวี
+ * @version   113.6.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -20,9 +20,17 @@
  * เพิ่มข้อความใหม่ทีหลังจึงแก้แค่สองที่ และถ้าลืมเติมคำแปล
  * หน้าเว็บจะแสดงภาษาอังกฤษไว้ก่อน ไม่พังและไม่เป็นช่องว่าง
  *
+ * @par Public Display
+ * DISPLAY_HTML คือหน้าจอสาธารณะที่ /display เปิดค้างไว้บนทีวีในโรงอาหาร
+ * ไม่ต้องเข้าสู่ระบบ ใครเดินผ่านก็เห็น จึงแสดงได้เฉพาะยอดรวม ชื่อร้าน
+ * และรหัสนิสิตที่ปิดบังเหลือห้าหลักแรกเท่านั้น
+ * ห้ามเพิ่มชื่อนิสิต หมายเลขบัตร เลขอ้างอิง หรือข้อมูลฮาร์ดแวร์ลงในหน้านี้เด็ดขาด
+ * ตรวจก่อน commit ด้วย tools/proto-check/privacycheck.py
+ *
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.6.0 | 2026-09-23 | เพิ่ม DISPLAY_HTML จอสาธารณะสำหรับทีวี ใช้ชุดสีและรูปแบบเดียวกับแดชบอร์ด แสดงไทยคู่อังกฤษพร้อมกันโดยไม่ต้องสลับภาษา |
  * | 113.4.0 | 2026-09-23 | เพิ่มช่องตั้งชื่อร้านที่จะขึ้นบนจอ พร้อมคำอธิบายว่าต้องเป็นภาษาอังกฤษ |
  * | 113.1.0 | 2026-09-22 | เพิ่มระบบสองภาษา ไทย/อังกฤษ ทั้งแดชบอร์ดและหน้าเข้าสู่ระบบ |
  * | 113.0.0 | 2026-09-22 | แยกออกมาจากไฟล์หลัก แล้วเขียนหน้าเว็บใหม่ทั้งหมด สี่แท็บ สองโหมดสี และย้าย CSS/JS ไปอยู่ใน PROGMEM |
@@ -422,6 +430,204 @@ setInterval(refresh,2000);
   }
 })();
 )js";
+
+// ============================================================================
+// [113.6.0] เพิ่ม: จอสาธารณะสำหรับทีวีในโรงอาหาร เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ
+//
+// หน้านี้ไม่มีค่าอะไรที่ต้องแทนตอนสร้าง ข้อมูลทั้งหมดมาจาก /api/board
+// จึงเก็บเป็นไฟล์นิ่งในแฟลชแล้วส่งตรงด้วย send_P ไม่ต้องสร้างสตริงในแรมเลย
+//
+// ขนาดตัวอักษรอิงหน่วย vmin ทั้งหน้า จึงปรับตามขนาดจอเองโดยไม่ต้องตั้งค่า
+// ใช้ได้ตั้งแต่จอ 1366x768 ไปจนถึง 4K
+//
+// โหมดมืด/สว่างตามที่เครื่องแม่ข่ายกำหนด เหมือนจอของจุดบริการ
+// ============================================================================
+static const char DISPLAY_HTML[] PROGMEM = R"html(<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MCU Canteen</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  color-scheme:light;
+  --bg:#f2f1ee; --panel:#fcfcfb; --line:#dedcd5;
+  --ink:#0b0b0b; --ink2:#52514e; --ink3:#78766f;
+  --bar:#2a78d6; --track:#e6e4dd;
+  --ok:#0ca30c; --off:#d03b3b;
+  --u:1vmin;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#111110; --panel:#1a1a19; --line:#33332f;
+  --ink:#ffffff; --ink2:#c3c2b7; --ink3:#94938a;
+  --bar:#3987e5; --track:#2b2b28;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);overflow:hidden;
+  font-family:"IBM Plex Sans Thai",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:calc(var(--u)*1.6);line-height:1.35;-webkit-font-smoothing:antialiased}
+.wrap{height:100%;display:flex;flex-direction:column;gap:calc(var(--u)*1.4);
+  padding:calc(var(--u)*2.2) calc(var(--u)*2.6)}
+
+/* ---- top bar ---- */
+.top{display:flex;align-items:flex-end;gap:calc(var(--u)*2)}
+.brand{font-size:calc(var(--u)*3);font-weight:700;letter-spacing:-.01em;line-height:1.1}
+.brand small{display:block;font-size:calc(var(--u)*1.7);font-weight:400;color:var(--ink3);
+  margin-top:calc(var(--u)*.4)}
+.top .sp{flex:1}
+.now{text-align:right}
+.clock{font-size:calc(var(--u)*5.2);font-weight:700;letter-spacing:-.02em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.when{font-size:calc(var(--u)*1.7);color:var(--ink3);margin-top:calc(var(--u)*.6);
+  display:flex;gap:calc(var(--u)*1.2);justify-content:flex-end;align-items:center}
+.pill{border-radius:999px;padding:calc(var(--u)*.35) calc(var(--u)*1.3);
+  font-weight:700;font-size:calc(var(--u)*1.5);color:#fff;background:var(--ok)}
+.pill.shut{background:var(--off)}
+
+/* ---- stat tiles ---- */
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:calc(var(--u)*1.4)}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:calc(var(--u)*1.6);
+  padding:calc(var(--u)*1.8) calc(var(--u)*2.2)}
+.tile .n{font-size:calc(var(--u)*9);font-weight:700;letter-spacing:-.04em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.tile .k{font-size:calc(var(--u)*1.6);font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink3);margin-top:calc(var(--u)*.9)}
+.tile .th{font-size:calc(var(--u)*1.7);color:var(--ink2);margin-top:calc(var(--u)*.2)}
+
+/* ---- two panels ---- */
+.cols{flex:1;display:grid;grid-template-columns:1.45fr 1fr;gap:calc(var(--u)*1.4);min-height:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:calc(var(--u)*1.6);
+  padding:calc(var(--u)*1.8) calc(var(--u)*2.2);display:flex;flex-direction:column;min-height:0}
+.ptitle{font-size:calc(var(--u)*1.5);font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink3)}
+.ptitle b{display:block;font-size:calc(var(--u)*1.7);font-weight:400;letter-spacing:0;
+  text-transform:none;color:var(--ink2);margin-top:calc(var(--u)*.2)}
+.body{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0;
+  margin-top:calc(var(--u)*1.2)}
+
+/* ---- shop rows ---- */
+.shop{display:grid;grid-template-columns:1fr calc(var(--u)*11) calc(var(--u)*13);
+  gap:calc(var(--u)*1.4);align-items:center}
+.shop .nm{font-size:calc(var(--u)*2.1);font-weight:600;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.track{grid-column:1/-1;background:var(--track);border-radius:calc(var(--u)*.5);
+  height:calc(var(--u)*1.5);overflow:hidden;margin-top:calc(var(--u)*.5)}
+.fill{background:var(--bar);height:100%;border-radius:calc(var(--u)*.5);
+  transition:width .5s ease}
+.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;
+  font-size:calc(var(--u)*2.1)}
+.num small{color:var(--ink3);font-weight:400;font-size:calc(var(--u)*1.4)}
+
+/* ---- recent feed ---- */
+.row{display:grid;grid-template-columns:1fr auto auto;gap:calc(var(--u)*1.4);
+  align-items:baseline;padding:calc(var(--u)*.6) 0}
+.row+.row{border-top:1px solid var(--line)}
+.row .id{font-size:calc(var(--u)*2.2);font-weight:700;font-variant-numeric:tabular-nums;
+  letter-spacing:.02em}
+.row .sh{font-size:calc(var(--u)*1.6);color:var(--ink2)}
+.row .at{font-size:calc(var(--u)*1.6);color:var(--ink3);font-variant-numeric:tabular-nums}
+.empty{color:var(--ink3);font-size:calc(var(--u)*2)}
+
+/* ---- offline banner ---- */
+#down{position:fixed;left:0;right:0;bottom:0;background:var(--off);color:#fff;
+  text-align:center;padding:calc(var(--u)*.9);font-size:calc(var(--u)*1.7);
+  font-weight:700;display:none}
+#down.show{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">MCU Canteen
+      <small>Meal subsidy &middot; &#3626;&#3623;&#3633;&#3626;&#3604;&#3636;&#3585;&#3634;&#3619;&#3629;&#3634;&#3627;&#3634;&#3619;&#3585;&#3621;&#3634;&#3591;&#3623;&#3633;&#3609;</small>
+    </div>
+    <div class="sp"></div>
+    <div class="now">
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="when"><span id="date">&nbsp;</span>
+        <span class="pill" id="state">&nbsp;</span></div>
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="n" id="tServed">0</div>
+      <div class="k">Meals served</div>
+      <div class="th">&#3592;&#3656;&#3634;&#3618;&#3649;&#3621;&#3657;&#3623;&#3623;&#3633;&#3609;&#3609;&#3637;&#3657;</div></div>
+    <div class="tile"><div class="n" id="tAmount">0</div>
+      <div class="k">Baht paid</div>
+      <div class="th">&#3648;&#3611;&#3655;&#3609;&#3648;&#3591;&#3636;&#3609;</div></div>
+    <div class="tile"><div class="n" id="tLeft">0</div>
+      <div class="k">Students left</div>
+      <div class="th">&#3618;&#3633;&#3591;&#3652;&#3617;&#3656;&#3617;&#3634;&#3619;&#3633;&#3610;</div></div>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <div class="ptitle">Sales by shop
+        <b>&#3618;&#3629;&#3604;&#3586;&#3634;&#3618;&#3619;&#3634;&#3618;&#3619;&#3657;&#3634;&#3609;</b></div>
+      <div class="body" id="shops"></div>
+    </div>
+    <div class="panel">
+      <div class="ptitle">Recent
+        <b>&#3619;&#3634;&#3618;&#3585;&#3634;&#3619;&#3621;&#3656;&#3634;&#3626;&#3640;&#3604;</b></div>
+      <div class="body" id="feed"></div>
+    </div>
+  </div>
+</div>
+<div id="down">Cannot reach the canteen server &middot;
+  &#3605;&#3636;&#3604;&#3605;&#3656;&#3629;&#3648;&#3588;&#3619;&#3639;&#3656;&#3629;&#3591;&#3649;&#3617;&#3656;&#3586;&#3656;&#3634;&#3618;&#3652;&#3617;&#3656;&#3652;&#3604;&#3657;</div>
+
+<script>
+var fails = 0;
+function el(id){return document.getElementById(id)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+
+function paint(d){
+  document.documentElement.setAttribute('data-theme', d.dark ? 'dark' : 'light');
+  el('clock').textContent  = d.clock;
+  el('date').textContent   = d.date;
+  var st = el('state');
+  st.textContent = (d.open ? 'OPEN ' : 'CLOSED ') + d.window;
+  st.className = 'pill' + (d.open ? '' : ' shut');
+  el('tServed').textContent = d.served.toLocaleString();
+  el('tAmount').textContent = d.amount.toLocaleString();
+  el('tLeft').textContent   = d.left.toLocaleString();
+
+  var peak = Math.max(1, d.shops.reduce(function(a,s){return Math.max(a,s.meals)},0));
+  el('shops').innerHTML = d.shops.map(function(s,i){
+    var pct = s.meals ? Math.max(2, Math.round(s.meals*100/peak)) : 0;
+    return '<div class="shop"><div class="nm">'+esc(s.name)+'</div>'
+      + '<div class="num">'+s.meals+' <small>meals</small></div>'
+      + '<div class="num">'+s.amount.toLocaleString()+' <small>THB</small></div>'
+      + '<div class="track"><div class="fill" style="width:'+pct+'%"></div></div></div>';
+  }).join('');
+
+  el('feed').innerHTML = d.feed.length ? d.feed.map(function(f){
+    var shop = (f.shop >= 1 && f.shop <= 4) ? esc(d.shops[f.shop-1].name) : '—';
+    return '<div class="row"><div class="id">'+esc(f.id)+'</div>'
+      + '<div class="sh">'+shop+'</div>'
+      + '<div class="at">'+esc(f.at)+'</div></div>';
+  }).join('') : '<div class="empty">No meals served yet &middot; '
+      + 'ยังไม่มีรายการ</div>';
+}
+
+function tick(){
+  fetch('/api/board').then(function(r){return r.json()}).then(function(d){
+    fails = 0; el('down').classList.remove('show'); paint(d);
+  }).catch(function(){
+    // พลาดครั้งเดียวไม่เตือน เพราะ Wi-Fi สะดุดชั่วครู่เป็นเรื่องปกติ
+    if (++fails >= 2) el('down').classList.add('show');
+  });
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
+)html";
 
 // --- หน้าเข้าสู่ระบบ ---
 String getLoginHTML(bool hasError) {
