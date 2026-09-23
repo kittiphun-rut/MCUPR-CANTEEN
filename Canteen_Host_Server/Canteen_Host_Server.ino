@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.8.0
+ * @version   113.9.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.9.0 | 2026-09-23 | ย้ำคำสั่งการแสดงผลหกรอบกระจายออกไปราวสองวินาทีโดยไม่หน่วงลูป แทนการย้ำสามรอบติดกันด้วย delay(30) หน้าเว็บจึงตอบกลับทันที |
  * | 113.8.0 | 2026-09-23 | ตามการเปลี่ยนคำของ HostScreen.h และ WebDashboard.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.7.0 | 2026-09-23 | คำสั่งเปลี่ยนโหมดการแสดงผลไปถึงจุดบริการทันที ส่งยูนิแคสต์ถึงทุกจุดก่อนแล้วค่อยกระจายเสียง และแก้ broadcastStationTheme() ที่ประกอบแพ็กเก็ตเองจนฟิลด์ screenOn, screensaver, modeSeq เป็นศูนย์ติดไปทุกครั้ง |
  * | 113.6.0 | 2026-09-23 | เพิ่มจอสาธารณะสำหรับทีวีในโรงอาหาร /display กับ /api/board เปิดดูได้โดยไม่ต้องเข้าสู่ระบบ ปิดบังรหัสนิสิตเหลือห้าหลักแรก ไม่มีชื่อ ไม่มีหมายเลขบัตร ไม่มีเลขอ้างอิง และไม่มีข้อมูลฮาร์ดแวร์ |
@@ -65,7 +66,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.8.0"
+#define APP_VERSION         "113.9.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -389,6 +390,16 @@ bool isScreensaverActive    = false;
 bool stationScreenOn        = true;   // แม่ข่ายสั่งให้ไฟจอของสถานีเปิดอยู่หรือไม่
 bool stationScreensaver     = false;  // แม่ข่ายสั่งให้สถานีพักหน้าจออยู่หรือไม่
 uint8_t hostModeSeq         = 0;      // นับทุกครั้งที่คำสั่งการแสดงผลเปลี่ยน
+
+// [113.9.0] เพิ่ม: ย้ำคำสั่งการแสดงผลหลายรอบแบบไม่หน่วงลูป
+//           ของเดิมย้ำสามรอบติดกันด้วย delay(30) รวมแล้วกินเวลาแค่ 90 มิลลิวินาที
+//           ถ้าจุดบริการพลาดช่วงนั้นไปก็ต้องรอ heartbeat รอบถัดไปเป็นวินาที
+//           ตอนนี้กระจายการย้ำออกไปราวสองวินาที โดยให้ loop() เป็นคนส่ง
+//           หน้าเว็บจึงตอบกลับทันทีโดยไม่ต้องค้างรอ และจอของแม่ข่ายก็ไม่สะดุด
+uint8_t  displayAnnounceLeft = 0;
+unsigned long displayAnnounceNext = 0;
+const uint8_t      DISPLAY_ANNOUNCE_ROUNDS = 6;
+const unsigned long DISPLAY_ANNOUNCE_GAP   = 300;
 bool isCreditActive         = false;
 bool isLiveScanDisplaying   = false;
 unsigned long liveScanHoldUntil = 0;
@@ -574,13 +585,17 @@ void sendStationTheme(uint8_t stationId) {
 //           และเป็นเส้นทางเดียวกับที่ใช้ตอบ heartbeat ซึ่งพิสูจน์แล้วว่าถึงแน่นอน
 //           ส่วน broadcast ยังส่งต่อไว้เผื่อจุดบริการที่ยังไม่เคยส่งอะไรมา
 //           แม่ข่ายจึงยังไม่รู้ MAC ของมัน
+// ส่งคำสั่งหนึ่งรอบ ยูนิแคสต์ถึงทุกจุดบริการแล้วตามด้วยการกระจายเสียง
+void sendDisplayConfigRound() {
+  for (uint8_t id = 1; id <= 4; id++) sendStationTheme(id);
+  broadcastStationTheme();
+}
+
 void announceDisplayMode() {
   hostModeSeq++;
-  for (int i = 0; i < 3; i++) {
-    for (uint8_t id = 1; id <= 4; id++) sendStationTheme(id);
-    broadcastStationTheme();
-    delay(30);
-  }
+  sendDisplayConfigRound();                       // รอบแรกส่งทันที
+  displayAnnounceLeft = DISPLAY_ANNOUNCE_ROUNDS - 1;
+  displayAnnounceNext = millis() + DISPLAY_ANNOUNCE_GAP;
 }
 
 // [113.7.0] แก้: ของเดิมประกอบแพ็กเก็ตเองทีละฟิลด์ แล้วตั้งแต่ darkMode ลงไปก็หยุด
@@ -2029,6 +2044,14 @@ void loop() {
       sendToStation(i + 1, (uint8_t *)&ack, sizeof(HostResponsePacket));
       sendStationTheme(i + 1);
     }
+  }
+
+  // [113.9.0] เพิ่ม: ย้ำคำสั่งการแสดงผลรอบที่เหลือ กระจายออกไปราวสองวินาที
+  //           จุดบริการที่พลาดรอบแรกจึงได้รับภายในไม่ถึงวินาที แทนที่จะรอ heartbeat
+  if (displayAnnounceLeft > 0 && millis() >= displayAnnounceNext) {
+    displayAnnounceLeft--;
+    displayAnnounceNext = millis() + DISPLAY_ANNOUNCE_GAP;
+    sendDisplayConfigRound();
   }
 
   if (isLiveScanDisplaying && millis() > liveScanHoldUntil) {
