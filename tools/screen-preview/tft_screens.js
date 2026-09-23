@@ -81,15 +81,10 @@ function drawStationBatteryHUD(x, y) {
   const tbg = fw > 22 ? col : BG();
   setTextColor(fw > 22 ? 0x0000 : TEXT(), tbg); setCursor(tx, ty); print(s);
 }
+/* [122.9.0] ตัดตัวเลข dBm และคำว่า OFFLINE ออก เหลือแต่สัญลักษณ์ขีดสัญญาณ
+   ต้องตรงกับ updateTopRightHeaderSmooth() ใน StationScreen.h */
 function updateStationHeaderStatus(online) {
-  fillRect(190, 3, 66, 18, BG()); setTextSize(1);
-  if (online) {
-    setTextColor(MUTED(), BG()); setCursor(194, 8); printf('%ddB', ST_RSSI);
-    drawSignalBars(228, 6, ST_RSSI, true, BG());
-  } else {
-    setTextColor(ROSE(), BG()); setCursor(192, 8); print('OFFLINE');
-    drawSignalBars(228, 6, -100, false, BG());
-  }
+  drawSignalBars(228, 6, online ? ST_RSSI : -100, online, BG());
   drawStationBatteryHUD(260, 3);
 }
 function drawStationTopBar(t, online = true) {
