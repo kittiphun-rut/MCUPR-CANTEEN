@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.4.0
+ * @version   122.5.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.5.0 | 2026-09-23 | จัดกึ่งกลางหน้าพักจอ ย้ายหน่วยเงินลงใต้ตัวเลข และกระจายแถวหน้า SYSTEM ให้เต็มการ์ด |
  * | 122.4.0 | 2026-09-23 | กรองชื่อและรหัสนิสิตให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่อง |
  * | 122.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร และแถบสัญญาณเทียบด้วยจำนวนขีดแทนค่า dBm ดิบ |
  * | 122.2.0 | 2026-09-22 | เพิ่ม refreshStationLiveValues() วาดซ้ำเฉพาะตัวเลขที่เปลี่ยน นาฬิกาเดินแล้ว |
@@ -46,6 +47,43 @@
 //
 // ตัดทิ้งไปเลยแทนการแทนด้วยเครื่องหมายคำถาม เพราะชื่อไทยล้วนจะได้เหลือสตริงว่าง
 // แล้วให้ผู้เรียกถอยไปใช้ชื่อภาษาอังกฤษสำรองได้ถูกต้อง
+// [122.5.0] เพิ่ม: วาดข้อความให้อยู่กึ่งกลางแกน x โดยไม่ต้องล้างพื้นก่อน
+//
+// drawFixedText() เติมช่องว่างท้ายอย่างเดียว ข้อความจึงชิดซ้ายของช่องเสมอ
+// พอเอาไปใช้แทนบรรทัดที่เคยจัดกึ่งกลาง ข้อความเลยเยื้องไปทางซ้าย
+//
+// ตัวนี้เติมช่องว่างทั้งสองข้างให้ช่องกว้างคงที่ ข้อความจึงอยู่กึ่งกลางจริง
+// และช่องว่างที่เติมก็ลบของเดิมที่ยาวกว่าไปพร้อมกัน ไม่ต้องล้างพื้น ไม่กะพริบ
+//
+// cx คือจุดกึ่งกลางที่ต้องการ ส่วน width คือความกว้างของช่องเป็นจำนวนตัวอักษร
+// ต้องกว้างพอสำหรับค่าที่ยาวที่สุดที่เป็นไปได้ ไม่งั้นจะถูกตัด
+void drawCenteredText(int cx, int y, uint8_t size, uint16_t fg, uint16_t bg,
+                      int width, const char* fmt, ...) {
+  if (width < 1) width = 1;
+  if (width > 70) width = 70;
+
+  char raw[80];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(raw, sizeof(raw), fmt, args);
+  va_end(args);
+
+  int len = (int)strlen(raw);
+  if (len > width) { len = width; raw[width] = '\0'; }
+  int left = (width - len) / 2;
+
+  char padded[80];
+  memset(padded, ' ', sizeof(padded));
+  memcpy(padded + left, raw, len);
+  padded[width] = '\0';
+
+  tft.setTextSize(size);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(cx - (width * 6 * (int)size) / 2, y);
+  tft.print(padded);
+}
+
+
 String asciiOnly(const String &raw) {
   String out;
   out.reserve(raw.length());
@@ -316,16 +354,16 @@ void refreshStationLiveValues(bool force) {
     }
     if (force || clock != lastClock) {
       // HH:MM:SS ยาวคงที่แปดตัว ขนาด 2 กว้างตัวละ 12 จึงเริ่มที่ 292-96 = 196
-      drawFixedText(196, 186, 2, getStTextMain(), getStCardBg(), 8, "%s", clock.c_str());
+      drawFixedText(196, 191, 2, getStTextMain(), getStCardBg(), 8, "%s", clock.c_str());
     }
   }
   // ---- หน้าสอง: ยอดจาน ยอดเงิน สถานะการเชื่อมต่อ และนาฬิกา ----
   else if (currentState == STATE_STANDBY && currentStationPage == 2) {
     if (force || served != lastServed) {
+      // ต้องตรงกับที่ displayStatsDashboard() วาดเป๊ะ
       drawFixedText(14, 62, 4, getStTextMain(), getStCardBg(), 3, "%d", served);
-      // ตัวเลขเงินกว้างคงที่ห้าหลัก ป้าย baht จึงอยู่กับที่ ไม่ขยับตามจำนวนหลัก
-      drawFixedText(14, 118, 3, getStGreen(), getStCardBg(), 5, "%d", served * 35);
-      drawFixedText(14, 134, 1, getStTextMuted(), getStCardBg(), 5, "baht");
+      drawFixedText(14, 112, 3, getStGreen(), getStCardBg(), 5, "%d", served * 35);
+      drawFixedText(14, 140, 1, getStTextMuted(), getStCardBg(), 5, "baht");
     }
     if (force || (int)isHostOnline != lastOnline) {
       // ป้ายเป็นสี่เหลี่ยมมุมโค้ง การวาดทับป้ายเดิมจึงไม่ลบสีที่มุมทั้งสี่
@@ -342,8 +380,9 @@ void refreshStationLiveValues(bool force) {
   // ---- หน้าพักจอ: ยอดวันนี้บรรทัดเดียว นาฬิกามีคนดูแลอยู่แล้วในฟังก์ชันของมันเอง ----
   else if (currentState == STATE_SCREENSAVER) {
     if (force || served != lastServed) {
-      drawFixedText(62, 146, 1, getStGreen(), getStCardBg(), 32,
-                    "%d served today   %d baht", served, served * 35);
+      // ต้องตรงกับที่ renderScreensaver() วาดเป๊ะ ไม่งั้นจะได้สองบรรทัดคนละตำแหน่ง
+      drawCenteredText(160, 146, 1, getStGreen(), getStCardBg(), 32,
+                       "%d served today   %d baht", served, served * 35);
     }
   }
 
@@ -430,7 +469,7 @@ void displayTapCardStandby() {
   // ตำแหน่งและความกว้างต้องตรงกับ refreshStationLiveValues() เป๊ะ
   // ไม่งั้นพอวาดซ้ำครั้งแรกตัวเลขจะขยับที่ แล้วของเดิมค้างอยู่
   drawFixedText(28, 191, 2, getStTextMain(), getStCardBg(), 4, "%d", (int)totalSuccessToday);
-  drawFixedText(196, 186, 2, getStTextMain(), getStCardBg(), 8,
+  drawFixedText(196, 191, 2, getStTextMain(), getStCardBg(), 8,
                 "%s", getTimeOnlyStr().c_str());
 
   drawStationBottomBar("Page 1/3    Press the button for the next page");
@@ -449,9 +488,12 @@ void displayStatsDashboard() {
   tft.setCursor(14, 40);
   tft.print("SERVED TODAY");
 
+  // [122.5.0] แก้: เดิมคำว่า baht อยู่ที่ x คงที่ทางขวาของตัวเลข
+  //           พอตัวเลขสั้นกว่าช่องก็เหลือช่องว่างกลางอากาศ ดูไม่เข้าชุดกัน
+  //           ย้ายมาอยู่ใต้ตัวเลข ชิดซ้ายเหมือนบรรทัดอื่นในการ์ดนี้
   drawFixedText(14, 62, 4, getStTextMain(), getStCardBg(), 3, "%d", (int)totalSuccessToday);
-  drawFixedText(14, 118, 3, getStGreen(), getStCardBg(), 5, "%d", (int)totalSuccessToday * 35);
-  drawFixedText(110, 134, 1, getStTextMuted(), getStCardBg(), 5, "baht");
+  drawFixedText(14, 112, 3, getStGreen(), getStCardBg(), 5, "%d", (int)totalSuccessToday * 35);
+  drawFixedText(14, 140, 1, getStTextMuted(), getStCardBg(), 5, "baht");
 
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
@@ -490,16 +532,17 @@ void displayStatusScreen(bool fullRedraw) {
 
     tft.setTextColor(getStTextMuted(), getStCardBg());
     tft.setTextSize(1);
-    tft.setCursor(16, 42);  tft.print("Host link");
-    tft.setCursor(16, 64);  tft.print("Service point");
-    tft.setCursor(16, 86);  tft.print("Chip");
-    tft.setCursor(16, 108); tft.print("Battery");
-    tft.setCursor(16, 130); tft.print("Served today");
-    tft.setCursor(16, 152); tft.print("Address");
+    // [122.5.0] แก้: กระจายหกแถวให้เต็มการ์ด ของเดิมกองอยู่ครึ่งบน เหลือที่ว่างข้างล่างเยอะ
+    tft.setCursor(16, 46);  tft.print("Host link");
+    tft.setCursor(16, 72);  tft.print("Service point");
+    tft.setCursor(16, 98);  tft.print("Chip");
+    tft.setCursor(16, 124); tft.print("Battery");
+    tft.setCursor(16, 150); tft.print("Served today");
+    tft.setCursor(16, 176); tft.print("Address");
 
     tft.setTextColor(getStTextMain(), getStCardBg());
-    tft.setCursor(140, 64);  tft.printf("Point %d", currentStationId);
-    tft.setCursor(140, 152); tft.print(WiFi.macAddress());
+    tft.setCursor(140, 72);  tft.printf("Point %d", currentStationId);
+    tft.setCursor(140, 176); tft.print(WiFi.macAddress());
 
     drawStationBottomBar("Page 3/3    Press the button for the next page");
   }
@@ -517,20 +560,20 @@ void displayStatusScreen(bool fullRedraw) {
 
     // [122.3.0] แก้: หน้านี้อัปเดตทุกครึ่งวินาที การล้างพื้นก่อนเขียนจึงกะพริบถี่ที่สุด
     if (isHostOnline) {
-      drawFixedText(140, 42, 1, getStGreen(), getStCardBg(), 24,
+      drawFixedText(140, 46, 1, getStGreen(), getStCardBg(), 24,
                     "Connected  %d dB", lastHostRssi);
     } else {
-      drawFixedText(140, 42, 1, getStRose(), getStCardBg(), 24, "Not connected");
+      drawFixedText(140, 46, 1, getStRose(), getStCardBg(), 24, "Not connected");
     }
 
-    drawFixedText(140, 86, 1, (chipT < 65.0f) ? getStTextMain() : getStYellow(),
+    drawFixedText(140, 98, 1, (chipT < 65.0f) ? getStTextMain() : getStYellow(),
                   getStCardBg(), 24, "%.0f C   cpu %.0f%%", chipT, cpuL);
 
     // สองแถวนี้เดิมมีแต่หัวข้อ ไม่เคยมีค่าโผล่มาเลย เติมให้ครบ
     float volt = readBatteryVoltage();
-    drawFixedText(140, 108, 1, getStTextMain(), getStCardBg(), 24,
+    drawFixedText(140, 124, 1, getStTextMain(), getStCardBg(), 24,
                   "%d%%   %.2f V", getBatteryPercentage(volt), volt);
-    drawFixedText(140, 130, 1, getStTextMain(), getStCardBg(), 24,
+    drawFixedText(140, 150, 1, getStTextMain(), getStCardBg(), 24,
                   "%d meals   %d baht", (int)totalSuccessToday, (int)totalSuccessToday * 35);
   }
 }
@@ -547,30 +590,38 @@ void renderScreensaver(bool fullRedraw) {
 
     drawStationCard(20, 36, 280, 162, getStCardBorder(), getStCardBg());
 
-    String dateStr = getDateFormattedStr();
-    tft.setTextColor(getStTextMuted(), getStCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(160 - (int)dateStr.length() * 3, 118);
-    tft.print(dateStr);
-
-    drawFixedText(62, 146, 1, getStGreen(), getStCardBg(), 32,
-                  "%d served today   %d baht", usedCount, usedCount * 35);
-
-    float volt = readBatteryVoltage();
-    char line2[48];
-    snprintf(line2, sizeof(line2), "battery %d%%", getBatteryPercentage(volt));
-    tft.setTextColor(getStTextMuted(), getStCardBg());
-    tft.setCursor(160 - (int)strlen(line2) * 3, 168);
-    tft.print(line2);
-
     drawStationBottomBar("Tap your card or press the button to wake");
   }
 
-  // นาฬิกาตัวโต ยาวคงที่แปดตัว เขียนทับที่เดิมได้เลย ไม่ต้องล้างพื้นให้กะพริบ
+  // [122.5.0] แก้: ทุกบรรทัดบนหน้านี้จัดกึ่งกลางที่ x = 160 เหมือนกันหมด
+  //           ของเดิมบรรทัดสีเขียวชิดซ้ายที่ x = 62 จึงเยื้องไม่ตรงกับนาฬิกาและวันที่
+  static String lastSaverDate = "";
+  static int lastSaverServed = -1;
+  static int lastSaverBatt = -1;
+
+  // นาฬิกาตัวโต ยาวคงที่แปดตัว
   String curTime = getTimeOnlyStr();
   if (fullRedraw || curTime != lastStationClock) {
     lastStationClock = curTime;
-    drawFixedText(40, 62, 5, getStTextMain(), getStCardBg(), 8, "%s", curTime.c_str());
+    drawCenteredText(160, 62, 5, getStTextMain(), getStCardBg(), 8, "%s", curTime.c_str());
+  }
+
+  String dateStr = getDateFormattedStr();
+  if (fullRedraw || dateStr != lastSaverDate) {
+    lastSaverDate = dateStr;
+    drawCenteredText(160, 118, 1, getStTextMuted(), getStCardBg(), 20, "%s", dateStr.c_str());
+  }
+
+  if (fullRedraw || usedCount != lastSaverServed) {
+    lastSaverServed = usedCount;
+    drawCenteredText(160, 146, 1, getStGreen(), getStCardBg(), 32,
+                     "%d served today   %d baht", usedCount, usedCount * 35);
+  }
+
+  int battPct = getBatteryPercentage(readBatteryVoltage());
+  if (fullRedraw || battPct != lastSaverBatt) {
+    lastSaverBatt = battPct;
+    drawCenteredText(160, 168, 1, getStTextMuted(), getStCardBg(), 16, "battery %d%%", battPct);
   }
 }
 

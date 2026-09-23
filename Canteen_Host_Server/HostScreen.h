@@ -1,7 +1,7 @@
 /**
  * @file      HostScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องแม่ข่าย
- * @version   113.4.0
+ * @version   113.5.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -21,6 +21,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.5.0 | 2026-09-23 | จัดกึ่งกลางทุกบรรทัดบนหน้าพักจอ และให้วันที่กับช่วงเวลาอยู่บรรทัดฐานเดียวกัน |
  * | 113.4.0 | 2026-09-23 | กรองทุกข้อความให้เหลือเฉพาะ ASCII ก่อนวาด และตัดความยาวทุกช่องไม่ให้ล้นไปทับกัน |
  * | 113.3.0 | 2026-09-22 | เลิกล้างพื้นก่อนเขียนตัวอักษร ใช้การเขียนทับที่เดิมแทน จอไม่กะพริบทุกวินาทีแล้ว |
  * | 113.2.0 | 2026-09-22 | วาดซ้ำเฉพาะช่องที่ค่าเปลี่ยน ยอดรายร้านและยอดบนหน้าพักจออัปเดตเองแล้ว |
@@ -43,6 +44,43 @@
 //
 // ตัดทิ้งไปเลยแทนการแทนด้วยเครื่องหมายคำถาม เพราะชื่อไทยล้วนจะได้เหลือสตริงว่าง
 // แล้วให้ผู้เรียกถอยไปใช้ชื่อภาษาอังกฤษสำรองได้ถูกต้อง
+// [113.5.0] เพิ่ม: วาดข้อความให้อยู่กึ่งกลางแกน x โดยไม่ต้องล้างพื้นก่อน
+//
+// drawFixedText() เติมช่องว่างท้ายอย่างเดียว ข้อความจึงชิดซ้ายของช่องเสมอ
+// พอเอาไปใช้แทนบรรทัดที่เคยจัดกึ่งกลาง ข้อความเลยเยื้องไปทางซ้าย
+//
+// ตัวนี้เติมช่องว่างทั้งสองข้างให้ช่องกว้างคงที่ ข้อความจึงอยู่กึ่งกลางจริง
+// และช่องว่างที่เติมก็ลบของเดิมที่ยาวกว่าไปพร้อมกัน ไม่ต้องล้างพื้น ไม่กะพริบ
+//
+// cx คือจุดกึ่งกลางที่ต้องการ ส่วน width คือความกว้างของช่องเป็นจำนวนตัวอักษร
+// ต้องกว้างพอสำหรับค่าที่ยาวที่สุดที่เป็นไปได้ ไม่งั้นจะถูกตัด
+void drawCenteredText(int cx, int y, uint8_t size, uint16_t fg, uint16_t bg,
+                      int width, const char* fmt, ...) {
+  if (width < 1) width = 1;
+  if (width > 70) width = 70;
+
+  char raw[80];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(raw, sizeof(raw), fmt, args);
+  va_end(args);
+
+  int len = (int)strlen(raw);
+  if (len > width) { len = width; raw[width] = '\0'; }
+  int left = (width - len) / 2;
+
+  char padded[80];
+  memset(padded, ' ', sizeof(padded));
+  memcpy(padded + left, raw, len);
+  padded[width] = '\0';
+
+  tft.setTextSize(size);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(cx - (width * 6 * (int)size) / 2, y);
+  tft.print(padded);
+}
+
+
 String asciiOnly(const String &raw) {
   String out;
   out.reserve(raw.length());
@@ -401,7 +439,8 @@ void renderHostPage(bool fullRedraw) {
                          isOpen ? getTftAccentGreen() : getTftAccentRose());
       tft.setTextColor(getTftTextMuted(), getTftCardBg());
       tft.setTextSize(1);
-      tft.setCursor(214 + (94 - (int)strlen(hours) * 6) / 2, 182);
+      // ให้อยู่บรรทัดฐานเดียวกับวันที่ทางซ้าย จะได้ดูเป็นแถวเดียวกัน
+      tft.setCursor(214 + (94 - (int)strlen(hours) * 6) / 2, 186);
       tft.print(hours);
       lastOpen = (int)isOpen;
     }
@@ -614,32 +653,36 @@ void renderScreensaver(bool fullRedraw) {
 
     drawBentoCard(20, 40, 280, 156, getTftCardBorder(), getTftCardBg());
 
-    // วันที่ อยู่ใต้นาฬิกา จัดกึ่งกลางการ์ด
-    String dateStr = getDateFormattedStr();
-    tft.setTextColor(getTftTextMuted(), getTftCardBg());
-    tft.setTextSize(1);
-    tft.setCursor(160 - (int)dateStr.length() * 3, 124);
-    tft.print(dateStr);
-
     // สรุปยอดวันนี้กับแถบความคืบหน้า วาดอยู่ที่เดียวข้างล่าง
     // ถ้าวาดตรงนี้ด้วยจะได้สองบรรทัดคนละตำแหน่ง
     drawBentoBottomBar("Tap a card or press the button to wake");
   }
 
-  // นาฬิกาตัวโตบนหน้าพักจอ ยาวคงที่แปดตัว จึงเขียนทับที่เดิมได้เลย ไม่ต้องล้างพื้น
+  // [113.5.0] แก้: ทุกบรรทัดบนหน้านี้จัดกึ่งกลางที่ x = 160 เหมือนกันหมด
+  //           ของเดิมบรรทัดสีเขียวชิดซ้ายที่ x = 62 จึงเยื้องไม่ตรงกับนาฬิกาและวันที่
+  static String lastSaverDate = "";
+  static int lastSaverUsed = -1;
+
+  // นาฬิกาตัวโต ยาวคงที่แปดตัว
   String curTime = getTimeOnlyStr();
   if (fullRedraw || curTime != lastHostClock) {
     lastHostClock = curTime;
-    drawFixedText(40, 68, 5, getTftTextMain(), getTftCardBg(), 8, "%s", curTime.c_str());
+    drawCenteredText(160, 68, 5, getTftTextMain(), getTftCardBg(), 8, "%s", curTime.c_str());
+  }
+
+  // วันที่ อยู่ใต้นาฬิกา เปลี่ยนตอนข้ามวันจึงต้องวาดซ้ำได้ด้วย
+  String dateStr = getDateFormattedStr();
+  if (fullRedraw || dateStr != lastSaverDate) {
+    lastSaverDate = dateStr;
+    drawCenteredText(160, 124, 1, getTftTextMuted(), getTftCardBg(), 20, "%s", dateStr.c_str());
   }
 
   // [113.2.0] แก้: ยอดวันนี้บนหน้าพักจอเคยวาดครั้งเดียวตอนเข้าโหมด
   //           ถ้ามีคนมารับอาหารระหว่างพักจอ ตัวเลขจะค้างอยู่ที่ค่าเก่า
-  static int lastSaverUsed = -1;
   if (fullRedraw || usedCount != lastSaverUsed) {
     lastSaverUsed = usedCount;
-    drawFixedText(62, 146, 1, getTftAccentGreen(), getTftCardBg(), 34,
-                  "%d of %d served   %d baht", usedCount, (int)db.size(), usedCount * 35);
+    drawCenteredText(160, 146, 1, getTftAccentGreen(), getTftCardBg(), 34,
+                     "%d of %d served   %d baht", usedCount, (int)db.size(), usedCount * 35);
     int pct = (db.size() > 0) ? (usedCount * 100) / (int)db.size() : 0;
     drawProgressBar(60, 170, 200, 6, pct);
   }

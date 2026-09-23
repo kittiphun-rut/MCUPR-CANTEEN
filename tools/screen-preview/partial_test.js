@@ -33,7 +33,7 @@ function hostTodayOpen(open) {
   drawBentoPillBadge(214, 152, 94, 22, open ? 'OPEN' : 'CLOSED', dark ? 0x0000 : 0xFFFF,
                      open ? GREEN() : ROSE());
   setTextColor(MUTED(), CARD()); setTextSize(1);
-  setCursor(214 + Math.floor((94 - hours.length * 6) / 2), 182); print(hours);
+  setCursor(214 + Math.floor((94 - hours.length * 6) / 2), 186); print(hours);
 }
 
 /* ---------- host หน้า SHOPS (การ์ดใบเดียวพอ) ---------- */
@@ -90,7 +90,7 @@ function stnStandbyServed(served) {
   drawFixedText(28, 191, 2, TEXT(), CARD(), 4, String(served));
 }
 function stnStandbyClock(clock) {
-  drawFixedText(196, 186, 2, TEXT(), CARD(), 8, clock);
+  drawFixedText(196, 191, 2, TEXT(), CARD(), 8, clock);
 }
 
 /* ---------- station หน้าสอง ---------- */
@@ -110,8 +110,8 @@ function stnStatsFull(served, clock, online) {
 }
 function stnStatsServed(served) {
   drawFixedText(14, 62, 4, TEXT(), CARD(), 3, String(served));
-  drawFixedText(14, 118, 3, GREEN(), CARD(), 5, String(served * 35));
-  drawFixedText(110, 134, 1, MUTED(), CARD(), 5, 'baht');
+  drawFixedText(14, 112, 3, GREEN(), CARD(), 5, String(served * 35));
+  drawFixedText(14, 140, 1, MUTED(), CARD(), 5, 'baht');
 }
 function stnStatsPill(online) {
   fillRect(172, 118, 96, 20, CARD());

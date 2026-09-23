@@ -135,7 +135,7 @@ function hostPage0() {
   drawBentoPillBadge(214, 152, 94, 22, SYS_OPEN ? 'OPEN' : 'CLOSED',
                      dark ? 0x0000 : 0xFFFF, SYS_OPEN ? GREEN() : ROSE());
   setTextColor(MUTED(), CARD()); setTextSize(1);
-  setCursor(214 + Math.floor((94 - hours.length * 6) / 2), 182); print(hours);
+  setCursor(214 + Math.floor((94 - hours.length * 6) / 2), 186); print(hours);
 }
 
 function hostPage1() {
@@ -243,15 +243,12 @@ function hostScreensaver() {
   fillScreen(BG());
   drawHostTopBar('MCU CANTEEN');
   drawBentoCard(20, 40, 280, 156, BORDER(), CARD());
-  setTextColor(MUTED(), CARD()); setTextSize(1);
-  setCursor(160 - DATE_H.length * 3, 124); print(DATE_H);
-  drawFixedText(62, 146, 1, GREEN(), CARD(), 34,
-                USED + ' of ' + DB_TOTAL + ' served   ' + (USED * 35) + ' baht');
-  drawProgressBar(60, 170, 200, 6, Math.floor(USED * 100 / DB_TOTAL));
   drawBentoBottomBar('Tap a card or press the button to wake');
-  fillRect(30, 60, 260, 52, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(5);
-  setCursor(160 - CLOCK.length * 15, 68); print(CLOCK);
+  drawCenteredText(160, 68, 5, TEXT(), CARD(), 8, CLOCK);
+  drawCenteredText(160, 124, 1, MUTED(), CARD(), 20, DATE_H);
+  drawCenteredText(160, 146, 1, GREEN(), CARD(), 34,
+                   USED + ' of ' + DB_TOTAL + ' served   ' + (USED * 35) + ' baht');
+  drawProgressBar(60, 170, 200, 6, Math.floor(USED * 100 / DB_TOTAL));
 }
 
 function hostLiveScan(status) {
@@ -325,9 +322,8 @@ function stStandby() {
   drawFitCenteredText(24, 112, 272, 16, 'Free meal  35 baht  once a day', 1, MUTED(), CARD());
   drawStationCard(16, 172, 288, 40, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(28, 178); print('SERVED TODAY');
-  setTextColor(TEXT(), CARD()); setTextSize(2); setCursor(28, 191); print(String(ST_SERVED));
-  setTextColor(TEXT(), CARD()); setTextSize(2);
-  setCursor(292 - CLOCK.length * 12, 186); print(CLOCK);
+  drawFixedText(28, 191, 2, TEXT(), CARD(), 4, String(ST_SERVED));
+  drawFixedText(196, 191, 2, TEXT(), CARD(), 8, CLOCK);
   drawStationBottomBar('Page 1/3    Press the button for the next page');
 }
 
@@ -338,8 +334,8 @@ function stStats() {
   drawStationCard(6, 30, 150, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(14, 40); print('SERVED TODAY');
   drawFixedText(14, 62, 4, TEXT(), CARD(), 3, String(ST_SERVED));
-  drawFixedText(14, 118, 3, GREEN(), CARD(), 5, String(ST_SERVED * 35));
-  drawFixedText(110, 134, 1, MUTED(), CARD(), 5, 'baht');
+  drawFixedText(14, 112, 3, GREEN(), CARD(), 5, String(ST_SERVED * 35));
+  drawFixedText(14, 140, 1, MUTED(), CARD(), 5, 'baht');
   setTextColor(MUTED(), CARD()); setCursor(14, 174); print('35 baht per student');
 
   drawStationCard(164, 30, 150, 172, BORDER(), CARD());
@@ -356,19 +352,19 @@ function stDiagnostics() {
   drawStationTopBar('SYSTEM');
   drawStationCard(6, 30, 308, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1);
-  setCursor(16, 42);  print('Host link');
-  setCursor(16, 64);  print('Service point');
-  setCursor(16, 86);  print('Chip');
-  setCursor(16, 108); print('Battery');
-  setCursor(16, 130); print('Served today');
-  setCursor(16, 152); print('Address');
+  setCursor(16, 46);  print('Host link');
+  setCursor(16, 72);  print('Service point');
+  setCursor(16, 98);  print('Chip');
+  setCursor(16, 124); print('Battery');
+  setCursor(16, 150); print('Served today');
+  setCursor(16, 176); print('Address');
   setTextColor(TEXT(), CARD());
-  setCursor(140, 64);  print('Point ' + ST_ID);
-  setCursor(140, 152); print('A0:B7:65:2C:1E:44');
-  setTextColor(GREEN(), CARD()); setCursor(140, 42); print('Connected  ' + ST_RSSI + ' dB');
-  setTextColor(TEXT(), CARD()); setCursor(140, 86); print('45 C   cpu 12%');
-  setCursor(140, 108); print(battPct(ST_V) + '%   ' + ST_V.toFixed(2) + ' V');
-  setCursor(140, 130); print(ST_SERVED + ' meals   ' + (ST_SERVED * 35) + ' baht');
+  setCursor(140, 72);  print('Point ' + ST_ID);
+  setCursor(140, 176); print('A0:B7:65:2C:1E:44');
+  setTextColor(GREEN(), CARD()); setCursor(140, 46); print('Connected  ' + ST_RSSI + ' dB');
+  setTextColor(TEXT(), CARD()); setCursor(140, 98); print('45 C   cpu 12%');
+  setCursor(140, 124); print(battPct(ST_V) + '%   ' + ST_V.toFixed(2) + ' V');
+  setCursor(140, 150); print(ST_SERVED + ' meals   ' + (ST_SERVED * 35) + ' baht');
   drawStationBottomBar('Page 3/3    Press the button for the next page');
 }
 
@@ -376,16 +372,12 @@ function stScreensaver() {
   fillScreen(BG());
   drawStationTopBar('POINT ' + ST_ID);
   drawStationCard(20, 36, 280, 162, BORDER(), CARD());
-  setTextColor(MUTED(), CARD()); setTextSize(1);
-  setCursor(160 - DATE_S.length * 3, 118); print(DATE_S);
-  drawFixedText(62, 146, 1, GREEN(), CARD(), 32,
-                ST_SERVED + ' served today   ' + (ST_SERVED * 35) + ' baht');
-  const line2 = 'battery ' + battPct(ST_V) + '%';
-  setTextColor(MUTED(), CARD()); setCursor(160 - line2.length * 3, 168); print(line2);
   drawStationBottomBar('Tap your card or press the button to wake');
-  fillRect(30, 54, 260, 52, CARD());
-  setTextColor(TEXT(), CARD()); setTextSize(5);
-  setCursor(160 - CLOCK.length * 15, 62); print(CLOCK);
+  drawCenteredText(160, 62, 5, TEXT(), CARD(), 8, CLOCK);
+  drawCenteredText(160, 118, 1, MUTED(), CARD(), 20, DATE_S);
+  drawCenteredText(160, 146, 1, GREEN(), CARD(), 32,
+                   ST_SERVED + ' served today   ' + (ST_SERVED * 35) + ' baht');
+  drawCenteredText(160, 168, 1, MUTED(), CARD(), 16, 'battery ' + battPct(ST_V) + '%');
 }
 
 function stScanning() {
