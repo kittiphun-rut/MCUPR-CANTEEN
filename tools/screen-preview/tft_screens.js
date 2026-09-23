@@ -158,7 +158,7 @@ function hostPage1() {
     fillRect(x + 8, y + 20, 74, 12, CARD());
     drawStatusDot(x + 12, y + 25, NODES[i].on);
     setTextSize(1); setTextColor(MUTED(), CARD());
-    setCursor(x + 22, y + 22); print('Point ' + (i + 1));
+    setCursor(x + 22, y + 22); print('Station ' + (i + 1));
 
     fillRect(x + 8, y + 66, w - 16, 14, CARD());
     if (NODES[i].on) {
@@ -185,13 +185,13 @@ function hostPage2() {
   setCursor(14, 148); print('Wi-Fi  MCU_CANTEEN');
   setCursor(14, 164); print('Page   192.168.4.1');
   setCursor(14, 180); print('Radio  channel 1');
-  setTextColor(MUTED(), CARD()); setCursor(14, 192); print('4 service points linked');
+  setTextColor(MUTED(), CARD()); setCursor(14, 192); print('4 stations linked');
   drawBentoBottomBar('Click: next page    Double click: sleep');
 
   fillRect(12, 54, 296, 58, CARD());
   setTextColor(TEXT(), CARD()); setTextSize(3); setCursor(14, 56); print(SCAN_SID);
   setTextSize(1); setTextColor(MUTED(), CARD()); setCursor(14, 86);
-  print('Point ' + ST_ID + '   card ' + SCAN_UID);
+  print('Station ' + ST_ID + '   card ' + SCAN_UID);
   drawBentoPillBadge(14, 98, 130, 14, 'SERVED', dark ? 0x0000 : 0xFFFF, GREEN());
   let ref = 'TXN-20260922-114705-ST2-0007';
   if (ref.length > 24) ref = '.' + ref.slice(ref.length - 23);
@@ -272,8 +272,8 @@ function hostLiveScan(status) {
   setCursor(Math.max(4, Math.floor((320 - title.length * 18) / 2)), 7); print(title);
   fillRoundRect(8, 44, 304, 188, 8, cardBg);
   drawRoundRect(8, 44, 304, 188, 8, accent); drawRoundRect(9, 45, 302, 186, 7, accent);
-  setTextSize(1); setTextColor(muted, cardBg); setCursor(20, 54); print('SERVICE POINT');
-  setTextSize(2); setTextColor(0xFFFF, cardBg); setCursor(20, 66); printf('Point %d', 2);
+  setTextSize(1); setTextColor(muted, cardBg); setCursor(20, 54); print('STATION');
+  setTextSize(2); setTextColor(0xFFFF, cardBg); setCursor(20, 66); printf('Station %d', 2);
   drawFastHLine(20, 88, 280, accent);
   setTextSize(1); setTextColor(muted, cardBg); setCursor(20, 96); print('STUDENT ID');
   setTextSize(3); setTextColor(0xFFFF, cardBg); setCursor(20, 110); print(sid);
@@ -329,7 +329,7 @@ function drawStandbyReadyState(ready) {
 function stStandby(ready) {
   if (ready === undefined) ready = true;
   fillScreen(BG());
-  drawStationTopBar('POINT ' + ST_ID);
+  drawStationTopBar('STATION ' + ST_ID);
   drawStationCard(16, 34, 288, 130, BORDER(), CARD());
   drawStandbyReadyState(ready);
   drawFitCenteredText(24, 100, 272, 32, 'TAP YOUR CARD', 4, TEXT(), CARD());
@@ -342,7 +342,7 @@ function stStandby(ready) {
 
 function stStats() {
   fillScreen(BG());
-  drawStationTopBar('POINT ' + ST_ID);
+  drawStationTopBar('STATION ' + ST_ID);
 
   drawStationCard(6, 30, 150, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(14, 40); print('SERVED TODAY');
@@ -352,7 +352,7 @@ function stStats() {
   setTextColor(MUTED(), CARD()); setCursor(14, 174); print('35 baht per student');
 
   drawStationCard(164, 30, 150, 172, BORDER(), CARD());
-  setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(172, 40); print('THIS POINT');
+  setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(172, 40); print('THIS STATION');
   setTextColor(TEXT(), CARD()); setTextSize(4); setCursor(172, 62); print(String(ST_ID));
   drawStationPillBadge(172, 118, 96, 20, 'ONLINE', dark ? 0x0000 : 0xFFFF, GREEN());
   drawFixedText(172, 166, 2, TEXT(), CARD(), 8, CLOCK);
@@ -366,13 +366,13 @@ function stDiagnostics() {
   drawStationCard(6, 30, 308, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1);
   setCursor(16, 46);  print('Host link');
-  setCursor(16, 72);  print('Service point');
+  setCursor(16, 72);  print('Station');
   setCursor(16, 98);  print('Chip');
   setCursor(16, 124); print('Battery');
   setCursor(16, 150); print('Served today');
   setCursor(16, 176); print('Address');
   setTextColor(TEXT(), CARD());
-  setCursor(140, 72);  print('Point ' + ST_ID);
+  setCursor(140, 72);  print('No. ' + ST_ID);
   setCursor(140, 176); print('A0:B7:65:2C:1E:44');
   setTextColor(GREEN(), CARD()); setCursor(140, 46); print('Connected  ' + ST_RSSI + ' dB');
   setTextColor(TEXT(), CARD()); setCursor(140, 98); print('45 C   cpu 12%');
@@ -383,7 +383,7 @@ function stDiagnostics() {
 
 function stScreensaver() {
   fillScreen(BG());
-  drawStationTopBar('POINT ' + ST_ID);
+  drawStationTopBar('STATION ' + ST_ID);
   drawStationCard(20, 36, 280, 162, BORDER(), CARD());
   drawStationBottomBar('Tap your card or press the button to wake');
   drawCenteredText(160, 62, 5, TEXT(), CARD(), 8, CLOCK);
@@ -429,7 +429,7 @@ function stResult(status) {
   setTextSize(1); setTextColor(muted, cardBg); setCursor(20, 102); print('STUDENT ID');
   setTextSize(3); setTextColor(0xFFFF, cardBg); setCursor(20, 114); print(sid);
   setTextSize(1); setTextColor(muted, cardBg);
-  setCursor(20, 150); print('Point ' + ST_ID);
+  setCursor(20, 150); print('Station ' + ST_ID);
   setCursor(20, 164); print('Card ' + SCAN_UID);
   const stamp = '11:47:05';
   setTextColor(muted, cardBg); setCursor(296 - stamp.length * 6, 164); print(stamp);
@@ -437,87 +437,7 @@ function stResult(status) {
   drawFitCenteredText(14, 192, 292, 40, foot, 1, bannerFg, bannerBg);
 }
 
-function stOfflineSaved(alreadySaved) {
-  const screenBg = 0x0209, cardBg = 0x0126;
-  const banner = alreadySaved ? 0xFD20 : 0x07FF;
-  const muted = alreadySaved ? 0xFDC0 : 0x9EFF;
 
-  fillScreen(screenBg);
-  fillRect(0, 0, 320, 34, banner);
-  drawFitCenteredText(0, 0, 320, 34,
-    alreadySaved ? '! ALREADY SAVED OFFLINE !' : 'SAVED - SERVE THE STUDENT', 2, 0x0000, banner);
-
-  fillRoundRect(8, 40, 304, 142, 8, cardBg);
-  drawRoundRect(8, 40, 304, 142, 8, banner);
-  drawRoundRect(9, 41, 302, 140, 7, banner);
-
-  setTextSize(1); setTextColor(muted, cardBg);
-  setCursor(20, 50);  print('SERVICE POINT');
-  setCursor(156, 50); print('CARD UID (ENCRYPTED):');
-  setTextSize(2); setTextColor(0xFFFF, cardBg);
-  setCursor(20, 62);  printf('STATION 0%d', ST_ID);
-  setCursor(156, 62); print(SCAN_UID);
-
-  drawFastHLine(20, 86, 280, banner);
-
-  setTextSize(1); setTextColor(muted, cardBg);
-  setCursor(20, 94); print('RECORDS WAITING TO SYNC:');
-  setTextSize(3); setTextColor(0xFFFF, cardBg);
-  setCursor(20, 108); printf('%u', OFFLINE_COUNT);
-  setTextSize(1); printf(' / %u', OFFLINE_MAX);
-
-  setTextColor(muted, cardBg);
-  setCursor(20, 146);
-  print(alreadySaved ? 'THIS CARD IS ALREADY IN THE QUEUE' : 'SENT AUTOMATICALLY WHEN THE LINK IS BACK');
-  setCursor(20, 162); print('NOTHING IS LOST IF THE POWER GOES OFF');
-
-  fillRoundRect(16, 188, 288, 30, 6, banner);
-  drawFitCenteredText(16, 188, 288, 30,
-    alreadySaved ? 'NO SECOND MEAL FOR THIS CARD' : 'HOST UNREACHABLE - RECORD KEPT ON THIS DEVICE',
-    1, 0x0000, banner);
-
-  drawStationBottomBar('OFFLINE MODE | RECORD SAVED LOCALLY');
-}
-
-function stOfflineRejected(alreadyUsed) {
-  const screenBg = alreadyUsed ? 0x2960 : 0x3000;
-  const cardBg   = alreadyUsed ? 0x4140 : 0x5000;
-  const banner   = alreadyUsed ? 0xFD20 : 0xF800;
-  const muted    = alreadyUsed ? 0xFDC0 : 0xFCAE;
-
-  fillScreen(screenBg);
-  fillRect(0, 0, 320, 34, banner);
-  drawFitCenteredText(0, 0, 320, 34,
-    alreadyUsed ? 'ALREADY USED TODAY' : 'CARD NOT IN THE LIST', 2, 0x0000, banner);
-
-  fillRoundRect(8, 40, 304, 142, 8, cardBg);
-  drawRoundRect(8, 40, 304, 142, 8, banner);
-  drawRoundRect(9, 41, 302, 140, 7, banner);
-
-  setTextSize(1); setTextColor(muted, cardBg);
-  setCursor(20, 50);  print('SERVICE POINT');
-  setCursor(156, 50); print('CARD UID (ENCRYPTED):');
-  setTextSize(2); setTextColor(0xFFFF, cardBg);
-  setCursor(20, 62);  printf('STATION 0%d', ST_ID);
-  setCursor(156, 62); print(SCAN_UID);
-
-  drawFastHLine(20, 86, 280, banner);
-
-  setTextSize(1); setTextColor(muted, cardBg);
-  setCursor(20, 94); print('OFFLINE ELIGIBILITY CHECK:');
-  setTextSize(3); setTextColor(0xFFFF, cardBg);
-  setCursor(20, 108); print('REJECTED');
-
-  setTextSize(1); setTextColor(muted, cardBg);
-  setCursor(20, 146);
-  print(alreadyUsed ? 'THIS CARD ALREADY CLAIMED TODAY' : 'THIS CARD IS NOT REGISTERED');
-  setCursor(20, 162); print('NOTHING WAS RECORDED ON THIS DEVICE');
-
-  fillRoundRect(16, 188, 288, 30, 6, banner);
-  drawFitCenteredText(16, 188, 288, 30, 'DO NOT SERVE THE STUDENT', 1, 0x0000, banner);
-
-  drawStationBottomBar('OFFLINE MODE | CHECKED AGAINST SAVED LIST');
-}
 
 function stSyncProgress() {
   fillScreen(BG());

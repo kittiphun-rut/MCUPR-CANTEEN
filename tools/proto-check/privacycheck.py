@@ -53,46 +53,55 @@ def body_of(text, name):
         j += 1
     return None
 
-raw = io.open(INO, encoding='utf-8').read()
-code = strip_all(raw)
-problems = []
+# [113.7.0] แก้: ห่อเนื้อการตรวจไว้ใน main() แล้วเรียกผ่าน if __name__ == '__main__'
+#           ของเดิมโค้ดตรวจอยู่ระดับโมดูล พอไฟล์อื่น import body_of() ไปใช้
+#           ไฟล์นี้จะรันตัวเองแล้ว sys.exit() ทันที ตัวตรวจที่ import มันจึงไม่ได้ทำงานเลย
+#           แต่ยังพิมพ์ผลออกมาดูเหมือนผ่าน เกิดขึ้นจริงมาแล้วกับ packetcheck.py
+def main():
+    raw = io.open(INO, encoding='utf-8').read()
+    code = strip_all(raw)
+    problems = []
 
-for fn in PUBLIC_HANDLERS:
-    body = body_of(code, fn)
-    if body is None:
-        problems.append('ไม่พบฟังก์ชัน %s()' % fn)
-        continue
-    for bad in FORBIDDEN:
-        if re.search(r'\b%s\b' % re.escape(bad).replace(r'\.', r'\.'), body):
-            problems.append('%s() อ้างถึง %s ซึ่งห้ามหลุดออกทางหน้าสาธารณะ' % (fn, bad))
+    for fn in PUBLIC_HANDLERS:
+        body = body_of(code, fn)
+        if body is None:
+            problems.append('ไม่พบฟังก์ชัน %s()' % fn)
+            continue
+        for bad in FORBIDDEN:
+            if re.search(r'\b%s\b' % re.escape(bad).replace(r'\.', r'\.'), body):
+                problems.append('%s() อ้างถึง %s ซึ่งห้ามหลุดออกทางหน้าสาธารณะ' % (fn, bad))
 
-# เส้นทางไหนบ้างที่ไม่ได้ตรวจการเข้าสู่ระบบ
-for m in re.finditer(r'server\.on\(\s*"([^"]+)"\s*,\s*HTTP_(GET|POST)\s*,\s*(.*)', raw):
-    path, method, rest = m.group(1), m.group(2), m.group(3)
-    if path in ALLOWED_PUBLIC:
-        continue
-    tail = raw[m.start():m.start() + 1400]
+    # เส้นทางไหนบ้างที่ไม่ได้ตรวจการเข้าสู่ระบบ
+    for m in re.finditer(r'server\.on\(\s*"([^"]+)"\s*,\s*HTTP_(GET|POST)\s*,\s*(.*)', raw):
+        path, method, rest = m.group(1), m.group(2), m.group(3)
+        if path in ALLOWED_PUBLIC:
+            continue
+        tail = raw[m.start():m.start() + 1400]
 
-    # [113.6.0] แก้: รูปแบบสี่อาร์กิวเมนต์ server.on(path, method, handler, upload)
-    #           มีตัวจัดการสองตัว ต้องตรวจการเข้าสู่ระบบทุกตัว
-    #           เดิมจับเฉพาะตัวเดียวที่ตามด้วยวงเล็บปิด จึงมองข้าม handleFileUpload()
-    args = rest.split(')')[0]
-    named = [a.strip() for a in args.split(',') if re.fullmatch(r'[A-Za-z_]\w*', a.strip())]
-    if named:
-        guarded = True
-        for fn in named:
-            body = body_of(code, fn)
-            if not body or 'isAuthenticated' not in body:
-                guarded = False
-                problems.append('เส้นทาง %s (%s) ตัวจัดการ %s() ไม่ได้ตรวจ isAuthenticated()'
-                                % (path, method, fn))
-    else:
-        guarded = 'isAuthenticated' in tail
-        if not guarded:
-            problems.append('เส้นทาง %s (%s) ไม่ได้ตรวจ isAuthenticated() และไม่ได้อยู่ในรายการสาธารณะ'
-                            % (path, method))
+        # [113.6.0] แก้: รูปแบบสี่อาร์กิวเมนต์ server.on(path, method, handler, upload)
+        #           มีตัวจัดการสองตัว ต้องตรวจการเข้าสู่ระบบทุกตัว
+        #           เดิมจับเฉพาะตัวเดียวที่ตามด้วยวงเล็บปิด จึงมองข้าม handleFileUpload()
+        args = rest.split(')')[0]
+        named = [a.strip() for a in args.split(',') if re.fullmatch(r'[A-Za-z_]\w*', a.strip())]
+        if named:
+            guarded = True
+            for fn in named:
+                body = body_of(code, fn)
+                if not body or 'isAuthenticated' not in body:
+                    guarded = False
+                    problems.append('เส้นทาง %s (%s) ตัวจัดการ %s() ไม่ได้ตรวจ isAuthenticated()'
+                                    % (path, method, fn))
+        else:
+            guarded = 'isAuthenticated' in tail
+            if not guarded:
+                problems.append('เส้นทาง %s (%s) ไม่ได้ตรวจ isAuthenticated() และไม่ได้อยู่ในรายการสาธารณะ'
+                                % (path, method))
 
-print('%-48s %s' % (INO, 'OK' if not problems else '*** พบ %d ปัญหา ***' % len(problems)))
-for line in problems:
-    print('      ' + line)
-sys.exit(1 if problems else 0)
+    print('%-48s %s' % (INO, 'OK' if not problems else '*** พบ %d ปัญหา ***' % len(problems)))
+    for line in problems:
+        print('      ' + line)
+    return 1 if problems else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

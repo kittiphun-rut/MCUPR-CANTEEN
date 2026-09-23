@@ -1,7 +1,7 @@
 /**
  * @file      WebDashboard.h
  * @brief     หน้าเว็บทั้งหมดของเครื่องแม่ข่าย: หน้าเข้าสู่ระบบ แดชบอร์ดเจ้าหน้าที่ และจอสาธารณะบนทีวี
- * @version   113.6.0
+ * @version   113.8.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -30,6 +30,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.8.0 | 2026-09-23 | เปลี่ยนคำอังกฤษ Service points และ Point เป็น Stations และ Station คำไทยคงเดิม |
  * | 113.6.0 | 2026-09-23 | เพิ่ม DISPLAY_HTML จอสาธารณะสำหรับทีวี ใช้ชุดสีและรูปแบบเดียวกับแดชบอร์ด แสดงไทยคู่อังกฤษพร้อมกันโดยไม่ต้องสลับภาษา |
  * | 113.4.0 | 2026-09-23 | เพิ่มช่องตั้งชื่อร้านที่จะขึ้นบนจอ พร้อมคำอธิบายว่าต้องเป็นภาษาอังกฤษ |
  * | 113.1.0 | 2026-09-22 | เพิ่มระบบสองภาษา ไทย/อังกฤษ ทั้งแดชบอร์ดและหน้าเข้าสู่ระบบ |
@@ -243,7 +244,7 @@ function post(url,data){
       return r.text().then(function(t){try{return JSON.parse(t)}catch(e){return{}}})});
 }
 
-/* ---- theme: remembered in this browser, and pushed to every service point ---- */
+/* ---- theme: remembered in this browser, and pushed to every station ---- */
 function paintTheme(th){
   document.documentElement.setAttribute('data-theme',th);
   var b=el('themeBtn');
@@ -293,7 +294,7 @@ function refresh(){
 
     el('stationList').innerHTML=d.stations.map(function(s){
       return '<span class="chip '+(s.online?'on':'off')+'"><i class="dot"></i>'
-           + t('point','Point')+' '+s.id+' · '
+           + t('point','Station')+' '+s.id+' · '
            + (s.online ? t('online','Online') : t('offline','Offline'))+'</span>';
     }).join('');
 
@@ -318,13 +319,13 @@ function refresh(){
   }).catch(function(){});
 }
 
-/* ---- display mode for every service point (host decides, stations obey) ---- */
+/* ---- display mode for every station (host decides, stations obey) ---- */
 function setDisplay(){
   post('/api/display',{dark:el('dispDark').value, saver:el('dispSaver').value})
     .then(function(){
       paintTheme(el('dispDark').value==='1'?'dark':'light');
       lsSet('theme',el('dispDark').value==='1'?'dark':'light');
-      toast(t('tDisp','Service points updated')); refresh();
+      toast(t('tDisp','Stations updated')); refresh();
     });
 }
 
@@ -788,7 +789,7 @@ String getHTML() {
     </div>
 
     <div class="panel">
-      <div class="ptitle" data-i="points">Service points</div>
+      <div class="ptitle" data-i="points">Stations</div>
       <div class="chips" id="stationList"></div>
     </div>
   </section>
@@ -831,8 +832,8 @@ String getHTML() {
   <!-- ===================== SETTINGS ===================== -->
   <section id="v-settings" class="view">
     <div class="panel">
-      <div class="ptitle" data-i="dTitle">Display on all service points</div>
-      <p class="note" data-i="dNote">The host decides the theme and the sleep mode for every service point.</p>
+      <div class="ptitle" data-i="dTitle">Display on all stations</div>
+      <p class="note" data-i="dNote">The host decides the theme and the sleep mode for every station.</p>
       <div class="row">
         <div><label for="dispDark" data-i="dTheme">Theme</label>
           <select id="dispDark" onchange="setDisplay()">

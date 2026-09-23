@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.6.2
+ * @version   122.8.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,8 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.8.0 | 2026-09-23 | เปลี่ยนป้ายบนแถบบนและหน้าตั้งหมายเลขจาก POINT เป็น STATION |
+ * | 122.7.0 | 2026-09-23 | สั่งเปลี่ยนธีมตอนสถานีพักหน้าจออยู่ ไม่เตะออกจากหน้าพักจออีกต่อไป วาดใหม่ตามหน้าที่แสดงอยู่จริงแทนการเรียก showStationPage() เสมอ |
  * | 122.6.2 | 2026-09-23 | ตามการแก้วิธีวาดคลื่นของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.6.1 | 2026-09-23 | ตามการย้ายตำแหน่งฟังก์ชันของ StationScreen.h ที่ทำให้คอมไพล์ไม่ผ่าน ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.6.0 | 2026-09-23 | บันทึกผลการตรวจสุขภาพ RC522 ไว้ใน isReaderReady ให้สัญลักษณ์แตะบัตรบนหน้าแรกบอกความพร้อมได้จริง และตรวจทะเบียนรุ่นซ้ำหลังสั่งเริ่มใหม่ |
@@ -55,7 +57,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.6.2"
+#define APP_VERSION         "122.8.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -440,7 +442,7 @@ void soundThemeSwitch() {
 
 
 void updateShopLabel() {
-  snprintf(dynamicShopLabel, sizeof(dynamicShopLabel), "POINT %d", currentStationId);
+  snprintf(dynamicShopLabel, sizeof(dynamicShopLabel), "STATION %d", currentStationId);
 }
 
 String maskUID(String uid) {
@@ -550,7 +552,15 @@ void applyHostConfig() {
     stationPrefs.begin("station_cfg", false);
     stationPrefs.putBool("dark", isStationDarkMode);
     stationPrefs.end();
-    if (!busy && isScreenOn) showStationPage(currentStationPage, true);
+    // [122.7.0] แก้: ของเดิมเรียก showStationPage() เสมอ ซึ่งตั้ง currentState
+    //           เป็น STANDBY หรือ STATUS ทุกครั้ง ถ้าตอนนั้นสถานีพักหน้าจออยู่
+    //           การสั่งเปลี่ยนธีมอย่างเดียวจะเตะมันออกจากหน้าพักจอ แล้วไม่กลับเข้าไปอีก
+    //           เพราะ modeSeq ไม่ได้เปลี่ยน คำสั่งพักจอจึงไม่ถูกทำซ้ำ
+    //           ตอนนี้วาดใหม่ตามหน้าที่แสดงอยู่จริง ไม่เปลี่ยนสถานะของเครื่อง
+    if (!busy && isScreenOn) {
+      if (currentState == STATE_SCREENSAVER) renderScreensaver(true);
+      else                                   showStationPage(currentStationPage, true);
+    }
   }
 
   if (seq == lastAppliedModeSeq) return;   // คำสั่งเดิมที่ย้ำมา ไม่ต้องทำซ้ำ
@@ -736,13 +746,13 @@ void runStationIdConfigMode() {
   int lastShownSec = -1;
 
   tft.fillScreen(getStBg());
-  drawStationTopBar("POINT NUMBER");
+  drawStationTopBar("STATION NUMBER");
   drawStationCard(16, 36, 288, 166, getStYellow(), getStCardBg());
 
   tft.setTextColor(getStTextMuted(), getStCardBg());
   tft.setTextSize(1);
   tft.setCursor(32, 48);
-  tft.println("CHOOSE THIS POINT");
+  tft.println("CHOOSE THIS STATION");
 
   auto drawSelectedId = [&]() {
     tft.fillRect(130, 70, 64, 40, getStCardBg());
@@ -832,7 +842,7 @@ void handlePhysicalButton() {
     if (held >= 200 && !holdUiShown) {
       wakeScreenIfNeeded();
       tft.fillScreen(getStBg());
-      drawStationTopBar("POINT NUMBER");
+      drawStationTopBar("STATION NUMBER");
       drawStationCard(16, 36, 288, 166, getStYellow(), getStCardBg());
       tft.setTextColor(getStTextMain(), getStCardBg());
       tft.setTextSize(2);

@@ -52,7 +52,7 @@ function hostShopsFull(counts) {
     fillRect(x + 8, y + 20, 74, 12, CARD());
     drawStatusDot(x + 12, y + 25, NODES[i].on);
     setTextSize(1); setTextColor(MUTED(), CARD());
-    setCursor(x + 22, y + 22); print('Point ' + (i + 1));
+    setCursor(x + 22, y + 22); print('Station ' + (i + 1));
     fillRect(x + 8, y + 66, w - 16, 14, CARD());
     if (NODES[i].on) {
       const sPct = battPct(NODES[i].v);
@@ -77,7 +77,7 @@ function hostShopValue(i, n) {
 function stnStandbyFull(served, clock, ready) {
   if (ready === undefined) ready = true;
   fillScreen(BG());
-  drawStationTopBar('POINT ' + ST_ID);
+  drawStationTopBar('STATION ' + ST_ID);
   drawStationCard(16, 34, 288, 130, BORDER(), CARD());
   stnStandbyReady(ready);
   drawFitCenteredText(24, 100, 272, 32, 'TAP YOUR CARD', 4, TEXT(), CARD());
@@ -105,13 +105,13 @@ function stnStandbyClock(clock) {
 /* ---------- station หน้าสอง ---------- */
 function stnStatsFull(served, clock, online) {
   fillScreen(BG());
-  drawStationTopBar('POINT ' + ST_ID);
+  drawStationTopBar('STATION ' + ST_ID);
   drawStationCard(6, 30, 150, 172, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(14, 40); print('SERVED TODAY');
   stnStatsServed(served);
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(14, 174); print('35 baht per student');
   drawStationCard(164, 30, 150, 172, BORDER(), CARD());
-  setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(172, 40); print('THIS POINT');
+  setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(172, 40); print('THIS STATION');
   drawFixedText(172, 62, 4, TEXT(), CARD(), 3, String(ST_ID));
   stnStatsPill(online);
   stnStatsClock(clock);
