@@ -26,9 +26,21 @@ function fillRoundRect(x,y,w,h,r,c){ g.fillStyle=rgb(c); rr(x,y,w,h,r); g.fill()
 function drawRoundRect(x,y,w,h,r,c){ g.strokeStyle=rgb(c); g.lineWidth=S; rr(x+0.5,y+0.5,w-1,h-1,r); g.stroke(); }
 function drawFastHLine(x,y,w,c){ fillRect(x,y,w,1,c); }
 function drawFastVLine(x,y,h,c){ fillRect(x,y,1,h,c); }
-function drawCircleHelper(x,y,r,mask,c){ // ใช้เฉพาะครึ่งขวา (0x6) ตามที่เฟิร์มแวร์เรียก
-  g.strokeStyle=rgb(c); g.lineWidth=S; g.beginPath();
-  g.arc(P(x),P(y),P(r),-Math.PI/2,Math.PI/2); g.stroke(); }
+function drawPixel(x,y,c){ fillRect(x,y,1,1,c); }
+/* [122.6.2] เดิมวาดส่วนโค้งด้วย g.arc() ของ canvas ซึ่งได้เส้นเรียบสวยกว่าของจริง
+   และที่แย่กว่านั้นคือมันวาดสำเร็จเสมอ จึงปิดบังบั๊กที่เส้นไม่ขึ้นบนจอจริง
+   เปลี่ยนมาใช้ Bresenham ลงทีละจุดชุดเดียวกับ drawRightArc() ในเฟิร์มแวร์
+   ภาพตัวอย่างจะได้เป็นพิกเซลชุดเดียวกับที่จอได้รับจริง */
+function drawRightArc(cx,cy,r,c){
+  let f=1-r, ddF_x=1, ddF_y=-2*r, x=0, y=r;
+  drawPixel(cx+r,cy,c);
+  while(x<y){
+    if(f>=0){ y--; ddF_y+=2; f+=ddF_y; }
+    x++; ddF_x+=2; f+=ddF_x;
+    drawPixel(cx+x,cy+y,c); drawPixel(cx+y,cy+x,c);
+    drawPixel(cx+x,cy-y,c); drawPixel(cx+y,cy-x,c);
+  }
+}
 function fillCircle(x,y,r,c){ g.fillStyle=rgb(c); g.beginPath(); g.arc(P(x),P(y),P(r),0,7); g.fill(); }
 function drawCircle(x,y,r,c){ g.strokeStyle=rgb(c); g.lineWidth=S; g.beginPath(); g.arc(P(x),P(y),P(r),0,7); g.stroke(); }
 function setTextSize(n){ tsize=n; }
