@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.10.0
+ * @version   113.11.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.11.0 | 2026-09-24 | บันทึกสำเนาลงการ์ด SD ที่อยู่หลังโมดูลจอ ทั้งรายการประจำวัน ไฟล์ปิดยอด และทะเบียนนิสิต LittleFS ยังเป็นที่เก็บหลัก ไม่มีการ์ดก็ทำงานได้ครบ ใช้บัส SPI ร่วมกับจอ เพิ่มขา SD_MISO ที่ GPIO6 และ SD_CS ที่ GPIO7 |
  * | 113.10.0 | 2026-09-24 | จัดขาใหม่ทั้งบอร์ดให้สายไม่ไขว้กัน อุปกรณ์ทุกตัวอยู่บนแถวซ้ายแถวเดียว ย้ายบัซเซอร์ไป GPIO17 ปุ่มกดไป GPIO18 วัดแบตเตอรี่ไป GPIO8 และไฟหน้าจอไป GPIO9 |
  * | 113.9.0 | 2026-09-23 | ย้ำคำสั่งการแสดงผลหกรอบกระจายออกไปราวสองวินาทีโดยไม่หน่วงลูป แทนการย้ำสามรอบติดกันด้วย delay(30) หน้าเว็บจึงตอบกลับทันที |
  * | 113.8.0 | 2026-09-23 | ตามการเปลี่ยนคำของ HostScreen.h และ WebDashboard.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -58,6 +59,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <LittleFS.h>
+#include <SD.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
@@ -67,7 +69,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.10.0"
+#define APP_VERSION         "113.11.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -86,7 +88,9 @@
 //    3        RST       ปุ่มรีเซ็ตของบอร์ด ห้ามต่ออะไร
 //    4        GPIO4     DS3231  SDA
 //    5        GPIO5     DS3231  SCL
-//    6-9      GPIO6,7,15,16   ว่าง
+//    6        GPIO6     การ์ด SD  SD_MISO   (หัวต่อด้านหลังโมดูลจอ)
+//    7        GPIO7     การ์ด SD  SD_CS
+//    8, 9     GPIO15,16 ว่าง
 //   10        GPIO17    บัซเซอร์
 //   11        GPIO18    ปุ่มกด (INPUT_PULLUP)
 //   12        GPIO8     วัดแรงดันแบตเตอรี่ (ADC1_CH7)
@@ -117,6 +121,19 @@
 // DS3231 บน I2C — สองขาติดกันที่ตำแหน่ง 4 และ 5 ใกล้ขา 3V3 ด้านบน
 #define I2C_SDA_PIN         4
 #define I2C_SCL_PIN         5
+
+// [113.11.0] เพิ่ม: การ์ด SD ที่อยู่ด้านหลังโมดูลจอ
+// โมดูลจอมีหัวต่อของการ์ด SD แยกไว้อีกชุดหนึ่งทางขวาของบอร์ด คือ
+// SD_SCK, SD_MISO, SD_MOSI, SD_CS ไม่ได้ต่อกับหัวแถว SPI ของจอ ต้องเดินสายเอง
+//
+// SD_SCK กับ SD_MOSI ใช้บัสร่วมกับจอได้เลย เพราะเป็นบัส SPI เดียวกัน
+//   SD_SCK  -> GPIO14 เส้นเดียวกับ TFT SCL
+//   SD_MOSI -> GPIO13 เส้นเดียวกับ TFT SDA
+// เหลือสองเส้นที่ต้องมีขาของตัวเอง วางไว้ตำแหน่ง 6 กับ 7 ซึ่งว่างอยู่พอดี
+//
+// จอไม่มีขา MISO ในผังนี้ จึงไม่ชนกับการ์ด ทั้งสองอุปกรณ์แยกกันด้วยขา CS
+#define SD_MISO_PIN         6
+#define SD_CS_PIN           7
 
 // อุปกรณ์สายเดี่ยว — สามขาติดกันที่ตำแหน่ง 10 ถึง 12
 // ชุดนี้ใช้ขาเดียวกับฝั่งจุดบริการเป๊ะ สายชุดเดียวใช้ได้ทั้งสองบอร์ด
@@ -1435,12 +1452,82 @@ void loadShopsFromFS() {
   file.close();
 }
 
+// ============================================================================
+// การ์ด SD — เป็น "สำเนา" ไม่ใช่ที่เก็บหลัก
+// ============================================================================
+// [113.11.0] เพิ่ม: บันทึกสำเนาข้อมูลลงการ์ด SD ที่อยู่ด้านหลังโมดูลจอ
+//
+// **LittleFS ยังเป็นที่เก็บหลักเหมือนเดิมทุกประการ** การ์ดเป็นเพียงสำเนา
+// ออกแบบแบบนี้โดยตั้งใจ เพราะการ์ดถอดออกได้ เสียได้ และไม่มีก็ได้
+// ถ้าให้การ์ดเป็นที่เก็บหลัก วันที่ลืมเสียบการ์ดคือวันที่ระบบจ่ายอาหารไม่ได้
+// ซึ่งขัดกับหลักที่วางไว้ว่าระบบต้องไม่หยุดเพราะอุปกรณ์เสริม
+//
+// ประโยชน์จริงของการ์ดคือ
+//   1. ถ้าบอร์ดแม่ข่ายพัง ถอดการ์ดไปเสียบคอมก็ได้ข้อมูลครบ ไม่ต้องกู้จากแฟลช
+//   2. เก็บประวัติย้อนหลังได้ไม่จำกัด ไม่ติดเพดาน 1 MB ของแฟลชในบอร์ด
+//   3. เป็นสำเนาสำรองของทะเบียนนิสิต เผื่อไฟล์ในแฟลชเสียหาย
+bool     sdReady     = false;
+uint32_t sdWriteFail = 0;
+uint32_t sdSizeMB    = 0;
+unsigned long lastSdRetry = 0;
+
+bool initSDCard() {
+  sdReady = false;
+  SD.end();                                   // เผื่อเคยเมานต์ค้างไว้
+  // ความเร็ว 10 MHz เป็นค่าที่การ์ดทั่วไปรับได้แน่ ๆ บนสายจัมเปอร์
+  // จอใช้ความเร็วของตัวเองคนละค่า เพราะไลบรารีตั้งความเร็วต่อหนึ่งทรานแซกชัน
+  if (!SD.begin(SD_CS_PIN, SPI_TFT, 10000000)) return false;
+  if (SD.cardType() == CARD_NONE) { SD.end(); return false; }
+  if (!SD.exists("/canteen")) SD.mkdir("/canteen");
+  sdSizeMB = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
+  sdReady = true;
+  return true;
+}
+
+// เขียนต่อท้ายไฟล์บนการ์ด ถ้าการ์ดหายไปกลางคันให้ปลดสถานะแล้วไปลองใหม่ในลูป
+// ห้าม return ค่าที่ทำให้ผู้เรียกต้องจัดการ เพราะงานหลักต้องเดินต่อได้เสมอ
+void sdAppend(const char *path, const char *text) {
+  if (!sdReady) return;
+  File f = SD.open(path, FILE_APPEND);
+  if (!f) { sdWriteFail++; sdReady = false; return; }
+  f.print(text);
+  f.close();
+}
+
+// คัดลอกไฟล์จากแฟลชลงการ์ด ใช้ตอนปิดยอดประจำวันและตอนสำรองทะเบียน
+void sdCopyFromFS(const char *fsPath, const char *sdPath) {
+  if (!sdReady) return;
+  File src = LittleFS.open(fsPath, "r");
+  if (!src) return;
+  File dst = SD.open(sdPath, FILE_WRITE);
+  if (!dst) { src.close(); sdWriteFail++; sdReady = false; return; }
+  uint8_t buf[512];
+  while (src.available()) {
+    size_t n = src.read(buf, sizeof(buf));
+    if (n == 0) break;
+    dst.write(buf, n);
+  }
+  src.close();
+  dst.close();
+}
+
 void appendLogToFS(String studentId, String fullName, String uid, String refNo, String timestamp, int station, String type) {
+  // [113.11.0] แก้: ประกอบบรรทัดครั้งเดียวแล้วใช้ทั้งสองที่ ข้อมูลจะได้ตรงกันแน่นอน
+  char line[320];
+  snprintf(line, sizeof(line), "%s,%s,%s,%s,%s,%d,35,%s\n",
+           studentId.c_str(), fullName.c_str(), uid.c_str(), refNo.c_str(),
+           timestamp.c_str(), station, type.c_str());
+
   File logFile = LittleFS.open("/daily_log.csv", FILE_APPEND);
   if (logFile) {
-    logFile.printf("%s,%s,%s,%s,%s,%d,35,%s\n", studentId.c_str(), fullName.c_str(), uid.c_str(), refNo.c_str(), timestamp.c_str(), station, type.c_str());
+    logFile.print(line);
     logFile.close();
   }
+
+  // สำเนาลงการ์ด ถ้าไม่มีการ์ดก็ข้ามไปเฉย ๆ ระบบยังทำงานปกติ
+  // จุดนี้ปลอดภัยเพราะถูกเรียก **หลัง** ส่งคำตอบให้จุดบริการไปแล้ว
+  // การ์ดที่เขียนช้าจึงไม่ทำให้จุดบริการรอจนหมดเวลา
+  sdAppend("/canteen/daily_log.csv", line);
 }
 
 void restoreDailyLogs() {
@@ -1482,6 +1569,10 @@ void saveDatabaseToFS() {
     file.printf("%s,%s,%s\n", s.studentId.c_str(), s.fullName.c_str(), permUid.c_str());
   }
   file.close();
+
+  // [113.11.0] เพิ่ม: สำรองทะเบียนลงการ์ดทุกครั้งที่ทะเบียนเปลี่ยน
+  //           ถ้าไฟล์ในแฟลชเสียหาย ยังมีฉบับล่าสุดอยู่บนการ์ดให้กู้
+  sdCopyFromFS("/students.csv", "/canteen/students_backup.csv");
 }
 
 void loadDatabaseFromFS() {
@@ -1652,6 +1743,11 @@ void handleDashboardAPI() {
   j += ",\"dark\":" + String(isTftDarkMode ? "true" : "false");
   j += ",\"saver\":" + String(stationScreensaver ? "true" : "false");
 
+  // [113.11.0] เพิ่ม: สถานะการ์ด SD เจ้าหน้าที่จะได้รู้ว่าสำเนายังถูกบันทึกอยู่หรือไม่
+  j += ",\"sd\":{\"ok\":" + String(sdReady ? "true" : "false");
+  j += ",\"mb\":" + String(sdSizeMB);
+  j += ",\"fail\":" + String(sdWriteFail) + "}";
+
   j += ",\"shops\":[";
   for (int i = 0; i < 4; i++) {
     if (i) j += ",";
@@ -1772,7 +1868,9 @@ void setup() {
   pinMode(RGB_LED_PIN, OUTPUT);
   analogSetAttenuation(ADC_11db);
 
-  SPI_TFT.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+  // [113.11.0] แก้: ของเดิมใส่ -1 ที่ช่อง MISO เพราะจอไม่ต้องใช้
+  //           แต่การ์ด SD ใช้บัสเดียวกันและต้องอ่านข้อมูลกลับ จึงต้องมี MISO จริง
+  SPI_TFT.begin(TFT_SCLK, SD_MISO_PIN, TFT_MOSI, -1);
   tft.init(240, 320); 
   tft.setRotation(1); 
   tft.setTextWrap(false);
@@ -1785,6 +1883,10 @@ void setup() {
   scanQueue = xQueueCreate(16, sizeof(ScanQueueItem));
 
   LittleFS.begin(true);
+
+  // [113.11.0] เพิ่ม: เมานต์การ์ด SD หลังเปิดบัส SPI แล้ว ถ้าไม่มีการ์ดก็ไม่เป็นไร
+  //           ระบบทั้งหมดยังทำงานได้ครบ เพราะการ์ดเป็นเพียงสำเนา
+  initSDCard();
   loadShopsFromFS();
   loadDatabaseFromFS();
   loadAdminsFromFS();
@@ -2010,6 +2112,12 @@ void setup() {
         while (src.available()) dst.write(src.read());
         src.close(); dst.close();
       }
+      // [113.11.0] เพิ่ม: เก็บไฟล์ประวัติไว้บนการ์ดด้วย แฟลชในบอร์ดมีแค่ 1 MB
+      //           แต่การ์ดเก็บย้อนหลังได้เป็นปี และถอดไปเปิดกับคอมได้ทันที
+      char sdArc[64];
+      snprintf(sdArc, sizeof(sdArc), "/canteen%s", arcName);
+      sdCopyFromFS(arcName, sdArc);
+
       LittleFS.remove("/daily_log.csv");
     }
 
@@ -2083,6 +2191,14 @@ void loop() {
       sendToStation(i + 1, (uint8_t *)&ack, sizeof(HostResponsePacket));
       sendStationTheme(i + 1);
     }
+  }
+
+  // [113.11.0] เพิ่ม: ถ้าการ์ดยังไม่พร้อม ลองเมานต์ใหม่ทุกสามสิบวินาที
+  //            เสียบการ์ดทีหลังได้โดยไม่ต้องรีบูต และถ้าการ์ดหลุดกลางวันแล้วเสียบคืน
+  //            ระบบก็กลับมาบันทึกสำเนาต่อเองโดยไม่ต้องมีใครสั่ง
+  if (!sdReady && millis() - lastSdRetry > 30000) {
+    lastSdRetry = millis();
+    initSDCard();
   }
 
   // [113.9.0] เพิ่ม: ย้ำคำสั่งการแสดงผลรอบที่เหลือ กระจายออกไปราวสองวินาที
