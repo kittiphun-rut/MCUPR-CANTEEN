@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Host_Server.ino
  * @brief     เครื่องแม่ข่ายของระบบสวัสดิการอาหารกลางวัน 35 บาท/คน/วัน
- * @version   113.9.0
+ * @version   113.10.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -31,6 +31,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.10.0 | 2026-09-24 | จัดขาใหม่ทั้งบอร์ดให้สายไม่ไขว้กัน อุปกรณ์ทุกตัวอยู่บนแถวซ้ายแถวเดียว ย้ายบัซเซอร์ไป GPIO17 ปุ่มกดไป GPIO18 วัดแบตเตอรี่ไป GPIO8 และไฟหน้าจอไป GPIO9 |
  * | 113.9.0 | 2026-09-23 | ย้ำคำสั่งการแสดงผลหกรอบกระจายออกไปราวสองวินาทีโดยไม่หน่วงลูป แทนการย้ำสามรอบติดกันด้วย delay(30) หน้าเว็บจึงตอบกลับทันที |
  * | 113.8.0 | 2026-09-23 | ตามการเปลี่ยนคำของ HostScreen.h และ WebDashboard.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 113.7.0 | 2026-09-23 | คำสั่งเปลี่ยนโหมดการแสดงผลไปถึงจุดบริการทันที ส่งยูนิแคสต์ถึงทุกจุดก่อนแล้วค่อยกระจายเสียง และแก้ broadcastStationTheme() ที่ประกอบแพ็กเก็ตเองจนฟิลด์ screenOn, screensaver, modeSeq เป็นศูนย์ติดไปทุกครั้ง |
@@ -66,26 +67,64 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-#define APP_VERSION         "113.9.0"
+#define APP_VERSION         "113.10.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
 
-// Pin Configuration สำหรับ ESP32-S3 DevKitC-1 N16R8
+// ============================================================================
+// การจัดขา (Pin Map) — ESP32-S3 DevKitC-1 N16R8
+// ============================================================================
+// [113.10.0] แก้: จัดขาใหม่ทั้งหมดให้สายไม่ไขว้กัน
+//           อุปกรณ์ภายนอก **ทุกตัวอยู่บนแถวซ้ายของบอร์ดแถวเดียว** ไม่มีอะไรข้ามไปฝั่งขวา
+//           และขาของแต่ละโมดูลเรียงติดกันตามลำดับขาบนตัวโมดูลเอง
+//           รายละเอียดและผังเต็มอยู่ใน docs/HARDWARE.md
+//
+//   ตำแหน่ง   ขา        เครื่องแม่ข่าย
+//   --------  --------  ----------------------------------------------------
+//    1, 2     3V3       ไฟเลี้ยง 3.3V ของทุกโมดูล
+//    3        RST       ปุ่มรีเซ็ตของบอร์ด ห้ามต่ออะไร
+//    4        GPIO4     DS3231  SDA
+//    5        GPIO5     DS3231  SCL
+//    6-9      GPIO6,7,15,16   ว่าง
+//   10        GPIO17    บัซเซอร์
+//   11        GPIO18    ปุ่มกด (INPUT_PULLUP)
+//   12        GPIO8     วัดแรงดันแบตเตอรี่ (ADC1_CH7)
+//   13,14     GPIO3,46  ไม่ใช้ เป็นขา strapping
+//   15        GPIO9     TFT  BLK
+//   16        GPIO10    TFT  CS
+//   17        GPIO11    TFT  DC
+//   18        GPIO12    TFT  RES
+//   19        GPIO13    TFT  SDA (MOSI)
+//   20        GPIO14    TFT  SCL (SCLK)
+//   21        5V0       ไม่ได้ใช้
+//   22        GND       กราวด์ร่วมของทุกโมดูล
+//
+// แถวขวาไม่ได้ต่อสายอะไรเลย เหลือไว้ทั้งแถว
+// ขาที่ห้ามใช้บนรุ่น N16R8: GPIO26-37 (แฟลชกับ PSRAM แบบ OPI),
+// GPIO19/20 (USB), GPIO43/44 (UART0), GPIO0/3/45/46 (strapping)
+
+// จอ ST7789 — หกขาเรียงติดกันที่ตำแหน่ง 15 ถึง 20
+// เรียงตรงกับลำดับขาบนตัวโมดูลพอดี อ่านจากล่างขึ้นบน
+// GND, VCC, SCL, SDA, RES, DC, CS, BLK จึงเสียบตรงลงมาได้โดยไม่ไขว้เลย
+#define TFT_BLK             9
 #define TFT_CS              10
 #define TFT_DC              11
 #define TFT_RST             12
 #define TFT_MOSI            13
 #define TFT_SCLK            14
-#define TFT_BLK             15
 
-#define BUZZER_PIN          6
-#define BTN_PIN             2
-#define BATTERY_ADC_PIN     1   // ADC1_CH0 ปลอดภัยต่อการใช้พร้อม Wi-Fi
-#define RGB_LED_PIN         48  // Onboard WS2812 RGB
+// DS3231 บน I2C — สองขาติดกันที่ตำแหน่ง 4 และ 5 ใกล้ขา 3V3 ด้านบน
+#define I2C_SDA_PIN         4
+#define I2C_SCL_PIN         5
 
-#define I2C_SDA_PIN         4   // DS3231 SDA
-#define I2C_SCL_PIN         5   // DS3231 SCL
+// อุปกรณ์สายเดี่ยว — สามขาติดกันที่ตำแหน่ง 10 ถึง 12
+// ชุดนี้ใช้ขาเดียวกับฝั่งจุดบริการเป๊ะ สายชุดเดียวใช้ได้ทั้งสองบอร์ด
+#define BUZZER_PIN          17
+#define BTN_PIN             18
+#define BATTERY_ADC_PIN     8   // ADC1_CH7 อ่านได้ขณะเปิด Wi-Fi
+
+#define RGB_LED_PIN         48  // WS2812 บนบอร์ด ไม่ต้องเดินสาย
 
 // ============================================================================
 // COLOR MACROS & THEME ENGINE

@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.10.0
+ * @version   122.11.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.11.0 | 2026-09-24 | จัดขาใหม่ทั้งบอร์ดให้สายไม่ไขว้กัน ย้าย RC522 มาอยู่ติดกันที่ GPIO4-7 กับ 15 ย้าย MISO ออกจากแถวขวา ย้ายวัดแบตเตอรี่ออกจากขา strapping GPIO3 ไป GPIO8 และใช้ขาบัซเซอร์ ปุ่มกด แบตเตอรี่ ชุดเดียวกับฝั่งแม่ข่าย |
  * | 122.10.0 | 2026-09-23 | ปิดโหมดประหยัดพลังงานของวิทยุด้วย WiFi.setSleep(false) ของเดิมใช้ esp_wifi_set_ps() ซึ่งถูกอีเวนต์ STA_START ของ Arduino core ทับกลับเป็น WIFI_PS_MIN_MODEM วิทยุจึงหลับและรับคำสั่งจากแม่ข่ายได้เฉพาะตอนเพิ่งส่ง heartbeat |
  * | 122.9.0 | 2026-09-23 | ตามการแก้แถบบนของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
  * | 122.8.0 | 2026-09-23 | เปลี่ยนป้ายบนแถบบนและหน้าตั้งหมายเลขจาก POINT เป็น STATION |
@@ -59,29 +60,73 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.10.0"
+#define APP_VERSION         "122.11.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
 
 // Pin Configuration สำหรับ ESP32-S3 DevKitC-1
+// ============================================================================
+// การจัดขา (Pin Map) — ESP32-S3 DevKitC-1 N16R8
+// ============================================================================
+// [122.11.0] แก้: จัดขาใหม่ทั้งหมดให้สายไม่ไขว้กัน
+//           อุปกรณ์ภายนอก **ทุกตัวอยู่บนแถวซ้ายของบอร์ดแถวเดียว** ไม่มีอะไรข้ามไปฝั่งขวา
+//           และขาของแต่ละโมดูลเรียงติดกันตามลำดับขาบนตัวโมดูลเอง
+//           รายละเอียดและผังเต็มอยู่ใน docs/HARDWARE.md
+//
+//   ตำแหน่ง   ขา        จุดบริการ
+//   --------  --------  ----------------------------------------------------
+//    1, 2     3V3       ไฟเลี้ยง 3.3V ของทุกโมดูล
+//    3        RST       ปุ่มรีเซ็ตของบอร์ด ห้ามต่ออะไร
+//    4        GPIO4     RC522  SDA (SS)
+//    5        GPIO5     RC522  SCK
+//    6        GPIO6     RC522  MOSI
+//    7        GPIO7     RC522  MISO
+//    8        GPIO15    RC522  RST
+//    9        GPIO16    ว่าง คั่นระหว่างกลุ่ม
+//   10        GPIO17    บัซเซอร์
+//   11        GPIO18    ปุ่มกด (INPUT_PULLUP)
+//   12        GPIO8     วัดแรงดันแบตเตอรี่ (ADC1_CH7)
+//   13,14     GPIO3,46  ไม่ใช้ เป็นขา strapping
+//   15        GPIO9     TFT  BLK
+//   16        GPIO10    TFT  CS
+//   17        GPIO11    TFT  DC
+//   18        GPIO12    TFT  RES
+//   19        GPIO13    TFT  SDA (MOSI)
+//   20        GPIO14    TFT  SCL (SCLK)
+//   21        5V0       ไม่ได้ใช้
+//   22        GND       กราวด์ร่วมของทุกโมดูล
+//
+// แถวขวาไม่ได้ต่อสายอะไรเลย เหลือไว้ทั้งแถว
+// ขาที่ห้ามใช้บนรุ่น N16R8: GPIO26-37 (แฟลชกับ PSRAM แบบ OPI),
+// GPIO19/20 (USB), GPIO43/44 (UART0), GPIO0/3/45/46 (strapping)
+
+// จอ ST7789 — หกขาเรียงติดกันที่ตำแหน่ง 15 ถึง 20
+// เรียงตรงกับลำดับขาบนตัวโมดูลพอดี อ่านจากล่างขึ้นบน
+// GND, VCC, SCL, SDA, RES, DC, CS, BLK จึงเสียบตรงลงมาได้โดยไม่ไขว้เลย
+#define TFT_BLK             9
 #define TFT_CS              10
 #define TFT_DC              11
 #define TFT_RST             12
 #define TFT_MOSI            13
 #define TFT_SCLK            14
-#define TFT_BLK             15
 
-#define RC522_SS            7
-#define RC522_SCK           4
-#define RC522_MOSI          5
-#define RC522_MISO          21  
-#define RC522_RST           17  
+// RC522 — ห้าขาเรียงติดกันที่ตำแหน่ง 4 ถึง 8 ใกล้ขา 3V3 ด้านบน
+// ลำดับตรงกับขาบนตัวโมดูล SDA, SCK, MOSI, MISO แล้วข้าม IRQ กับ GND ไป RST
+// สายทุกเส้นวิ่งลงทางเดียวกัน ไม่มีเส้นไหนไขว้กัน ส่วน IRQ ไม่ได้ใช้
+#define RC522_SS            4
+#define RC522_SCK           5
+#define RC522_MOSI          6
+#define RC522_MISO          7
+#define RC522_RST           15
 
-#define BUZZER_PIN          38  
-#define BTN_PIN             2
-#define BATTERY_ADC_PIN     3   
-#define RGB_LED_PIN         48  
+// อุปกรณ์สายเดี่ยว — สามขาติดกันที่ตำแหน่ง 10 ถึง 12
+// ชุดนี้ใช้ขาเดียวกับฝั่งแม่ข่ายเป๊ะ สายชุดเดียวใช้ได้ทั้งสองบอร์ด
+#define BUZZER_PIN          17
+#define BTN_PIN             18
+#define BATTERY_ADC_PIN     8   // ADC1_CH7 อ่านได้ขณะเปิด Wi-Fi
+
+#define RGB_LED_PIN         48  // WS2812 บนบอร์ด ไม่ต้องเดินสาย
 
 // ============================================================================
 // DYNAMIC THEME ENGINE (คาลิเบทตาม TFT Color Calibration Tool)
