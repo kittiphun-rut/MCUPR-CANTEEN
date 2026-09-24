@@ -125,6 +125,7 @@ python3 tools/proto-check/ordercheck.py    # ฟังก์ชันที่�
 python3 tools/proto-check/gfxcheck.py      # ฟังก์ชัน GFX ที่ต้องมี startWrite() ก่อน
 python3 tools/proto-check/packetcheck.py   # แพ็กเก็ตคำสั่งที่ใส่ฟิลด์ไม่ครบ
 python3 tools/proto-check/pincheck.py      # ขาชนกันเองหรือไปโดนขาต้องห้าม
+python3 tools/proto-check/kicadcheck.py    # ไฟล์วงจร KiCad ตรงกับผังขาในซอร์ส
 python3 tools/proto-check/protoscan.py Canteen_Host_Server/Canteen_Host_Server.ino \
                                        Canteen_Station_Client/Canteen_Station_Client.ino
 ```

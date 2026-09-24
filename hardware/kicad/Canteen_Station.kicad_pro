@@ -1,0 +1,13 @@
+{
+  "board": {"design_settings": {}},
+  "boards": [],
+  "cvpcb": {"equivalence_files": []},
+  "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
+  "meta": {"filename": "Canteen_Station.kicad_pro", "version": 1},
+  "net_settings": {"classes": [{"name": "Default", "clearance": 0.2,
+    "track_width": 0.25, "via_diameter": 0.8, "via_drill": 0.4}]},
+  "pcbnew": {"page_layout_descr_file": ""},
+  "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []},
+  "sheets": [["3673b4f9-eb45-4f27-a3ba-59c4cccca7d1", ""]],
+  "text_variables": {}
+}
