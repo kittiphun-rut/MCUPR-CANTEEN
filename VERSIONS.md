@@ -43,6 +43,7 @@ release/24-h113.7.0-s122.7.0
 release/25-h113.8.0-s122.8.0
 release/26-h113.8.0-s122.9.0
 release/27-h113.9.0-s122.10.0
+release/28-h113.10.0-s122.11.0
 ```
 
 > หมายเหตุ: ปกติงานลักษณะนี้ควรเป็น **tag** ไม่ใช่ branch แต่บัญชีที่เซสชันนี้ใช้
@@ -100,7 +101,9 @@ release/27-h113.9.0-s122.10.0
 
 | `release/27-h113.9.0-s122.10.0` | 113.9.0 | 122.10.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/27-h113.9.0-s122.10.0.zip) | [`361c907`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/361c907947d3b674b3db6811cef5b672ec450b73) | **ต้นเหตุจริงของการหน่วงห้าวินาที** วิทยุของจุดบริการหลับ เพราะ Arduino core สั่งทับ `esp_wifi_set_ps()` กลับเป็นโหมดประหยัดพลังงานตอนอีเวนต์ STA_START · แก้ด้วย `WiFi.setSleep(false)` · แม่ข่ายย้ำคำสั่งหกรอบกระจายสองวินาทีโดยไม่หน่วงลูป<br><sub>23 ก.ย. 2026</sub> |
 
-> ❔ **`release/12` ถึง `release/27` ยังไม่ผ่านการคอมไพล์จริง**
+| `release/28-h113.10.0-s122.11.0` | 113.10.0 | 122.11.0 | ❔ | [zip](https://github.com/kittiphun-rut/MCUPR-CANTEEN/archive/refs/heads/release/28-h113.10.0-s122.11.0.zip) | [`6ff9621`](https://github.com/kittiphun-rut/MCUPR-CANTEEN/tree/6ff96219e0cc25851c31c06a655aa1e8e906b65a) | **จัดขาใหม่ทั้งสองบอร์ดให้สายไม่ไขว้กัน** อุปกรณ์ทุกตัวอยู่บนแถวซ้ายแถวเดียว · จอเสียบตรงลงมาได้ทั้งแถว · ย้ายวัดแบตเตอรี่ออกจากขา strapping GPIO3 · เพิ่ม `pincheck.py` และ `docs/HARDWARE.md` · **ต้องรื้อสายจริง**<br><sub>24 ก.ย. 2026</sub> |
+
+> ❔ **`release/12` ถึง `release/28` ยังไม่ผ่านการคอมไพล์จริง**
 > (`release/18` ท่านแฟลชแล้วและยืนยันว่าอักษรซ้อนหาย การกะพริบดีขึ้น แต่ยังไม่ได้แจ้งผลการคอมไพล์) เพราะเครื่องที่ใช้พัฒนาเข้า
 > `downloads.arduino.cc` ไม่ได้ ตรวจมาแล้วเท่าที่ตรวจได้: วงเล็บครบทุกไฟล์
 > การประกาศฟังก์ชันล่วงหน้าครบ ไวยากรณ์ JavaScript ที่ฝังอยู่ผ่าน `node --check`
