@@ -1,7 +1,7 @@
 /**
  * @file      Canteen_Station_Client.ino
  * @brief     เครื่องประจำร้านค้า อ่านบัตร RFID แล้วถามสิทธิ์จากเครื่องแม่ข่าย
- * @version   122.11.0
+ * @version   122.12.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -26,6 +26,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.12.0 | 2026-09-24 | ปฏิเสธการแตะบัตรตั้งแต่ต้นเมื่อรู้อยู่แล้วว่าแม่ข่ายไม่ตอบ และแยกข้อความกรณีหมดเวลารอคำตอบเป็น "ไม่ทราบผล" แทน "ไม่สำเร็จ" |
  * | 122.11.0 | 2026-09-24 | จัดขาใหม่ทั้งบอร์ดให้สายไม่ไขว้กัน ย้าย RC522 มาอยู่ติดกันที่ GPIO4-7 กับ 15 ย้าย MISO ออกจากแถวขวา ย้ายวัดแบตเตอรี่ออกจากขา strapping GPIO3 ไป GPIO8 และใช้ขาบัซเซอร์ ปุ่มกด แบตเตอรี่ ชุดเดียวกับฝั่งแม่ข่าย |
  * | 122.10.0 | 2026-09-23 | ปิดโหมดประหยัดพลังงานของวิทยุด้วย WiFi.setSleep(false) ของเดิมใช้ esp_wifi_set_ps() ซึ่งถูกอีเวนต์ STA_START ของ Arduino core ทับกลับเป็น WIFI_PS_MIN_MODEM วิทยุจึงหลับและรับคำสั่งจากแม่ข่ายได้เฉพาะตอนเพิ่งส่ง heartbeat |
  * | 122.9.0 | 2026-09-23 | ตามการแก้แถบบนของ StationScreen.h ตรรกะในไฟล์นี้ไม่เปลี่ยน |
@@ -60,7 +61,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define APP_VERSION         "122.11.0"
+#define APP_VERSION         "122.12.0"
 #define DEV_NAME            "Kittiphan Rattanakorn"
 #define DEV_ROLE            "Computer Technical Officer"
 #define DEV_INSTITUTION     "MCU Phrae Campus"
@@ -346,7 +347,7 @@ void showDisplayLockedNotice();
 void refreshStationLiveValues(bool force);
 void displayScanningUID(String uid);
 void displayResult(String status, String name, String id, String refNo, String claimTime, String msg);
-void displayOfflineAlert();
+void displayOfflineAlert(bool resultUnknown = false);
 void playBootAnimation();
 void drawStationIdConfigProgress(unsigned long elapsedMs, bool holdToEnter);
 void runStationIdConfigMode();
@@ -1046,6 +1047,19 @@ void checkRC522() {
     if (uidStr == lastProcessedUID && (millis() - lastProcessedTime < COOLDOWN_MS)) return;
     lastProcessedUID = uidStr;
     lastProcessedTime = millis();
+
+    // [122.12.0] เพิ่ม: รู้อยู่แล้วว่าแม่ข่ายไม่ตอบ ก็ไม่ต้องส่งออกไปให้เสียเวลา
+    //            ของเดิมส่งไปแล้วให้นิสิตยืนรอสามวินาทีกว่าจะรู้ว่าไม่สำเร็จ
+    //            ปฏิเสธตั้งแต่ตรงนี้จึงรู้ผลทันที และที่สำคัญกว่านั้นคือ
+    //            **การันตีได้ว่าไม่มีการตัดสิทธิ์เกิดขึ้น** เพราะไม่ได้ส่งอะไรออกไปเลย
+    //            ต่างจากกรณีหมดเวลารอคำตอบ ซึ่งบอกไม่ได้ว่าตัดสิทธิ์ไปแล้วหรือยัง
+    if (!isHostOnline) {
+      displayOfflineAlert(false);
+      currentState = STATE_RESULT_DISPLAY;
+      stateHoldUntil = millis() + 2500;
+      return;
+    }
+
     sendCardToHost(uidStr);
   }
 }
@@ -1202,7 +1216,8 @@ void loop() {
   }
 
   if (currentState == STATE_SCANNING_SENT && millis() > stateHoldUntil) {
-    displayOfflineAlert();
+    // ส่งไปแล้วไม่มีคำตอบ ไม่มีทางรู้ว่าแม่ข่ายตัดสิทธิ์ไปแล้วหรือยัง
+    displayOfflineAlert(true);
     currentState = STATE_RESULT_DISPLAY;
     stateHoldUntil = millis() + 2500;
   }

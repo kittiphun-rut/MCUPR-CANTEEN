@@ -1,7 +1,7 @@
 /**
  * @file      StationScreen.h
  * @brief     ทุกอย่างที่วาดลงจอ TFT ของเครื่องประจำร้านค้า
- * @version   122.9.0
+ * @version   122.12.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -22,6 +22,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 122.12.0 | 2026-09-24 | หน้าแรกบอกสถานะการให้บริการสามแบบ พร้อมรับบัตร แม่ข่ายไม่ตอบ และเครื่องอ่านบัตรไม่ตอบ และแยกหน้าเตือนเป็นกรณีไม่ได้ส่งเลยกับกรณีส่งแล้วไม่ทราบผล |
  * | 122.9.0 | 2026-09-23 | ขีดสัญญาณมุมขวาบนหายหลังเปลี่ยนหน้า เพราะ drawStationTopBar() ล้างแถบแล้วไม่วาดคืน และตัดตัวเลข dBm กับคำว่า OFFLINE ออก เหลือแต่สัญลักษณ์ |
  * | 122.8.0 | 2026-09-23 | เปลี่ยนคำว่า Point บนหน้าจอเป็น Station ให้ตรงกับชื่อที่ใช้ทั้งระบบ ส่วนชื่อร้านยังใช้คำว่า Shop เหมือนเดิม |
  * | 122.6.2 | 2026-09-23 | คลื่นของสัญลักษณ์แตะบัตรไม่ขึ้นบนจอจริง เพราะ drawCircleHelper() ของไลบรารีไม่เปิดทรานแซกชัน SPI เอง เปลี่ยนมาวาดครึ่งวงกลมเองด้วย drawPixel() |
@@ -205,28 +206,57 @@ void drawRfidTapIcon(int cx, int cy, uint16_t cardColor, uint16_t waveColor, uin
 
 // [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรพร้อมบรรทัดคำอธิบาย บนหน้าแรกของจุดบริการ
 //           แยกออกมาเป็นฟังก์ชันของตัวเองเพราะถูกเรียกจากสองที่
-//           คือตอนวาดหน้าใหม่ทั้งหน้า และตอนที่เครื่องอ่านบัตรเปลี่ยนสถานะ
+//           คือตอนวาดหน้าใหม่ทั้งหน้า และตอนที่สถานะการให้บริการเปลี่ยน
 //           ทั้งสองที่จึงใช้พิกัดชุดเดียวกันเสมอ ไม่มีทางเลื่อนออกจากกันได้
 //
-// สีคลื่นบอกความพร้อม เขียวคือเครื่องอ่านตอบอยู่ แดงคือไม่ตอบ
+// [122.12.0] แก้: เดิมบอกแค่ว่าเครื่องอ่านบัตรพร้อมหรือไม่
+//            ตอนนี้บอกสถานะการให้บริการทั้งหมด รวมถึงตอนที่แม่ข่ายไม่ตอบด้วย
+//            เพราะถ้าแม่ข่ายไม่ตอบ แตะบัตรไปก็ตัดสิทธิ์ไม่ได้อยู่ดี
+//            นิสิตที่เดินมาถึงต้องรู้ตั้งแต่ก่อนแตะ ไม่ใช่รู้หลังจากยืนรอสามวินาที
+//
 // ล้างพื้นก่อนวาดเพราะเส้นโค้งวาดทับเส้นโค้งเดิมไม่มิด สีเก่าจะค้างตามขอบ
 // จุดนี้วาดเฉพาะตอนสถานะเปลี่ยนซึ่งนาน ๆ ครั้ง จึงไม่ทำให้กลับไปกะพริบทุกวินาที
-void drawStandbyReadyState(bool ready) {
-  uint16_t bg = getStCardBg();
-  tft.fillRect(RFID_ICON_X(160), RFID_ICON_Y(72), RFID_ICON_W, RFID_ICON_H, bg);
-  drawRfidTapIcon(160, 72, getStTextMain(), ready ? getStGreen() : getStRose(), bg);
 
-  // ความกว้าง 44 ตัวอักษรที่ขนาด 1 คือ 264 พิกเซล พอดีกับช่องในการ์ด
-  // ข้อความยาวไม่เท่ากัน จึงต้องเป็น drawCenteredText ที่เติมช่องว่างทั้งสองข้าง
-  // ไม่ใช่ drawFitCenteredText ที่ไม่ลบของเดิม
-  if (ready) {
-    drawCenteredText(160, 139, 1, getStTextMuted(), bg, 44,
-                     "Free meal  35 baht  once a day");
-  } else {
-    drawCenteredText(160, 139, 1, getStRose(), bg, 44,
-                     "Card reader not responding - call staff");
-  }
+// สถานะการให้บริการที่หน้าแรกต้องบอก
+// ถ้าติดหลายอย่างพร้อมกัน ให้แสดงอันที่อยู่ก่อนในรายการนี้
+//   0 = พร้อมรับบัตร
+//   1 = แม่ข่ายไม่ตอบ ตัดสิทธิ์ไม่ได้
+//   2 = เครื่องอ่านบัตรไม่ตอบ
+uint8_t standbyServiceState() {
+  if (!isHostOnline)  return 1;
+  if (!isReaderReady) return 2;
+  return 0;
 }
+
+void drawStandbyService(uint8_t svc) {
+  uint16_t bg = getStCardBg();
+  uint16_t wave, noteColor;
+  const char *head, *note;
+
+  if (svc == 1) {
+    wave = getStYellow();  noteColor = getStYellow();
+    head = "SERVER OFFLINE";
+    note = "Cannot serve now - please tell the staff";
+  } else if (svc == 2) {
+    wave = getStRose();    noteColor = getStRose();
+    head = "OUT OF SERVICE";
+    note = "Card reader not responding - call staff";
+  } else {
+    wave = getStGreen();   noteColor = getStTextMuted();
+    head = "TAP YOUR CARD";
+    note = "Free meal  35 baht  once a day";
+  }
+
+  tft.fillRect(RFID_ICON_X(160), RFID_ICON_Y(72), RFID_ICON_W, RFID_ICON_H, bg);
+  drawRfidTapIcon(160, 72, getStTextMain(), wave, bg);
+
+  // ทั้งพาดหัวและบรรทัดล่างใช้ drawCenteredText ที่เติมช่องว่างทั้งสองข้าง
+  // ข้อความสามแบบยาวไม่เท่ากัน ถ้าใช้ตัวที่ไม่เติมช่องว่างจะมีหางของเก่าค้าง
+  // ความกว้าง 15 ตัวอักษรที่ขนาด 3 คือ 270 พิกเซล และ 44 ตัวที่ขนาด 1 คือ 264
+  drawCenteredText(160, 104, 3, getStTextMain(), bg, 15, "%s", head);
+  drawCenteredText(160, 139, 1, noteColor,       bg, 44, "%s", note);
+}
+
 
 void drawStationPillBadge(int x, int y, int w, int h, const char* text, uint16_t fgColor, uint16_t bgColor) {
   tft.fillRoundRect(x, y, w, h, 3, bgColor);
@@ -427,17 +457,17 @@ void refreshStationLiveValues(bool force) {
   static int  lastServed = -1;
   static String lastClock = "";
   static int  lastOnline = -1;
-  static int  lastReady  = -1;
+  static int  lastSvc    = -1;
 
   int served = (int)totalSuccessToday;
   String clock = getTimeOnlyStr();
 
   // ---- หน้าแรก: ยอดวันนี้มุมซ้ายล่าง และนาฬิกามุมขวาล่าง ----
   if (currentState == STATE_STANDBY && currentStationPage == 1) {
-    // [122.6.0] เพิ่ม: สัญลักษณ์แตะบัตรเปลี่ยนสีตามความพร้อมของเครื่องอ่านบัตร
-    //           วาดเฉพาะตอนสถานะเปลี่ยน ไม่ได้วาดทุกวินาที
-    if (force || (int)isReaderReady != lastReady) {
-      drawStandbyReadyState(isReaderReady);
+    // [122.12.0] แก้: ตามสถานะการให้บริการทั้งหมด ไม่ใช่แค่ความพร้อมของเครื่องอ่านบัตร
+    //            วาดเฉพาะตอนสถานะเปลี่ยน ไม่ได้วาดทุกวินาที
+    if (force || (int)standbyServiceState() != lastSvc) {
+      drawStandbyService(standbyServiceState());
     }
     if (force || served != lastServed) {
       drawFixedText(28, 191, 2, getStTextMain(), getStCardBg(), 4, "%d", served);
@@ -479,7 +509,7 @@ void refreshStationLiveValues(bool force) {
   lastServed = served;
   lastClock  = clock;
   lastOnline = (int)isHostOnline;
-  lastReady  = (int)isReaderReady;
+  lastSvc    = (int)standbyServiceState();
 
   // แถบสัญญาณและแบตเตอรี่มุมขวาบน วาดเองเมื่อค่าเปลี่ยนพอสมควร
   updateTopRightHeaderSmooth(lastHostRssi, isHostOnline, force);
@@ -548,8 +578,7 @@ void displayTapCardStandby() {
 
   // ช่องใหญ่ช่องเดียว มีสัญลักษณ์แตะบัตรกับประโยคเดียวที่นิสิตต้องอ่าน
   drawStationCard(16, 34, 288, 130, getStCardBorder(), getStCardBg());
-  drawStandbyReadyState(isReaderReady);
-  drawFitCenteredText(24, 100, 272, 32, "TAP YOUR CARD", 4, getStTextMain(), getStCardBg());
+  drawStandbyService(standbyServiceState());
 
   // ช่องล่าง: ยอดของจุดบริการนี้วันนี้ และเวลา
   drawStationCard(16, 172, 288, 40, getStCardBorder(), getStCardBg());
@@ -868,12 +897,29 @@ void displayResult(String status, String name, String id, String refNo, String c
   drawFitCenteredText(14, 192, 292, 40, footerDesc, 1, bannerFg, bannerBg);
 }
 
-void displayOfflineAlert() {
+// [122.12.0] แก้: แยกหน้าเตือนออกเป็นสองกรณีที่ต่างกันโดยสิ้นเชิง
+//
+//   resultUnknown = false  ยังไม่ได้ส่งอะไรออกไปเลย เพราะรู้อยู่แล้วว่าแม่ข่ายไม่ตอบ
+//                          **การันตีได้ว่าไม่มีการตัดสิทธิ์เกิดขึ้น** บอกนิสิตได้เต็มปาก
+//
+//   resultUnknown = true   ส่งไปแล้วแต่ไม่มีคำตอบกลับมาภายในเวลาที่กำหนด
+//                          **ไม่มีทางรู้ได้ว่าแม่ข่ายตัดสิทธิ์ไปแล้วหรือยัง**
+//                          เพราะคำตอบอาจหายระหว่างทางหลังจากที่แม่ข่ายบันทึกไปแล้ว
+//                          ห้ามบอกว่า "ไม่สำเร็จ" เด็ดขาด เพราะอาจสำเร็จไปแล้วจริง ๆ
+//                          ต้องบอกว่าไม่ทราบผล แล้วชี้ทางให้ตรวจสอบ
+//
+// เรื่องนี้แก้ให้หายขาดไม่ได้ในทางทฤษฎี เป็นปัญหา Two Generals
+// มาตรฐานจึงไม่พยายามกำจัด แต่ทำให้กู้คืนได้แทน
+// ทางกู้คืนที่ง่ายที่สุดคือให้แตะบัตรซ้ำ ถ้าแม่ข่ายบันทึกไปแล้วจะตอบว่า ALREADY SERVED
+// ถ้ายังไม่ได้บันทึกก็จะตัดสิทธิ์ให้ตามปกติ ไม่ว่าทางไหนก็ได้คำตอบที่ถูกต้อง
+void displayOfflineAlert(bool resultUnknown) {
   ledOffline();
   tft.fillScreen(0x8000);
 
   drawStationCard(10, 16, 300, 208, 0xF800, 0x4800);
-  drawStationPillBadge(24, 28, 272, 24, "NO CONNECTION", 0xFFFF, 0xF800);
+  drawStationPillBadge(24, 28, 272, 24,
+                       resultUnknown ? "RESULT UNKNOWN" : "SERVER OFFLINE",
+                       0xFFFF, 0xF800);
 
   tft.setTextColor(0xFCAE, 0x4800);
   tft.setTextSize(1);
@@ -882,9 +928,9 @@ void displayOfflineAlert() {
   tft.setTextColor(0xF800, 0x4800);
   tft.setTextSize(2);
   tft.setCursor(24, 84);
-  tft.println("Main computer");
+  tft.println(resultUnknown ? "No answer from" : "Main computer");
   tft.setCursor(24, 104);
-  tft.println("is not answering");
+  tft.println(resultUnknown ? "the main computer" : "is not answering");
 
   tft.setTextColor(0xFCAE, 0x4800);
   tft.setTextSize(1);
@@ -893,9 +939,14 @@ void displayOfflineAlert() {
   tft.setTextColor(0xFFFF, 0x4800);
   tft.setTextSize(1);
   tft.setCursor(24, 142);
-  tft.println("Tell the staff, then press the button");
+  tft.println(resultUnknown ? "Your meal may or may not be recorded"
+                            : "Nothing was taken from your quota");
+  tft.setCursor(24, 158);
+  tft.println(resultUnknown ? "Ask the staff to check for you"
+                            : "Please tell the staff");
 
-  drawStationBottomBar("Press the button to try again");
+  drawStationBottomBar(resultUnknown ? "Tap your card again to see the real result"
+                                     : "Press the button to go back");
   soundError();
 }
 
