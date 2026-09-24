@@ -1,7 +1,7 @@
 /**
  * @file      WebDashboard.h
  * @brief     หน้าเว็บทั้งหมดของเครื่องแม่ข่าย: หน้าเข้าสู่ระบบ แดชบอร์ดเจ้าหน้าที่ และจอสาธารณะบนทีวี
- * @version   113.8.0
+ * @version   113.11.0
  * @date      2026-09-23
  * @author    Kittiphan Rattanakorn <kittiphun.rut@mcu.ac.th>
  *
@@ -30,6 +30,7 @@
  * @par Revision History
  * | Version | Date | Change |
  * |---|---|---|
+ * | 113.11.0 | 2026-09-24 | เพิ่มแผงสถานะการ์ด SD ในหน้าตั้งค่า บอกว่ากำลังบันทึกสำเนาอยู่หรือไม่ ความจุเท่าไร และมีการเขียนพลาดกี่ครั้ง |
  * | 113.8.0 | 2026-09-23 | เปลี่ยนคำอังกฤษ Service points และ Point เป็น Stations และ Station คำไทยคงเดิม |
  * | 113.6.0 | 2026-09-23 | เพิ่ม DISPLAY_HTML จอสาธารณะสำหรับทีวี ใช้ชุดสีและรูปแบบเดียวกับแดชบอร์ด แสดงไทยคู่อังกฤษพร้อมกันโดยไม่ต้องสลับภาษา |
  * | 113.4.0 | 2026-09-23 | เพิ่มช่องตั้งชื่อร้านที่จะขึ้นบนจอ พร้อมคำอธิบายว่าต้องเป็นภาษาอังกฤษ |
@@ -194,6 +195,8 @@ var TH = {
   eodNote:'เก็บข้อมูลของวันนี้เข้าแฟ้ม แล้วคืนสิทธิ์ให้นิสิตทุกคน',
   eodBtn:'ปิดยอดวันนี้',
   tDisp:'สั่งไปยังทุกจุดบริการแล้ว', tRec:'บันทึกแล้ว', tRm:'ลบแล้ว',
+  sdTitle:'การ์ด SD', sdOn:'กำลังบันทึกสำเนา', sdOff:'ไม่พบการ์ด',
+  sdNote:'การ์ดเป็นสำเนาสำรอง ไม่ใช่ที่เก็บหลัก ถึงไม่มีการ์ดระบบก็ทำงานได้ครบ',
   tTmp:'ผูกบัตรชั่วคราวแล้ว', tRev:'คืนบัตรแล้ว', tAdd:'เพิ่มนิสิตแล้ว',
   tDay:'ปิดยอดวันนี้แล้ว', tArc:'ลบไฟล์แล้ว', tSaved:'บันทึกแล้ว',
   tFail:'บันทึกไม่สำเร็จ',
@@ -291,6 +294,17 @@ function refresh(){
        + '</div>';
     });
     el('shopList').innerHTML=h;
+
+    // [113.11.0] เพิ่ม: ป้ายสถานะการ์ด SD บอกว่ายังบันทึกสำเนาอยู่หรือไม่
+    var sc=el('sdChip');
+    if(sc && d.sd){
+      var ok=d.sd.ok;
+      sc.className='chip '+(ok?'on':'off');
+      sc.innerHTML='<i class="dot"></i>'
+        + (ok ? t('sdOn','Recording a copy')+' · '+d.sd.mb+' MB'
+              : t('sdOff','No card found'))
+        + (d.sd.fail ? ' · '+d.sd.fail+' write errors' : '');
+    }
 
     el('stationList').innerHTML=d.stations.map(function(s){
       return '<span class="chip '+(s.online?'on':'off')+'"><i class="dot"></i>'
@@ -831,6 +845,13 @@ String getHTML() {
 
   <!-- ===================== SETTINGS ===================== -->
   <section id="v-settings" class="view">
+    <div class="panel">
+      <div class="ptitle" data-i="sdTitle">SD card</div>
+      <p class="note" data-i="sdNote">The card is a backup copy, not the main storage.
+        Everything still works without it.</p>
+      <div class="chips"><span class="chip off" id="sdChip"><i class="dot"></i>-</span></div>
+    </div>
+
     <div class="panel">
       <div class="ptitle" data-i="dTitle">Display on all stations</div>
       <p class="note" data-i="dNote">The host decides the theme and the sleep mode for every station.</p>

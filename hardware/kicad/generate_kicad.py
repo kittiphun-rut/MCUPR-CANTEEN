@@ -60,6 +60,8 @@ MODULES = {
     'BUZZER':      ['+', '-'],
     'SW_PUSH':     ['1', '2'],
     'CONN_BATT':   ['+', '-'],
+    # หัวต่อการ์ด SD ที่อยู่ด้านหลังโมดูลจอ เป็นหัวต่อคนละชุดกับแถว SPI ของจอ
+    'SD_SLOT':     ['SD_SCK', 'SD_MISO', 'SD_MOSI', 'SD_CS'],
 }
 MODULE_PWR = {
     'ST7789_LCD': {'GND': 'power_in', 'VCC': 'power_in'},
@@ -293,6 +295,9 @@ def board_nets(pins, is_station):
     else:
         n[gpio_pin_no(pins['I2C_SDA_PIN'])] = 'RTC_SDA'
         n[gpio_pin_no(pins['I2C_SCL_PIN'])] = 'RTC_SCL'
+        # การ์ด SD ใช้บัส SPI ร่วมกับจอ เหลือสองเส้นที่มีขาของตัวเอง
+        n[gpio_pin_no(pins['SD_MISO_PIN'])] = 'SD_MISO'
+        n[gpio_pin_no(pins['SD_CS_PIN'])]   = 'SD_CS'
     return n
 
 
@@ -348,6 +353,13 @@ def build_sheet(title, pins, is_station):
     else:
         module('DS3231_RTC', 'J3', 'DS3231 ZS-042', 190.5, 104.14, {
             'SCL': 'RTC_SCL', 'SDA': 'RTC_SDA', 'VCC': '+3V3', 'GND': 'GND'})
+
+    if not is_station:
+        # การ์ด SD อยู่บนโมดูลจอเดียวกัน แต่เป็นหัวต่ออีกชุดหนึ่ง
+        # SCK กับ MOSI ใช้เส้นเดียวกับจอ ส่วน MISO กับ CS มีขาของตัวเอง
+        module('SD_SLOT', 'J5', 'microSD on LCD module', 284.48, 175.26, {
+            'SD_SCK': 'TFT_SCL', 'SD_MISO': 'SD_MISO',
+            'SD_MOSI': 'TFT_SDA', 'SD_CS': 'SD_CS'})
 
     module('BUZZER', 'BZ1', 'Passive buzzer', 190.5, 147.32,
            {'+': 'BUZZER', '-': 'GND'})

@@ -39,7 +39,7 @@ ADC1 = set(range(1, 11))
 # ขาบนบอร์ดที่มีอยู่จริง นอกจากนี้ถือว่าพิมพ์ผิด
 EXISTS = set(range(0, 22)) | set(range(35, 49))
 
-NAME = re.compile(r'^#define\s+((?:TFT_|RC522_|BUZZER|BTN|BATTERY|RGB_LED|I2C_)\w*)\s+(\d+)', re.M)
+NAME = re.compile(r'^#define\s+((?:TFT_|RC522_|SD_|BUZZER|BTN|BATTERY|RGB_LED|I2C_)\w*)\s+(\d+)', re.M)
 
 bad = 0
 for path, who in BOARDS:

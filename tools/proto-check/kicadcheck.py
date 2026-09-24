@@ -55,12 +55,18 @@ def main():
             elif ('U1', str(pin_no)) not in nets[net]:
                 problems.append('U1 ขา %s ควรอยู่เน็ต %s แต่ไม่อยู่' % (pin_no, net))
 
-        # 2) เน็ตสัญญาณต้องมีสองปลายพอดี ปลายเดียวคือลืมต่อ สามปลายคือชนกัน
+        # 2) เน็ตสัญญาณต้องมีอย่างน้อยสองปลาย ปลายเดียวคือลืมต่อ
+        #    ที่มีเกินสองได้คือบัสที่ตั้งใจให้ใช้ร่วมกัน ต้องอยู่ในรายการข้างล่างเท่านั้น
+        #    ถ้าเน็ตอื่นมีสามปลายแปลว่าขาชนกันโดยไม่ตั้งใจ
+        SHARED_BUS = ('TFT_SCL', 'TFT_SDA')    # จอกับการ์ด SD ใช้บัส SPI ร่วมกัน
+        POWER      = ('GND', '+3V3', 'VBAT', 'VBAT_SENSE')
         for name, nodes in sorted(nets.items()):
-            if name in ('GND', '+3V3', 'VBAT', 'VBAT_SENSE') or name.startswith('unconnected'):
+            if name in POWER or name.startswith('unconnected'):
                 continue
-            if len(nodes) != 2:
-                problems.append('เน็ต %s มี %d ปลาย ควรมีสองปลาย: %s'
+            if len(nodes) < 2:
+                problems.append('เน็ต %s มีปลายเดียว น่าจะลืมต่อ: %s' % (name, nodes))
+            elif len(nodes) > 2 and name not in SHARED_BUS:
+                problems.append('เน็ต %s มี %d ปลาย ทั้งที่ไม่ใช่บัสที่ใช้ร่วมกัน: %s'
                                 % (name, len(nodes), nodes))
 
         # 3) ขา GPIO ของ U1 ต้องไม่ถูกใช้ซ้ำสองเน็ต
