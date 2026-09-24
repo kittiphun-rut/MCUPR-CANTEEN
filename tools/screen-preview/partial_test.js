@@ -74,26 +74,36 @@ function hostShopValue(i, n) {
 }
 
 /* ---------- station หน้าแรก ---------- */
-function stnStandbyFull(served, clock, ready) {
-  if (ready === undefined) ready = true;
+function stnStandbyFull(served, clock, svc) {
+  if (svc === undefined) svc = 0;
   fillScreen(BG());
   drawStationTopBar('STATION ' + ST_ID);
   drawStationCard(16, 34, 288, 130, BORDER(), CARD());
-  stnStandbyReady(ready);
-  drawFitCenteredText(24, 100, 272, 32, 'TAP YOUR CARD', 4, TEXT(), CARD());
+  stnStandbyService(svc);
   drawStationCard(16, 172, 288, 40, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(28, 178); print('SERVED TODAY');
   stnStandbyServed(served);
   stnStandbyClock(clock);
   drawStationBottomBar('Page 1/3    Press the button for the next page');
 }
-// [122.6.0] ต้องตรงกับ drawStandbyReadyState() ใน StationScreen.h ทุกพิกัด
-function stnStandbyReady(ready) {
+// [122.12.0] ต้องตรงกับ drawStandbyService() ใน StationScreen.h ทุกพิกัด
+function stnStandbyService(svc) {
   const bg = CARD();
+  let wave, noteColor, head, note;
+  if (svc === 1) {
+    wave = YELLOW(); noteColor = YELLOW();
+    head = 'SERVER OFFLINE'; note = 'Cannot serve now - please tell the staff';
+  } else if (svc === 2) {
+    wave = ROSE(); noteColor = ROSE();
+    head = 'OUT OF SERVICE'; note = 'Card reader not responding - call staff';
+  } else {
+    wave = GREEN(); noteColor = MUTED();
+    head = 'TAP YOUR CARD'; note = 'Free meal  35 baht  once a day';
+  }
   fillRect(160 - 34, 72 - 23, 72, 47, bg);
-  drawRfidTapIcon(160, 72, TEXT(), ready ? GREEN() : ROSE(), bg);
-  drawCenteredText(160, 139, 1, ready ? MUTED() : ROSE(), bg, 44,
-    ready ? 'Free meal  35 baht  once a day' : 'Card reader not responding - call staff');
+  drawRfidTapIcon(160, 72, TEXT(), wave, bg);
+  drawCenteredText(160, 104, 3, TEXT(), bg, 15, head);
+  drawCenteredText(160, 139, 1, noteColor, bg, 44, note);
 }
 function stnStandbyServed(served) {
   drawFixedText(28, 191, 2, TEXT(), CARD(), 4, String(served));
@@ -157,12 +167,21 @@ window.CASES = [
   { id: 'stn-standby-clock', perSecond: true, full: () => stnStandbyFull(72, '9:05:01'),
     start: () => stnStandbyFull(72, '11:47:05'),
     patch: () => stnStandbyClock('9:05:01') },
-  { id: 'stn-reader-down', full: () => stnStandbyFull(72, '11:47:05', false),
-    start: () => stnStandbyFull(72, '11:47:05', true),
-    patch: () => stnStandbyReady(false) },
-  { id: 'stn-reader-back', full: () => stnStandbyFull(72, '11:47:05', true),
-    start: () => stnStandbyFull(72, '11:47:05', false),
-    patch: () => stnStandbyReady(true) },
+  { id: 'stn-reader-down', full: () => stnStandbyFull(72, '11:47:05', 2),
+    start: () => stnStandbyFull(72, '11:47:05', 0),
+    patch: () => stnStandbyService(2) },
+  { id: 'stn-reader-back', full: () => stnStandbyFull(72, '11:47:05', 0),
+    start: () => stnStandbyFull(72, '11:47:05', 2),
+    patch: () => stnStandbyService(0) },
+  { id: 'stn-host-down', full: () => stnStandbyFull(72, '11:47:05', 1),
+    start: () => stnStandbyFull(72, '11:47:05', 0),
+    patch: () => stnStandbyService(1) },
+  { id: 'stn-host-back', full: () => stnStandbyFull(72, '11:47:05', 0),
+    start: () => stnStandbyFull(72, '11:47:05', 1),
+    patch: () => stnStandbyService(0) },
+  { id: 'stn-reader-to-host', full: () => stnStandbyFull(72, '11:47:05', 1),
+    start: () => stnStandbyFull(72, '11:47:05', 2),
+    patch: () => stnStandbyService(1) },
   { id: 'stn-stats-served', full: () => stnStatsFull(5, '11:47:05', true),
     start: () => stnStatsFull(72, '11:47:05', true),
     patch: () => stnStatsServed(5) },

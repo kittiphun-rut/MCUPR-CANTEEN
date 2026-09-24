@@ -309,25 +309,33 @@ function drawRfidTapIcon(cx, cy, cardColor, waveColor, bgColor) {
   }
 }
 
-// [122.6.0] ต้องตรงกับ drawStandbyReadyState() ใน StationScreen.h ทุกพิกัด
-function drawStandbyReadyState(ready) {
+// [122.12.0] ต้องตรงกับ drawStandbyService() ใน StationScreen.h ทุกพิกัด
+//   0 = พร้อมรับบัตร   1 = แม่ข่ายไม่ตอบ   2 = เครื่องอ่านบัตรไม่ตอบ
+function drawStandbyService(svc) {
   const bg = CARD();
-  fillRect(160 - 34, 72 - 23, 72, 47, bg);
-  drawRfidTapIcon(160, 72, TEXT(), ready ? GREEN() : ROSE(), bg);
-  if (ready) {
-    drawCenteredText(160, 139, 1, MUTED(), bg, 44, 'Free meal  35 baht  once a day');
+  let wave, noteColor, head, note;
+  if (svc === 1) {
+    wave = YELLOW(); noteColor = YELLOW();
+    head = 'SERVER OFFLINE'; note = 'Cannot serve now - please tell the staff';
+  } else if (svc === 2) {
+    wave = ROSE(); noteColor = ROSE();
+    head = 'OUT OF SERVICE'; note = 'Card reader not responding - call staff';
   } else {
-    drawCenteredText(160, 139, 1, ROSE(), bg, 44, 'Card reader not responding - call staff');
+    wave = GREEN(); noteColor = MUTED();
+    head = 'TAP YOUR CARD'; note = 'Free meal  35 baht  once a day';
   }
+  fillRect(160 - 34, 72 - 23, 72, 47, bg);
+  drawRfidTapIcon(160, 72, TEXT(), wave, bg);
+  drawCenteredText(160, 104, 3, TEXT(), bg, 15, head);
+  drawCenteredText(160, 139, 1, noteColor, bg, 44, note);
 }
 
-function stStandby(ready) {
-  if (ready === undefined) ready = true;
+function stStandby(svc) {
+  if (svc === undefined) svc = 0;
   fillScreen(BG());
-  drawStationTopBar('STATION ' + ST_ID);
+  drawStationTopBar('STATION ' + ST_ID, svc !== 1);
   drawStationCard(16, 34, 288, 130, BORDER(), CARD());
-  drawStandbyReadyState(ready);
-  drawFitCenteredText(24, 100, 272, 32, 'TAP YOUR CARD', 4, TEXT(), CARD());
+  drawStandbyService(svc);
   drawStationCard(16, 172, 288, 40, BORDER(), CARD());
   setTextColor(MUTED(), CARD()); setTextSize(1); setCursor(28, 178); print('SERVED TODAY');
   drawFixedText(28, 191, 2, TEXT(), CARD(), 4, String(ST_SERVED));
@@ -458,22 +466,27 @@ function stSyncDone() {
   drawStationBottomBar('RETURNING TO THE MAIN PAGE...');
 }
 
-function stStandbyOffline() {
-  stStandby(true);
-}
-
-function stOffline() {
+/* [122.12.0] สองกรณีที่ต่างกันโดยสิ้นเชิง ต้องตรงกับ displayOfflineAlert() ในเฟิร์มแวร์
+   resultUnknown = false  ยังไม่ได้ส่งอะไรออกไป การันตีได้ว่าไม่มีการตัดสิทธิ์
+   resultUnknown = true   ส่งไปแล้วไม่มีคำตอบ ไม่มีทางรู้ว่าตัดสิทธิ์ไปแล้วหรือยัง */
+function stOffline(resultUnknown) {
   fillScreen(0x8000);
   drawStationCard(10, 16, 300, 208, 0xF800, 0x4800);
   fillRoundRect(24, 28, 272, 24, 3, 0xF800);
-  drawFitCenteredText(24, 28, 272, 24, 'NO CONNECTION', 1, 0xFFFF, 0xF800);
+  drawFitCenteredText(24, 28, 272, 24,
+    resultUnknown ? 'RESULT UNKNOWN' : 'SERVER OFFLINE', 1, 0xFFFF, 0xF800);
   setTextColor(0xFCAE, 0x4800); setTextSize(1); setCursor(24, 68); print('WHAT HAPPENED');
   setTextColor(0xF800, 0x4800); setTextSize(2);
-  setCursor(24, 84); print('Main computer');
-  setCursor(24, 104); print('is not answering');
+  setCursor(24, 84);  print(resultUnknown ? 'No answer from' : 'Main computer');
+  setCursor(24, 104); print(resultUnknown ? 'the main computer' : 'is not answering');
   setTextColor(0xFCAE, 0x4800); setTextSize(1); setCursor(24, 124); print('WHAT TO DO');
-  setTextColor(0xFFFF, 0x4800); setCursor(24, 142); print('Tell the staff, then press the button');
-  drawStationBottomBar('Press the button to try again');
+  setTextColor(0xFFFF, 0x4800);
+  setCursor(24, 142); print(resultUnknown ? 'Your meal may or may not be recorded'
+                                          : 'Nothing was taken from your quota');
+  setCursor(24, 158); print(resultUnknown ? 'Ask the staff to check for you'
+                                          : 'Please tell the staff');
+  drawStationBottomBar(resultUnknown ? 'Tap your card again to see the real result'
+                                     : 'Press the button to go back');
 }
 
 function stIdSetup() {
@@ -523,10 +536,12 @@ const SCREENS = [
   ['stn-06-approved',       'Station · แจ้งผล APPROVED',                  true,  () => stResult('SUCCESS')],
   ['stn-07-duplicate',      'Station · แจ้งผล DUPLICATE',                 true,  () => stResult('ALREADY_USED')],
   ['stn-08-rejected',       'Station · แจ้งผล บัตรไม่อยู่ในทะเบียน',       true,  () => stResult('REJECTED')],
-  ['stn-09-offline',        'Station · เตือนขาดการเชื่อมต่อแม่ข่าย',        true,  stOffline],
+  ['stn-09-offline',        'Station · แตะบัตรตอนแม่ข่ายไม่ตอบ',            true,  () => stOffline(false)],
+  ['stn-15-result-unknown', 'Station · ส่งแล้วไม่มีคำตอบ ไม่ทราบผล',        true,  () => stOffline(true)],
   ['stn-10-idsetup',        'Station · ตั้งหมายเลขสถานี',                  true,  stIdSetup],
-  ['stn-11-standby-light',  'Station · หน้า 1/3 โหมดสว่าง',               false, () => stStandby(true)],
-  ['stn-13-reader-down',    'Station · หน้า 1/3 — เครื่องอ่านบัตรไม่ตอบ',   true,  () => stStandby(false)],
+  ['stn-11-standby-light',  'Station · หน้า 1/3 โหมดสว่าง',               false, () => stStandby(0)],
+  ['stn-13-reader-down',    'Station · หน้า 1/3 — เครื่องอ่านบัตรไม่ตอบ',   true,  () => stStandby(2)],
+  ['stn-14-server-offline','Station · หน้า 1/3 — แม่ข่ายไม่ตอบ',            true,  () => stStandby(1)],
   ['stn-12-themelocked',    'Station · ธีมถูกกำหนดจากแม่ข่าย',            true,  stThemeLocked],
 ];
 window.SCREEN_LIST = SCREENS.map(([id, label]) => ({ id, label }));
