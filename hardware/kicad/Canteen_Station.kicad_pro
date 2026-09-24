@@ -8,6 +8,6 @@
     "track_width": 0.25, "via_diameter": 0.8, "via_drill": 0.4}]},
   "pcbnew": {"page_layout_descr_file": ""},
   "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []},
-  "sheets": [["951c5e1a-61e6-4aad-aa28-81d3153b7944", ""]],
+  "sheets": [["3bd85867-a6eb-4073-8fb4-7fbb2b66be58", ""]],
   "text_variables": {}
 }
