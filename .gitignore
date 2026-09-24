@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+
+# ไฟล์ชั่วคราวที่ KiCad สร้างขึ้นเอง
+hardware/kicad/*-backups/
+hardware/kicad/*.kicad_prl
+hardware/kicad/fp-info-cache
