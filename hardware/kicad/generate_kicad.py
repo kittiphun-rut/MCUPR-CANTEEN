@@ -295,8 +295,10 @@ def board_nets(pins, is_station):
     else:
         n[gpio_pin_no(pins['I2C_SDA_PIN'])] = 'RTC_SDA'
         n[gpio_pin_no(pins['I2C_SCL_PIN'])] = 'RTC_SCL'
-        # การ์ด SD ใช้บัส SPI ร่วมกับจอ เหลือสองเส้นที่มีขาของตัวเอง
+        # การ์ด SD อยู่บนบัส SPI ของตัวเอง สี่ขาเรียงติดกัน ไม่ใช้ร่วมกับจอ
+        n[gpio_pin_no(pins['SD_SCK_PIN'])]  = 'SD_SCK'
         n[gpio_pin_no(pins['SD_MISO_PIN'])] = 'SD_MISO'
+        n[gpio_pin_no(pins['SD_MOSI_PIN'])] = 'SD_MOSI'
         n[gpio_pin_no(pins['SD_CS_PIN'])]   = 'SD_CS'
     return n
 
@@ -355,11 +357,11 @@ def build_sheet(title, pins, is_station):
             'SCL': 'RTC_SCL', 'SDA': 'RTC_SDA', 'VCC': '+3V3', 'GND': 'GND'})
 
     if not is_station:
-        # การ์ด SD อยู่บนโมดูลจอเดียวกัน แต่เป็นหัวต่ออีกชุดหนึ่ง
-        # SCK กับ MOSI ใช้เส้นเดียวกับจอ ส่วน MISO กับ CS มีขาของตัวเอง
+        # การ์ด SD อยู่บนโมดูลจอเดียวกัน แต่เป็นหัวต่ออีกชุดหนึ่งที่ขอบขวาของบอร์ด
+        # อยู่บนบัส SPI ของตัวเองทั้งสี่เส้น ไม่ได้ใช้ร่วมกับจอเลย
         module('SD_SLOT', 'J5', 'microSD on LCD module', 284.48, 175.26, {
-            'SD_SCK': 'TFT_SCL', 'SD_MISO': 'SD_MISO',
-            'SD_MOSI': 'TFT_SDA', 'SD_CS': 'SD_CS'})
+            'SD_SCK': 'SD_SCK', 'SD_MISO': 'SD_MISO',
+            'SD_MOSI': 'SD_MOSI', 'SD_CS': 'SD_CS'})
 
     module('BUZZER', 'BZ1', 'Passive buzzer', 190.5, 147.32,
            {'+': 'BUZZER', '-': 'GND'})
